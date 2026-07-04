@@ -1,12 +1,19 @@
-"""Quickstart demo: watch evolution reshape a population, in the terminal.
+r"""Quickstart demo: watch evolution reshape a population, in the terminal.
 
 Runs the milestone-4 generation loop on a classic scenario — Tit for Tat,
 Always Defect, and Random sharing one population — and prints each
 generation's composition as a little text bar chart. With repeated matches
 and score-driven (Fermi) selection, reciprocity should visibly take over.
 
-Run it from the repo root:
+Run it from the repo root **with the project's virtual environment** — that
+is where ``pdsim`` and its dependencies are installed; the system Python
+does not know them (``ModuleNotFoundError: No module named 'pdsim'``):
 
+    .venv\Scripts\python examples\quickstart.py        # Windows PowerShell
+
+or activate the venv once per terminal session, then use plain ``python``:
+
+    .venv\Scripts\Activate.ps1
     python examples/quickstart.py
 
 Change the numbers below and re-run — β (selection intensity), μ (mutation),

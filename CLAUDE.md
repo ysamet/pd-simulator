@@ -55,6 +55,10 @@ the owner performs the commit himself.
 
 ## Commands
 
+All commands assume the project venv is active (`.venv\Scripts\Activate.ps1`
+in PowerShell), or prefix them with `.venv\Scripts\` — the system Python does
+not have `pdsim` or its dependencies installed.
+
 - Run tests: `pytest`
 - Lint/format: `ruff check . && ruff format .`
 - Demo simulation (until the M5 CLI lands): `python examples/quickstart.py`
