@@ -28,6 +28,7 @@ from pdsim.core.strategies.registry import (
     create_strategy,
     get_strategy_info,
     register_strategy,
+    strategy_name_of,
 )
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "create_strategy",
     "get_strategy_info",
     "register_strategy",
+    "strategy_name_of",
 ]
 
 

@@ -118,6 +118,51 @@ class TestPopulationComposition:
             PopulationConfig(size=100, composition={"telepathy": 100})
 
 
+class TestStrategyParams:
+    """Per-run strategy parameter overrides (DECISIONS #30)."""
+
+    def test_defaults_to_no_overrides(self) -> None:
+        """Omitting the section means registry defaults everywhere."""
+        assert _minimal_config().strategy_params == {}
+
+    def test_valid_override_accepted(self) -> None:
+        """A well-formed override is stored as given."""
+        cfg = _minimal_config(strategy_params={"random": {"cooperation_probability": 0.9}})
+        assert cfg.strategy_params == {"random": {"cooperation_probability": 0.9}}
+
+    def test_strategy_absent_from_composition_is_allowed(self) -> None:
+        """Params for a non-composition strategy are legal (DECISIONS #30).
+
+        A no-op for the initial population — but mutation may still
+        introduce that strategy mid-run, and then these values apply.
+        """
+        cfg = _minimal_config(
+            strategy_params={"generous_tit_for_tat": {"generosity": 0.5}},
+        )
+        assert "generous_tit_for_tat" not in cfg.population.composition
+        assert cfg.strategy_params["generous_tit_for_tat"] == {"generosity": 0.5}
+
+    def test_unknown_strategy_rejected(self) -> None:
+        """Overrides for a strategy that doesn't exist fail loudly."""
+        with pytest.raises(ValidationError, match="unknown strategy"):
+            _minimal_config(strategy_params={"telepathy": {"power": 1.0}})
+
+    def test_unknown_parameter_rejected(self) -> None:
+        """Overrides must name parameters the strategy actually declares."""
+        with pytest.raises(ValidationError, match="cooperation_probability"):
+            _minimal_config(strategy_params={"random": {"generosity": 0.5}})
+
+    def test_parameterless_strategy_rejects_overrides(self) -> None:
+        """A strategy without parameters accepts no overrides at all."""
+        with pytest.raises(ValidationError, match="no parameters"):
+            _minimal_config(strategy_params={"tit_for_tat": {"generosity": 0.5}})
+
+    def test_out_of_range_value_rejected(self) -> None:
+        """Override values validate against their registry specs."""
+        with pytest.raises(ValidationError, match="at most"):
+            _minimal_config(strategy_params={"random": {"cooperation_probability": 2.0}})
+
+
 class TestStrictnessAndImmutability:
     """Reproducibility guards: no silent typos, no mid-run mutation."""
 
@@ -142,6 +187,7 @@ class TestYamlRoundTrip:
             seed=123,
             match={"length_mode": "continuation", "continuation_probability": 0.95},
             dynamics={"selection_beta": 2.5, "mutation_rate": 0.05},
+            strategy_params={"random": {"cooperation_probability": 0.25}},
         )
         path = save_config(cfg, tmp_path / "config.yaml")
         assert load_config(path) == cfg

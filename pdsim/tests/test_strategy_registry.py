@@ -18,6 +18,7 @@ from pdsim.core.strategies import (
     create_strategy,
     get_strategy_info,
     register_strategy,
+    strategy_name_of,
 )
 from pdsim.core.strategies.generous_tit_for_tat import GenerousTitForTat
 from pdsim.core.strategies.pavlov import Pavlov
@@ -62,6 +63,16 @@ class TestDiscovery:
         """Re-registering an existing machine name is always a bug."""
         with pytest.raises(ValueError, match="already registered"):
             register_strategy(get_strategy_info("pavlov"))
+
+    def test_strategy_name_of_reverses_create_strategy(self) -> None:
+        """An instance can be traced back to its machine name."""
+        assert strategy_name_of(create_strategy("pavlov")) == "pavlov"
+        assert strategy_name_of(TitForTat()) == "tit_for_tat"
+
+    def test_strategy_name_of_rejects_unregistered_classes(self) -> None:
+        """Test stubs and other outsiders have no machine name."""
+        with pytest.raises(KeyError, match="not a registered strategy class"):
+            strategy_name_of(StubAlwaysCooperate())
 
 
 class TestStrategyInfoWellFormedness:

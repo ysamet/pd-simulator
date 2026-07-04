@@ -299,6 +299,13 @@ class ExperimentConfig(_RegistryBackedModel):
         match: Match length mode and noise.
         population: Size, memory constraint, and initial strategy mix.
         dynamics: Selection and mutation settings.
+        strategy_params: Optional per-run strategy parameter overrides, as a
+            mapping of strategy machine name → ``{parameter: value}``, e.g.
+            ``{"random": {"cooperation_probability": 0.9}}``. Omitted
+            parameters keep their Parameter Registry defaults. One parameter
+            set per strategy per run (DECISIONS #30); a strategy may be named
+            here even if it is not in the composition — mutation can still
+            introduce it mid-run, and then these values apply.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {"seed": "run.seed"}
@@ -312,6 +319,44 @@ class ExperimentConfig(_RegistryBackedModel):
     match: MatchConfig = Field(default_factory=MatchConfig)
     population: PopulationConfig
     dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
+    strategy_params: dict[str, dict[str, registry.ParamValue]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_strategy_params(self) -> Self:
+        """Validate overrides against the strategy roster and their specs.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If an override names an unknown strategy, a parameter
+                the strategy does not declare, or a value that violates the
+                parameter's registry spec.
+        """
+        # Lazy import for the same cycle-breaking reason as in
+        # PopulationConfig._check_composition above.
+        from pdsim.core.strategies import all_strategy_names, get_strategy_info
+
+        valid_names = all_strategy_names()
+        for name, params in self.strategy_params.items():
+            if name not in valid_names:
+                raise ValueError(
+                    f"strategy_params names unknown strategy {name!r}. "
+                    f"Valid strategy names: {', '.join(sorted(valid_names))}."
+                )
+            info = get_strategy_info(name)
+            # zip(strict=True) (new concept): pairs two sequences and raises
+            # if their lengths differ — a silent-mismatch guard.
+            declared = dict(zip(info.param_names(), info.params, strict=True))
+            for param_name, value in params.items():
+                if param_name not in declared:
+                    allowed = ", ".join(declared) if declared else "none — it has no parameters"
+                    raise ValueError(
+                        f"strategy_params for {name!r} names unknown parameter "
+                        f"{param_name!r}. Valid parameters: {allowed}."
+                    )
+                declared[param_name].validate(value)
+        return self
 
 
 def load_config(path: str | Path) -> ExperimentConfig:

@@ -259,3 +259,56 @@ list of files to stage, and (c) a suggested commit message; the owner performs t
 commit himself. Rationale: the owner retains sole authorship of repository history
 while all mechanical editing stays with Claude Code, matching the environment
 split in #1. Codified in `CLAUDE.md` ("About the developer") this session.
+
+**#30 — 2026-07-04 — Per-run strategy parameters: optional top-level
+`strategy_params` config section (resolves the #28 open question).**
+`ExperimentConfig` gains `strategy_params: {machine_name: {param: value}}`,
+overriding Parameter Registry defaults for that run (e.g.
+`{"random": {"cooperation_probability": 0.9}}`). **One parameter set per strategy
+per run**; heterogeneous same-strategy variants in one population (two different
+p values coexisting) are explicitly deferred to v2 — the parameter-perturbation
+mutation era, which needs per-variant identity machinery anyway. Validation:
+strategy names must exist in the roster; parameter names must be declared by that
+strategy's `StrategyInfo`; values validate against their `ParameterSpec`s. Naming
+a strategy in `strategy_params` that is absent from the composition is **allowed
+but a no-op for the initial population** — allowed because strategy-switch
+mutation may still introduce that strategy mid-run, at which point its configured
+parameters apply. Alternatives considered: parameterized composition entries
+(rejected: conflates the population mix with strategy tuning and complicates the
+one-set-per-strategy rule); leaving #28 open (rejected: M4's mutation must
+construct strategies from config now).
+
+**#31 — 2026-07-04 — Generation boundary resets scores AND per-opponent
+histories.** Rationale: selection changes agents' strategies between
+generations, so a remembered relationship would be memory of a behaviorally
+different agent — e.g. GrimTrigger would punish a now-cooperative neighbor
+forever for a defection its predecessor strategy made. Consequence (restating
+\#22): a history view's `round_number` is cumulative within one generation only.
+Implementation: the same `Agent` objects persist across the whole run (ids
+0..N-1 each generation); after offspring strategies are assigned,
+`Agent.reset_for_new_generation()` clears score and histories. Alternative
+rejected: score-only reset with histories persisting across generations — that
+is cross-generation reputation, a deliberate future mechanism (DESIGN §6.2),
+not something to fall into by accident.
+
+**#32 — 2026-07-04 — Dynamics-phase semantics and RNG draw order (extends #23
+to the generation level).** Fermi semantics: for each of the N next-generation
+slots, sample incumbent A and model B uniformly **with replacement** from the
+current generation's scored population (A = B is allowed — a no-op comparison);
+the slot adopts B's strategy with probability `1/(1+exp(−β(s_B − s_A)))`,
+computed with a sign-branched logistic so extreme β·Δscore never overflows. All
+N decisions are made against the same scored population and applied
+simultaneously — no mid-selection feedback (synchronous generations, DESIGN
+§2.7). RNG draw order per generation: (1) **match phase** — pairings in matcher
+order, per-round draws per #23; (2) **selection phase** — per slot: incumbent
+index, model index, adoption coin; always exactly three draws, regardless of β;
+(3) **mutation phase** — per slot: one coin only when μ > 0, then one
+roster-index draw only when the coin hits (the conditional-draw precedent set by
+ε in #23). Mutation draws from the **full registered roster**, not just the
+composition — mutation can introduce strategies the run did not start with
+(which is why #30 allows `strategy_params` for non-composition strategies);
+mutants are constructed via `create_strategy` with the run's `strategy_params`.
+Offspring *share* the parent's strategy instance rather than copying it — safe
+because strategies are stateless (#21; the flyweight option noted in #25). Any
+change to these orders changes every seeded run's history: breaking change,
+new DECISIONS entry required.

@@ -162,6 +162,32 @@ def all_strategy_names() -> tuple[str, ...]:
     return tuple(_STRATEGIES)
 
 
+def strategy_name_of(strategy: Strategy) -> str:
+    """Return the machine name a strategy instance was registered under.
+
+    The reverse of :func:`create_strategy` — used by the generation loop and
+    the recorder to report population composition by name.
+
+    Args:
+        strategy: A live strategy instance.
+
+    Returns:
+        The machine name whose registered class is exactly this instance's
+        class.
+
+    Raises:
+        KeyError: If the instance's class is not registered (e.g. a test
+            stub) — such strategies have no reportable identity.
+    """
+    for info in _STRATEGIES.values():
+        if type(strategy) is info.factory:
+            return info.name
+    raise KeyError(
+        f"{type(strategy).__name__} is not a registered strategy class; "
+        "only roster strategies have machine names."
+    )
+
+
 def create_strategy(name: str, **overrides: ParamValue) -> Strategy:
     """Build a fresh strategy instance by machine name.
 

@@ -72,6 +72,14 @@ machine names — the identifiers configs use — are `always_cooperate`,
 defaults: Random p = 0.5, GTFT g = 1/3 (see DECISIONS #26, including Pavlov's
 moves-only "win = opponent cooperated" derivation).
 
+Per-run parameter overrides live in the optional top-level `strategy_params`
+config section, mapping machine name → `{parameter: value}` — one parameter set
+per strategy per run, overriding the registry defaults (DECISIONS #30).
+Heterogeneous same-strategy variants in one population are a v2 concern
+(parameter-perturbation mutation). A strategy may appear in `strategy_params`
+without being in the composition: mutation can still introduce it mid-run, and
+its configured parameters then apply.
+
 ### 2.4 Matching (who plays whom)
 
 Behind a `Matcher` interface:
@@ -105,14 +113,20 @@ Per-match round count, two modes (both in v1, UI-selectable):
 - **Selection rule** behind a `SelectionRule` interface. v1 ships **Fermi
   (pairwise-comparison)**: for each next-generation slot, sample agents A (incumbent)
   and B (model); A adopts B's strategy with probability `1 / (1 + exp(-β (s_B − s_A)))`.
+  All slots sample the current generation's scores and apply simultaneously; exact
+  sampling and RNG-order semantics in DECISIONS #32.
   - **β = selection intensity**: 0 → pure drift (score irrelevant);
     large → near-deterministic copying of higher scorers. First-class experimental knob.
 - **Mutation**: with probability **μ**, a newly produced agent receives a uniformly
   random strategy from the enabled roster instead of the copied one (strategy-switch
-  mutation). μ=0 ⇒ perfect cloning. Parameter-perturbation mutation (Gaussian noise on
-  continuous strategy parameters, enabling true strategy evolution) is a v2 mode behind
-  the same `ReproductionConfig`.
-- **Score accounting**: scores reset each generation (v1). Cumulative / sliding-window /
+  mutation). In v1 the enabled roster is the **full registered roster** — mutation may
+  introduce strategies absent from the initial composition; mutants are constructed
+  with the run's `strategy_params` (DECISIONS #30/#32). μ=0 ⇒ perfect cloning.
+  Parameter-perturbation mutation (Gaussian noise on continuous strategy parameters,
+  enabling true strategy evolution) is a v2 mode behind the same reproduction interface.
+- **Score accounting**: scores reset each generation (v1), and per-opponent histories
+  reset with them — selection changes who your neighbors are, so remembered
+  relationships would be stale (DECISIONS #31). Cumulative / sliding-window /
   exponentially discounted accounting are future `ScoreAccounting` options.
 - Additional selection rules planned behind the same interface: fitness-proportional
   (roulette), tournament(k), truncation/elitist, threshold-based cloning (see §6.1).
@@ -135,9 +149,10 @@ pdsim/
     matcher.py       # Matcher ABC; RoundRobin; RandomK; (future: SpatialKernel)
     match.py         # plays one match (length mode, noise ε) between participants
     selection.py     # SelectionRule ABC; Fermi; (future: proportional, tournament, ...)
-    reproduction.py  # ReproductionConfig; strategy-switch mutation; (v2: perturbation)
-    dynamics.py      # generation loop; PopulationDynamics config (fixed size v1;
-                     #   v2: growth/energy economy, carrying capacity, async/Moran)
+    reproduction.py  # StrategySwitchReproduction (mutation μ); (v2: perturbation)
+    dynamics.py      # generation loop: PopulationDynamics + per-generation
+                     #   GenerationReport (fixed size v1; v2: growth/energy economy,
+                     #   carrying capacity, async/Moran)
     engine.py        # orchestrates a run; emits event stream (see §4)
   config/
     registry.py      # Parameter Registry (single source of truth; see §5)

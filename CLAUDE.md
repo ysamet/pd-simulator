@@ -57,6 +57,7 @@ the owner performs the commit himself.
 
 - Run tests: `pytest`
 - Lint/format: `ruff check . && ruff format .`
+- Demo simulation (until the M5 CLI lands): `python examples/quickstart.py`
 - Launch UI: `streamlit run pdsim/ui/app.py`
 - Headless run: `python -m pdsim.run path/to/config.yaml`
 

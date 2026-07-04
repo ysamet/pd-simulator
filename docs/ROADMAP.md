@@ -16,6 +16,7 @@ Milestone order (each lands with tests + docs):
    ✅ M3 landed 2026-07-04, 200 tests passing.
 4. **Evolutionary dynamics.** Synchronous generations; Fermi selection (β);
    strategy-switch mutation (μ); seeded RNG discipline; golden validation tests.
+   ✅ M4 landed 2026-07-04, 237 tests passing.
 5. **Event stream + persistence.** Typed events; run folders (config + seed +
    parquet + summary); runs index.
 6. **Streamlit UI.** Registry-generated parameter panel with novice tooltips;
