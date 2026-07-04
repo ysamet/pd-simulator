@@ -102,3 +102,38 @@ references from root-level files use the `docs/` prefix; references between the 
 themselves stay bare filenames (same folder). Generated documentation (e.g.,
 `docs/PARAMETERS.md`) also lands in `docs/`. Alternative considered: all docs at the
 repo root — rejected as clutter once source modules exist.
+
+**#18 — 2026-07-03 — Milestone 1 implementation conventions (registry + config).**
+(a) Config models (pydantic v2) contain **no literal defaults or ranges**: every field
+pulls its default from the Parameter Registry and is re-validated against its
+`ParameterSpec` via a shared base-model hook, so the registry stays the single source
+of truth with zero duplication. (b) Configs are **immutable** (`frozen=True`) and
+**reject unknown keys** (`extra="forbid"`): a typo'd YAML key fails loudly instead of
+silently producing a different run — a reproducibility guard. (c) Population
+composition is an explicit strategy→count mapping that must sum to `population.size`;
+strategy-name validation is deferred to milestone 3 when the strategy registry exists.
+(d) `match.continuation_probability` gets an *exclusive* upper bound (w < 1), since
+w = 1 means matches never end; `ParameterSpec` supports `maximum_exclusive` for this.
+(e) Tooling: hatchling build backend; ruff with pydocstyle (Google convention) and
+flake8-annotations enabled so hard rules 1–2 (docstrings, type hints) are
+machine-enforced; pytest suites live in `pdsim/tests/`. Alternative considered for (a):
+plain pydantic `Field(ge=…, le=…)` constraints — rejected because ranges would then be
+declared twice (registry + model), violating hard rule 3.
+
+**#19 — 2026-07-03 — Sync protocol strengthened from principle to explicit contract.**
+The cross-environment documentation protocol in `CLAUDE.md` was upgraded (supersedes
+the "Cross-conversation synchronization protocol" section; complements #16) into a
+knowledge-preservation contract with three parts: (a) a **quality standard** — the
+`docs/` files alone must suffice for an external advisor (human or AI) to give
+correct, current advice about the project without seeing the code; (b) an explicit
+**checklist of triggers** that require a same-session `docs/` update (interface or
+contract changes, new mechanisms/parameters/modules/dependencies,
+implementation-time design decisions, discovered ambiguities/performance
+walls/open questions, milestone or scope changes, user decisions made in
+conversation); (c) a **mandatory end-of-session ritual** reporting `DOCS CHANGED:
+<files>` or `DOCS UNCHANGED` to the user, naming any new DECISIONS entry numbers.
+Rationale: the `docs/` files are the only shared memory between the AI environments
+this project spans; instructions phrased as explicit triggers and rituals are
+followed far more reliably than general principles. Alternative considered:
+automated enforcement via session hooks — deferred unless instruction-based
+compliance proves insufficient.

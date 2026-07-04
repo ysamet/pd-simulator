@@ -20,7 +20,7 @@ composable functions), point it out — it's a learning thread of this project.
    Registry with a plain-language, novice-friendly explanation (the user of this
    platform is NOT assumed to know game theory).
 2. **Type hints everywhere.** Full annotations on all public signatures.
-3. **Parameter Registry is the single source of truth** (`config/registry.py`).
+3. **Parameter Registry is the single source of truth** (`pdsim/config/registry.py`).
    Never add a tunable parameter anywhere else. UI tooltips, docs, and validation are
    generated from it. A parameter without a registry entry is a bug.
 4. **Headless engine.** Nothing under `pdsim/core/`, `pdsim/config/`, or `pdsim/io/`
@@ -53,21 +53,52 @@ composable functions), point it out — it's a learning thread of this project.
 
 (Keep this section updated as tooling lands.)
 
-## Cross-conversation synchronization protocol
+## Design-layer documentation: the knowledge-preservation contract
 
-Design discussion happens in the Claude.ai project chat; implementation happens here
-in Claude Code. The sync contract, in both directions:
+This project is developed across multiple AI environments. Design discussion happens
+in the Claude.ai project chat; implementation happens here in Claude Code. **The
+files in `docs/` are the ONLY shared memory between these environments.** The chat
+side never sees this conversation, the code, or the commit history — it sees only
+the `docs/` files the user uploads to it.
 
-- Any design change agreed in chat → user brings updated `docs/DESIGN.md` /
-  `docs/DECISIONS.md` text into the repo (or pastes conclusions to Claude Code, which
-  updates the files).
-- Any design-relevant discovery made during implementation (an interface that doesn't
-  fit, a performance wall, a modeling ambiguity) → update `docs/DESIGN.md` and append to
-  `docs/DECISIONS.md` in the same session, so the chat side can pick it up.
-- `docs/DECISIONS.md` entries are append-only: number, date, decision, rationale,
-  alternatives considered. Reversals get a new entry referencing the old one.
-- End every significant Claude Code session by checking whether `docs/DESIGN.md`,
-  `docs/ROADMAP.md`, or `docs/DECISIONS.md` need updates. Stale docs are bugs.
+**The standard every `docs/` file must meet:** an external advisor (human or AI)
+who reads ONLY `docs/DESIGN.md`, `docs/DECISIONS.md`, `docs/ROADMAP.md`, and
+`docs/specs/*` must be able to give correct, current advice about this project —
+without seeing the code. If knowledge exists only in code, in commit messages, or
+in this conversation, it is invisible to every other advisor. Capture it.
+
+**Triggers that REQUIRE a `docs/` update in the same session** (not "when
+convenient" — same session, before finishing):
+
+- A designed interface or contract changed, or didn't fit and was adapted.
+- A new mechanism, parameter, module, or dependency was introduced that
+  `docs/DESIGN.md` doesn't describe.
+- A design decision was made during implementation — anything where a reasonable
+  alternative existed and one path was chosen (append to `docs/DECISIONS.md`:
+  number, date, decision, rationale, alternatives).
+- A modeling ambiguity, performance wall, or open question was discovered
+  (log it, even if unresolved — open questions are design state too).
+- A milestone completed or scope shifted (update `docs/ROADMAP.md`; append a
+  one-line status, e.g. "✅ M2 landed 2026-07-12, 38 tests passing").
+- Anything the user decided in conversation here that a future session would
+  need to know.
+
+**`docs/DECISIONS.md` is append-only**: number, date, decision, rationale,
+alternatives considered. Reversals get a new entry referencing the old one.
+
+**Mandatory end-of-session ritual.** Every session that changed code or made
+decisions ends with these steps, in order:
+
+1. Re-check the triggers above; make any missing `docs/` updates now.
+2. Report to the user explicitly, in this exact shape:
+   - `DOCS CHANGED: <list of changed docs/ files> — please refresh these in the
+     Claude.ai project knowledge before your next design conversation.`
+   - or `DOCS UNCHANGED: no design-layer changes this session.`
+3. If DECISIONS.md gained entries, mention the new entry numbers so the chat
+   side can spot the delta at a glance.
+
+Never end a significant session without step 2. Stale or silent docs are bugs —
+they cause other advisors to give wrong advice with full confidence.
 
 ## Current phase
 
