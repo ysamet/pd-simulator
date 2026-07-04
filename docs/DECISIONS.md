@@ -312,3 +312,77 @@ Offspring *share* the parent's strategy instance rather than copying it — safe
 because strategies are stateless (#21; the flyweight option noted in #25). Any
 change to these orders changes every seeded run's history: breaking change,
 new DECISIONS entry required.
+
+**#33 — 2026-07-04 — ROADMAP restructured to reach a working GUI fastest.** The
+old "M5 — event stream + persistence" is split: the typed event stream lands in
+the new M5 (the UI needs it); persistence (run folders, parquet, runs index,
+headless CLI, results browser) is deferred to a new M7. M5 is rescoped to "GUI
+foundations": run modes (#34), the typed event stream (#35), and the Scenario
+Registry (#36) — the three things M6's Streamlit UI depends on. M6 = the UI
+(scenario dropdown, registry-generated panel, mode-aware charts + greying, live
+updates, run launcher; NO results browser). M7 = persistence + CLI + results
+browser. M8 = polish (the old M7 content). Rationale: a visible, interactive
+app is the project's next proof point; nothing in persistence blocks it.
+
+**#34 — 2026-07-04 — Run modes: evolution vs tournament.** New top-level
+`run.mode` ("evolution" default | "tournament") and `run.tournament_cycles`
+(default 20) registry parameters, mapped to **top-level `ExperimentConfig`
+fields** next to `seed` (the `run.*` registry section maps to top-level config
+fields; a nested `run:` section would have relocated `seed:` and broken every
+existing YAML — hard rule 8). Tournament semantics: a fixed cast keeps its
+initial strategies for the whole run; one cycle = one complete matcher pass;
+no selection, no mutation, no generation boundary, no resets — scores and
+per-opponent histories accumulate across the entire run, so w.r.t. #22/#31 a
+tournament is **one long generation** (`round_number` cumulative across
+cycles; intended direct-reciprocity behavior — Grim stays grim about a
+cycle-1 betrayal). Selection/mutation/generation parameters are **ignored** in
+tournament mode — valid but without effect; rejected alternative: hard
+validation error — it would force config surgery when switching modes, and the
+UI will grey the parameters out instead (they also consume no RNG draws, so
+two tournament runs differing only in β/μ are byte-identical). Engine
+integration: a `TournamentDynamics` sibling class beside `PopulationDynamics`
+in `dynamics.py`, dispatched by the engine on `config.mode`. Rejected: a
+RunMode/Runner abstraction (premature with two modes — hard rule 6 is
+satisfied by the existing collaborator interfaces, and a third mode can
+motivate the abstraction later); rejected: branching inside
+`PopulationDynamics` (would muddy M4-validated code). Tournament RNG order:
+the #23 match-phase order, repeated per cycle, nothing else.
+
+**#35 — 2026-07-04 — Typed event stream (DESIGN §4).** New `pdsim/core/events.py`
+with five frozen-dataclass events — `RoundPlayed`, `MatchFinished`,
+`GenerationFinished`, `CycleFinished`, `RunFinished` — and
+`pdsim/core/engine.py` exposing `run(config, granularity) -> Iterator[Event]`
+as a **module-level generator function** (rejected: an `Engine` class — the
+orchestration holds no state an instance would carry). Two distinct
+period-level event types because their payloads differ: a generation reports
+that generation's composition and mean scores; a cycle reports cumulative
+totals and per-agent means (plus the constant composition, a deliberate
+superset of the minimum payload, used by standings tables and goldens).
+**Granularity ("round" | "match" | "generation", default "generation") is an
+observer concern, not a model parameter**: it is an argument to `engine.run`,
+deliberately NOT a Parameter Registry entry or config field, because it only
+controls which events are emitted — the same config + seed must produce (and
+verifiably does produce) identical simulation results at every granularity.
+Emission mechanics: the dynamics classes gained a read-only `on_match`
+observer hook; the engine buffers fine-grained events one generation/cycle at
+a time and yields them in play order (a match's rounds, then its
+`MatchFinished`), followed by the period event; exactly one `RunFinished`
+closes every stream. The engine owns turning `config.seed` into the run's
+generator; direct dynamics users keep injecting their own.
+
+**#36 — 2026-07-04 — Scenario Registry (third registry-idiom instance).** New
+`pdsim/config/scenarios.py`: frozen `ScenarioInfo` (machine name, display
+name, novice "what question does this explore?" description, a complete
+validated `ExperimentConfig`, and a "things to try" note) + the usual
+register/lookup/list functions. **One scenario = one config**: comparative
+questions ("re-run with β = 0.5 and compare") live in the things-to-try text;
+a run-both-and-compare mechanism is a possible future UI feature, not a
+registry concern. "Custom" is a UI concept (start from any scenario, then
+edit), not a registry entry. Five seed scenarios registered:
+`classic_tournament` (tournament mode, all seven strategies),
+`reciprocity_takes_over` (the M4 quickstart mix), `noise_breaks_the_grim`
+(ε = 0.05, Grim vs the forgivers), `drift_vs_meritocracy` (β = 0.001 control
+experiment), `defectors_paradise` (TFT minority, continuation w = 0.98,
+strong selection). The registry is the designated home of the v3 real-world
+scenario presets (DESIGN §6.3). Every scenario is smoke-run end-to-end in
+tests via a shrunk copy of its config.

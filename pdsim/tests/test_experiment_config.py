@@ -118,6 +118,41 @@ class TestPopulationComposition:
             PopulationConfig(size=100, composition={"telepathy": 100})
 
 
+class TestRunMode:
+    """The run-mode fields (DECISIONS #34)."""
+
+    def test_default_mode_is_evolution(self) -> None:
+        """Untouched configs run the evolutionary loop."""
+        cfg = _minimal_config()
+        assert cfg.mode == "evolution"
+        assert cfg.tournament_cycles == get_spec("run.tournament_cycles").default
+
+    def test_tournament_mode_accepted_with_dynamics_settings(self) -> None:
+        """Dynamics settings stay valid in tournament mode (DECISIONS #34).
+
+        Ignored rather than rejected, so configs can switch modes without
+        surgery and the UI can simply grey these parameters out.
+        """
+        cfg = _minimal_config(mode="tournament", dynamics={"selection_beta": 5.0})
+        assert cfg.mode == "tournament"
+        assert cfg.dynamics.selection_beta == 5.0
+
+    def test_unknown_mode_rejected(self) -> None:
+        """Only the two registered modes exist."""
+        with pytest.raises(ValidationError, match="must be one of"):
+            _minimal_config(mode="battle_royale")
+
+    def test_tournament_cycles_must_be_positive(self) -> None:
+        """Zero cycles would mean an empty run."""
+        with pytest.raises(ValidationError, match="at least"):
+            _minimal_config(tournament_cycles=0)
+
+    def test_tournament_config_round_trips(self, tmp_path: Path) -> None:
+        """Mode fields survive YAML save/load exactly (hard rule 8)."""
+        cfg = _minimal_config(mode="tournament", tournament_cycles=7)
+        assert load_config(save_config(cfg, tmp_path / "t.yaml")) == cfg
+
+
 class TestStrategyParams:
     """Per-run strategy parameter overrides (DECISIONS #30)."""
 

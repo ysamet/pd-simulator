@@ -1,9 +1,14 @@
-"""The generation loop: play → score → select → reproduce → reset (DESIGN §2.7).
+"""The run loops: evolution generations and fixed-cast tournaments.
 
-One :meth:`PopulationDynamics.step` is one synchronous generation: every
-pairing plays its matches, end-of-generation scores feed the selection rule,
-every next-generation slot is decided at once (no mid-selection feedback),
-mutation is applied, and the population is reset for the next generation.
+Two loop classes, one per run mode (DESIGN §2.7/§2.9):
+
+* :class:`PopulationDynamics` — evolution mode. One :meth:`~PopulationDynamics.step`
+  is one synchronous generation: every pairing plays its matches,
+  end-of-generation scores feed the selection rule, every next-generation
+  slot is decided at once (no mid-selection feedback), mutation is applied,
+  and the population is reset for the next generation.
+* :class:`TournamentDynamics` — tournament mode. One step is one complete
+  matcher pass ("cycle"); nothing is selected, mutated, or reset, ever.
 
 Generation-boundary reset (DECISIONS #31): **both scores and per-opponent
 histories are cleared** between generations. Under selection the neighbors'
@@ -28,7 +33,7 @@ existing interfaces.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -36,7 +41,7 @@ import numpy as np
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core.agent import Agent
 from pdsim.core.game import PrisonersDilemma
-from pdsim.core.match import Match
+from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import build_matcher
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
@@ -143,8 +148,14 @@ class PopulationDynamics:
         for _ in range(self._config.dynamics.generations):
             yield self.step()
 
-    def step(self) -> GenerationReport:
+    def step(self, on_match: Callable[[MatchResult], None] | None = None) -> GenerationReport:
         """Advance exactly one generation (see the module docstring's order).
+
+        Args:
+            on_match: Optional observer called with each finished match's
+                result, in play order. Purely a read-only hook — the engine
+                uses it to emit match/round events (DESIGN §4); it never
+                influences the simulation.
 
         Returns:
             The report for the generation that just played — its composition
@@ -154,7 +165,9 @@ class PopulationDynamics:
         # 1. Match phase: every pairing the matcher produces plays once.
         #    Scores and per-opponent histories accumulate on the agents.
         for agent_a, agent_b in self._matcher.pairings(self._population, self._rng):
-            self._match.play(agent_a, agent_b)
+            result = self._match.play(agent_a, agent_b)
+            if on_match is not None:
+                on_match(result)
         report = self._report()
 
         # 2. Selection phase: one parent index per slot, all chosen against
@@ -186,14 +199,128 @@ class PopulationDynamics:
         Returns:
             Composition counts and mean scores keyed by machine name.
         """
-        counts: dict[str, int] = {}
-        totals: dict[str, float] = {}
-        for agent in self._population:
-            name = strategy_name_of(agent.strategy)
-            counts[name] = counts.get(name, 0) + 1
-            totals[name] = totals.get(name, 0.0) + agent.score
+        counts, totals = _tally_by_strategy(self._population)
         return GenerationReport(
             index=self._generation,
             composition=counts,
             mean_scores={name: totals[name] / counts[name] for name in counts},
         )
+
+
+def _tally_by_strategy(population: list[Agent]) -> tuple[dict[str, int], dict[str, float]]:
+    """Count agents and sum scores per strategy machine name.
+
+    Args:
+        population: The agents to tally.
+
+    Returns:
+        Two dicts with identical keys: agent counts and score totals.
+    """
+    counts: dict[str, int] = {}
+    totals: dict[str, float] = {}
+    for agent in population:
+        name = strategy_name_of(agent.strategy)
+        counts[name] = counts.get(name, 0) + 1
+        totals[name] = totals.get(name, 0.0) + agent.score
+    return counts, totals
+
+
+@dataclass(frozen=True, slots=True)
+class CycleReport:
+    """What one completed tournament cycle looks like, for consumers.
+
+    The per-cycle payload behind milestone 5's ``CycleFinished`` event:
+    tournament charts plot cumulative and mean score per strategy over time.
+
+    Attributes:
+        index: 0-based cycle number.
+        composition: Agent count per strategy machine name — constant across
+            the whole run, since nothing evolves in a tournament.
+        total_scores: Cumulative score per strategy: summed over its agents
+            and over ALL cycles so far (scores never reset in a tournament).
+        mean_scores: Cumulative mean score per agent, per strategy
+            (``total_scores[name] / composition[name]``).
+    """
+
+    index: int
+    composition: dict[str, int]
+    total_scores: dict[str, float]
+    mean_scores: dict[str, float]
+
+
+class TournamentDynamics:
+    """Runs the fixed-cast tournament loop (run mode ``"tournament"``).
+
+    Axelrod-style: the initial agents keep their strategies for the entire
+    run. One step is one **cycle** — a complete matcher pass (round-robin:
+    every pair plays one match). There is no selection, no mutation, and no
+    reset: scores and per-opponent histories accumulate across the whole
+    run, so with respect to the history-view semantics a tournament behaves
+    as one long generation — ``round_number`` is cumulative across cycles.
+    That is the intended direct-reciprocity behavior, not an accident
+    (DECISIONS #34): GrimTrigger stays grim in cycle 2 about a betrayal
+    from cycle 1.
+
+    Selection/mutation/generation settings in the config are ignored here
+    (valid but without effect). RNG contract: the #23 match-phase draw
+    order, repeated per cycle — no selection or mutation phases exist, so a
+    tournament consumes only match-phase draws.
+    """
+
+    def __init__(self, config: ExperimentConfig, rng: np.random.Generator) -> None:
+        """Set up a tournament: collaborators plus the fixed cast.
+
+        Args:
+            config: The complete, validated experiment description
+                (``mode`` itself is not consulted — the engine dispatches).
+            rng: The run's single seeded random generator (hard rule 5).
+        """
+        self._config = config
+        self._rng = rng
+        self._match = Match(PrisonersDilemma(config.game), config.match, rng)
+        self._matcher = build_matcher(config.matching)
+        self._population = build_initial_population(config)
+        self._cycle = 0
+
+    @property
+    def population(self) -> tuple[Agent, ...]:
+        """The cast, in agent-id order (the same agents for the whole run).
+
+        Returns:
+            An immutable snapshot (the agents themselves are live objects).
+        """
+        return tuple(self._population)
+
+    def run(self) -> Iterator[CycleReport]:
+        """Play the configured number of cycles, reporting each one.
+
+        Yields:
+            One :class:`CycleReport` per cycle, in order.
+        """
+        for _ in range(self._config.tournament_cycles):
+            yield self.step()
+
+    def step(self, on_match: Callable[[MatchResult], None] | None = None) -> CycleReport:
+        """Play exactly one cycle: a full matcher pass, nothing else.
+
+        Args:
+            on_match: Optional observer called with each finished match's
+                result, in play order (read-only; used by the engine to
+                emit match/round events).
+
+        Returns:
+            The cumulative standings after this cycle.
+        """
+        for agent_a, agent_b in self._matcher.pairings(self._population, self._rng):
+            result = self._match.play(agent_a, agent_b)
+            if on_match is not None:
+                on_match(result)
+        counts, totals = _tally_by_strategy(self._population)
+        report = CycleReport(
+            index=self._cycle,
+            composition=counts,
+            total_scores=totals,
+            mean_scores={name: totals[name] / counts[name] for name in counts},
+        )
+        self._cycle += 1
+        return report

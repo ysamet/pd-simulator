@@ -136,6 +136,28 @@ Per-match round count, two modes (both in v1, UI-selectable):
 Single seeded RNG (numpy `Generator`) injected everywhere; seed recorded in every
 run's saved config. No module may create its own unseeded RNG.
 
+### 2.9 Run modes
+
+Every experiment runs in one of two modes (registry: `run.mode`; DECISIONS #34):
+
+- **evolution** (default): the full evolutionary loop of §2.7 — synchronous
+  generations, selection, mutation, per-generation resets.
+- **tournament**: Axelrod-style — a fixed cast of agents keeps its initial
+  strategies for the entire run. Each **cycle** (`run.tournament_cycles`) is one
+  complete matcher pass (round-robin: every pair plays one match). There is no
+  selection, no mutation, no generation boundary, and no reset: scores and
+  per-opponent histories accumulate across the ENTIRE run. With respect to the
+  history-view semantics (DECISIONS #22/#31), a tournament behaves as **one long
+  generation** — `round_number` is cumulative across all cycles. This is the
+  intended direct-reciprocity behavior, not an accident: GrimTrigger stays grim
+  in cycle 2 about a betrayal from cycle 1. RNG draw order: the match-phase
+  order of DECISIONS #23, repeated per cycle — no selection or mutation phases.
+
+Selection, mutation, and generation-count parameters are **ignored** in
+tournament mode — valid in the config but without effect, NOT a validation
+error — so configs can switch modes without surgery and the UI can simply grey
+those parameters out (DECISIONS #34).
+
 ## 3. Architecture
 
 ```
@@ -150,13 +172,15 @@ pdsim/
     match.py         # plays one match (length mode, noise ε) between participants
     selection.py     # SelectionRule ABC; Fermi; (future: proportional, tournament, ...)
     reproduction.py  # StrategySwitchReproduction (mutation μ); (v2: perturbation)
-    dynamics.py      # generation loop: PopulationDynamics + per-generation
-                     #   GenerationReport (fixed size v1; v2: growth/energy economy,
-                     #   carrying capacity, async/Moran)
-    engine.py        # orchestrates a run; emits event stream (see §4)
+    dynamics.py      # run loops: PopulationDynamics + GenerationReport (evolution);
+                     #   TournamentDynamics + CycleReport (tournament) (fixed size v1;
+                     #   v2: growth/energy economy, carrying capacity, async/Moran)
+    events.py        # typed event dataclasses (see §4)
+    engine.py        # run(config, granularity) -> Iterator[Event] (see §4)
   config/
     registry.py      # Parameter Registry (single source of truth; see §5)
     experiment.py    # ExperimentConfig schema (pydantic); YAML load/save; validation
+    scenarios.py     # Scenario Registry: curated presets (see §5.1; v3 scenario home)
   io/
     results.py       # persistence: run folder = config.yaml + results.parquet + meta
   viz/
@@ -175,9 +199,11 @@ Key contracts:
   never see engine internals.
 - `Game.play(actions: Mapping[AgentId, Action]) -> Mapping[AgentId, Payoff]` —
   arity-agnostic so PGG fits the same interface.
-- `Engine.run(config) -> Iterator[Event]` — the engine **yields events** rather than
-  returning a final blob (see §4). The CLI, file writer, and live UI are all just
-  event consumers.
+- `engine.run(config, granularity="generation") -> Iterator[Event]` — a
+  module-level generator function: the engine **yields events** rather than
+  returning a final blob (see §4). The CLI, recorder, and live UI are all just
+  event consumers. `granularity` is an observer concern, never a model
+  parameter (DECISIONS #35).
 
 ### 3.1 Performance strategy
 
@@ -190,14 +216,39 @@ Key contracts:
 
 ## 4. Event stream and live visualization
 
-The engine emits typed events: `RoundPlayed`, `MatchFinished`, `GenerationFinished`
-(carrying population composition, score stats), `RunFinished`. Consumers:
+The engine (`pdsim/core/engine.py`) is a generator: `engine.run(config,
+granularity)` yields immutable typed events (`pdsim/core/events.py`) as the run
+unfolds. Five event types (DECISIONS #35):
 
-- **Live UI**: renders population-composition stacked area, per-strategy mean score
-  trajectories, updating at a user-chosen granularity (**every round / every match /
-  every generation**) with playback speed control. Fine granularity is for small N;
+- `RoundPlayed` — pair identity, round index, executed actions, payoffs.
+- `MatchFinished` — pair identity, per-agent match totals, match length.
+- `GenerationFinished` (evolution mode) — generation index, population
+  composition (strategy → count), per-strategy mean scores.
+- `CycleFinished` (tournament mode) — cycle index, composition (constant), and
+  per-strategy **cumulative** totals + per-agent mean scores. A distinct type
+  from `GenerationFinished` because the payloads differ: a generation reports
+  that generation's scores; a cycle reports run-long cumulative standings.
+- `RunFinished` — always emitted, exactly once, last: mode, periods completed,
+  final composition, and final scores/standings.
+
+**Granularity** (`"round" | "match" | "generation"`, default `"generation"`) is
+an argument to `engine.run` controlling the *finest* event level emitted;
+coarser events are always emitted, and `RunFinished` always. In tournament mode
+the "generation" level is the cycle level. Granularity is an **observer**
+concern, not a model parameter — deliberately NOT in the Parameter Registry or
+`ExperimentConfig`: the same config + seed produces identical simulation
+results at every granularity (DECISIONS #35). Fine-granularity events are
+buffered one generation/cycle at a time and arrive in play order.
+
+Consumers:
+
+- **Live UI** (M6): stacked-area composition + per-strategy score trajectories
+  in evolution mode; cumulative/mean standings in tournament mode; user-chosen
+  granularity with playback speed. Fine granularity is for small N;
   per-generation updates for large N.
-- **Recorder**: writes the time series to disk regardless of UI granularity.
+- **Recorder** (M7): writes the time series to disk regardless of UI granularity.
+- **Demos**: `examples/quickstart.py` (evolution) and
+  `examples/tournament_demo.py` (tournament) show the consumer pattern.
 
 ## 5. Parameter Registry (novice-first explanations)
 
@@ -212,6 +263,25 @@ more" note. From this registry we generate:
 
 It is structurally impossible for a parameter to exist without an explanation: the
 registry entry *is* the parameter's existence.
+
+### 5.1 Scenario Registry (curated presets)
+
+The third instance of the registry idiom (`pdsim/config/scenarios.py`, after the
+Parameter and Strategy Registries). Each scenario is a frozen `ScenarioInfo`:
+machine name, display name, a novice-friendly "what question does this
+explore?" description, a **complete validated `ExperimentConfig`**, and a
+"things to try" note with concrete tweaks to experiment with. The UI's scenario
+dropdown (M6) reads this registry; "Custom" is a UI concept (start anywhere,
+then edit), not a registry entry. One scenario = one config — comparative
+questions live in the things-to-try text; run-both-and-compare is a possible
+future UI mechanism (DECISIONS #36).
+
+v1 ships five seed scenarios: `classic_tournament`, `reciprocity_takes_over`,
+`noise_breaks_the_grim`, `drift_vs_meritocracy`, `defectors_paradise`.
+
+This registry is also the designated future home of the v3 real-world scenario
+presets (§6.3): geographic/geopolitical setups will register here exactly like
+the seed scenarios.
 
 ## 6. Designed-for future extensions (build nothing that blocks these)
 

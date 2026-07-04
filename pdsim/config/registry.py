@@ -587,6 +587,49 @@ register(
 
 register(
     ParameterSpec(
+        key="run.mode",
+        kind="choice",
+        default="evolution",
+        choices=("evolution", "tournament"),
+        label="Run mode",
+        section="Run",
+        description=(
+            "What kind of experiment this is. 'evolution' means strategies compete "
+            "AND the population changes over generations — strategies that score "
+            "well spread through selection, and mutation adds variety. 'tournament' "
+            "means a fixed cast of agents plays repeated matches while we simply "
+            "watch the scores accumulate — nothing evolves, like Axelrod's original "
+            "computer tournaments. Selection and mutation settings are ignored in "
+            "tournament mode."
+        ),
+        learn_more=(
+            "Robert Axelrod's 1980 computer tournaments — fixed strategy line-ups, "
+            "round-robin play — are where Tit for Tat first made its name."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="run.tournament_cycles",
+        kind="int",
+        default=20,
+        minimum=1,
+        maximum=100_000,
+        label="Tournament cycles",
+        section="Run",
+        description=(
+            "How many complete tournament passes to play when the run mode is "
+            "'tournament'. In one cycle, every pairing produced by the matching "
+            "scheme plays one match (round-robin: every pair plays once). Agents "
+            "remember their opponents from earlier cycles, so relationships keep "
+            "developing. Has no effect in 'evolution' mode."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
         key="run.seed",
         kind="int",
         default=42,

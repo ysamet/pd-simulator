@@ -17,12 +17,19 @@ Milestone order (each lands with tests + docs):
 4. **Evolutionary dynamics.** Synchronous generations; Fermi selection (β);
    strategy-switch mutation (μ); seeded RNG discipline; golden validation tests.
    ✅ M4 landed 2026-07-04, 237 tests passing.
-5. **Event stream + persistence.** Typed events; run folders (config + seed +
-   parquet + summary); runs index.
-6. **Streamlit UI.** Registry-generated parameter panel with novice tooltips;
-   live stacked-area composition + score trajectories; update granularity
-   (round/match/generation) + playback speed; run launcher; results browser.
-7. **Polish.** `docs/PARAMETERS.md` generation; README quick start; RandomK matcher
+5. **GUI foundations** (rescoped — see DECISIONS #33). Run modes
+   (evolution/tournament); typed event stream with observer-side granularity;
+   Scenario Registry with five curated presets.
+   ✅ M5 landed 2026-07-04, 270 tests passing.
+6. **Streamlit UI.** Scenario dropdown (registry-driven); registry-generated
+   parameter panel with novice tooltips; mode-aware charts (stacked-area
+   composition + score trajectories in evolution; cumulative standings in
+   tournament) with ignored-parameter greying; live updates with granularity
+   (round/match/generation) + playback speed; run launcher. No results browser
+   yet.
+7. **Persistence + CLI.** Run folders (config + seed + parquet + summary);
+   runs index; headless CLI (`python -m pdsim.run`); results browser in the UI.
+8. **Polish.** `docs/PARAMETERS.md` generation; README quick start; RandomK matcher
    if not already landed.
 
 Out of scope for v1 (but nothing may block them): everything below.

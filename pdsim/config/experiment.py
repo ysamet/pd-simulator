@@ -292,6 +292,13 @@ class ExperimentConfig(_RegistryBackedModel):
     section falls back to registry defaults.
 
     Attributes:
+        mode: What kind of run this is — ``"evolution"`` (selection and
+            mutation reshape the population each generation) or
+            ``"tournament"`` (a fixed cast plays repeated matcher passes and
+            scores simply accumulate; selection/mutation/generation settings
+            are ignored — valid but without effect, DECISIONS #34).
+        tournament_cycles: Number of complete matcher passes in a
+            ``"tournament"`` run; ignored in ``"evolution"`` mode.
         seed: Random seed; with the same seed and settings, a run replays
             exactly (hard rules 5 and 8).
         game: Payoff matrix and game-shape toggles.
@@ -308,8 +315,18 @@ class ExperimentConfig(_RegistryBackedModel):
             introduce it mid-run, and then these values apply.
     """
 
-    _registry_keys: ClassVar[dict[str, str]] = {"seed": "run.seed"}
+    _registry_keys: ClassVar[dict[str, str]] = {
+        "mode": "run.mode",
+        "tournament_cycles": "run.tournament_cycles",
+        "seed": "run.seed",
+    }
 
+    # Run-mode fields live at the top level next to `seed` (the "run.*"
+    # registry section maps to top-level config fields) — a nested `run:`
+    # section would have moved `seed:` and broken every existing YAML
+    # (hard rule 8; DECISIONS #34).
+    mode: str = _registry_field("run.mode")
+    tournament_cycles: int = _registry_field("run.tournament_cycles")
     seed: int = _registry_field("run.seed")
     # New concept — `default_factory`: for defaults that are *objects*, pydantic
     # (like dataclasses) takes a zero-argument function that builds a fresh

@@ -13,10 +13,18 @@ every test is deterministic — a failure means behavior changed, not luck.
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
-from pdsim.core.dynamics import GenerationReport, PopulationDynamics, build_initial_population
+from pdsim.core.dynamics import (
+    GenerationReport,
+    PopulationDynamics,
+    TournamentDynamics,
+    build_initial_population,
+)
+from pdsim.core.match import MatchResult
 from pdsim.core.strategies import strategy_name_of
 from pdsim.core.strategies.random_strategy import Random
 
@@ -251,3 +259,97 @@ class TestGoldenScenarios:
             "random",
             "tit_for_tat",
         }
+
+
+def _tournament_config(
+    composition: dict[str, int],
+    *,
+    rounds: int = 5,
+    cycles: int = 3,
+) -> ExperimentConfig:
+    """Build a tournament-mode config for dynamics tests.
+
+    Args:
+        composition: The fixed cast; population size is its sum.
+        rounds: Fixed rounds per match.
+        cycles: Number of complete matcher passes.
+
+    Returns:
+        A validated tournament config with noise off.
+    """
+    return ExperimentConfig.model_validate(
+        {
+            "mode": "tournament",
+            "tournament_cycles": cycles,
+            "population": {"size": sum(composition.values()), "composition": composition},
+            "match": {"length_mode": "fixed", "rounds_per_match": rounds},
+        }
+    )
+
+
+class TestTournamentDynamics:
+    """Tournament mode: one long generation, nothing evolves (DECISIONS #34)."""
+
+    def test_composition_is_identical_at_every_cycle(self) -> None:
+        """No selection, no mutation: the cast never changes."""
+        config = _tournament_config({"tit_for_tat": 2, "always_defect": 2, "pavlov": 2}, cycles=4)
+        reports = list(TournamentDynamics(config, np.random.default_rng(0)).run())
+        assert len(reports) == 4
+        expected = {"tit_for_tat": 2, "always_defect": 2, "pavlov": 2}
+        assert all(report.composition == expected for report in reports)
+
+    def test_cumulative_totals_never_decrease(self) -> None:
+        """Scores accumulate for the whole run (non-negative payoffs)."""
+        config = _tournament_config({"tit_for_tat": 2, "always_defect": 2, "random": 2}, cycles=5)
+        reports = list(TournamentDynamics(config, np.random.default_rng(1)).run())
+        # itertools.pairwise (new concept): successive overlapping pairs —
+        # (r0, r1), (r1, r2), ... — exactly "each cycle vs the next".
+        for earlier, later in itertools.pairwise(reports):
+            for name, total in earlier.total_scores.items():
+                assert later.total_scores[name] >= total
+
+    def test_hand_computed_tft_vs_alld_totals(self) -> None:
+        """Golden: cumulative totals follow the hand-worked arithmetic.
+
+        Cycle 1 (fresh relationship, 5 rounds): TFT earns S+4P = 4, AllD
+        earns T+4P = 9. TFT *remembers* the betrayal across the cycle
+        boundary, so every later cycle is all-defection: +5P = +5 each.
+        """
+        config = _tournament_config({"tit_for_tat": 1, "always_defect": 1}, rounds=5, cycles=3)
+        reports = list(TournamentDynamics(config, np.random.default_rng(0)).run())
+        totals = [report.total_scores for report in reports]
+        assert totals == [
+            {"tit_for_tat": 4.0, "always_defect": 9.0},
+            {"tit_for_tat": 9.0, "always_defect": 14.0},
+            {"tit_for_tat": 14.0, "always_defect": 19.0},
+        ]
+        assert reports[-1].mean_scores == {"tit_for_tat": 14.0, "always_defect": 19.0}
+
+    def test_histories_accumulate_across_cycles(self) -> None:
+        """The run is one long generation: round_number spans cycles (#34)."""
+        config = _tournament_config({"tit_for_tat": 1, "always_defect": 1}, rounds=5, cycles=3)
+        dynamics = TournamentDynamics(config, np.random.default_rng(0))
+        dynamics.step()
+        dynamics.step()
+        agent_a, agent_b = dynamics.population
+        assert agent_a.view_of(agent_b.agent_id).round_number == 10  # 2 cycles x 5 rounds
+        assert agent_a.score > 0.0  # never reset
+
+    def test_grim_stays_grim_about_a_cycle_one_betrayal(self) -> None:
+        """Direct reciprocity across cycles: no generation-boundary amnesty.
+
+        GrimTrigger faces Random; the seeded cycle-1 match contains at least
+        one Random defection, so Grim must play pure defection for the
+        whole of cycle 2 — the grudge survives the cycle boundary.
+        """
+        config = _tournament_config({"grim_trigger": 1, "random": 1}, rounds=4, cycles=2)
+        dynamics = TournamentDynamics(config, np.random.default_rng(1))
+        results: list[MatchResult] = []
+        dynamics.step(on_match=results.append)
+        dynamics.step(on_match=results.append)
+        cycle_1, cycle_2 = results
+        grim_id = 0  # composition order: grim_trigger first
+        random_id = 1
+        # Precondition for the scenario: Random betrayed at least once early.
+        assert any(record.actions[random_id].value == "D" for record in cycle_1.rounds)
+        assert all(record.actions[grim_id].value == "D" for record in cycle_2.rounds)
