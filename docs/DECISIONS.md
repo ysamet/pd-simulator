@@ -180,3 +180,82 @@ scores/histories as rounds complete and returns a full-transcript `MatchResult`
 never bare primitives/dicts (CLAUDE.md style rule). Test stub strategies live in
 `pdsim/tests/stub_strategies.py`, not `pdsim/core/strategies/`, which stays
 reserved for M3's auto-discovered roster.
+
+**#25 — 2026-07-04 — Strategy Registry: `StrategyInfo` + auto-discovery in
+`pdsim/core/strategies/registry.py`.** Each strategy module declares one frozen
+`StrategyInfo` (machine name, display name, novice description, the class as
+`factory`, its `ParameterSpec`s, literature note) via a module-level
+`register_strategy(...)` call; the package `__init__` auto-imports every module in
+the folder (pkgutil), so *importing the package guarantees the roster is populated*
+and adding a strategy = dropping in one module, zero other edits. Consequences and
+conventions: (a) **machine names are a persistence surface** — saved configs
+reference them, so renaming one is a breaking change (hard rule 8); the v1 names
+are `always_cooperate`, `always_defect`, `random`, `tit_for_tat`,
+`generous_tit_for_tat`, `grim_trigger`, `pavlov`. (b) Strategy parameter keys are
+`strategy.<machine_name>.<param>`; the last segment doubles as the constructor
+keyword, and `create_strategy(name, **overrides)` is the factory M4's mutation and
+M6's UI construct through. Parameter values are validated inside each strategy's
+constructor against its registry spec — one validation path. (c)
+`population.composition` names are now validated against the roster (closes the
+#18c deferral) via a *lazy function-level import* in the config validator, breaking
+the `core.game → config.experiment → core.strategies → core.game` import cycle.
+(d) Registration order is alphabetical module order (= UI display order for now).
+(e) Since strategies are stateless (#21), M4 may share one instance per
+(strategy, params) across agents — noted as an option, not built. Alternatives
+rejected: a class decorator for registration (needs a decorator factory; the
+module-level call matches the Parameter Registry idiom); housing the registry in
+`core/strategy.py` (keeps the interface module minimal).
+
+**#26 — 2026-07-04 — Roster semantics under moves-only views.** All reciprocal
+strategies key off the *visible* (memory-capped) window, never `round_number`: an
+empty window is a fresh start (uniform with #21's "grim within the visible
+window"). Pavlov is derived from moves because views expose no payoffs (#22):
+under PD ordering my round paid T or R ("win") exactly when the opponent
+cooperated, so Win-Stay-Lose-Shift = repeat my last *executed* (post-noise, #20)
+move if the opponent's last visible move was C, flip it if D; with the payoff
+orderings relaxed (Chicken/Stag Hunt), Pavlov keeps this moves-based definition.
+RNG discipline: Random draws exactly once per decision regardless of p; GTFT draws
+only when reacting to a defection (a conditional draw is fine — the draw count is
+a deterministic function of the visible history, per #23). Defaults: Random
+p = 0.5; GTFT g = 1/3 — Nowak & Sigmund (1992)'s optimal generosity
+`min(1−(T−R)/(R−S), (R−P)/(T−P))` at standard payoffs, and exactly what the
+axelrod library's GTFT derives; a fixed constant (not payoff-derived) because
+registry defaults are static data. Both p and g allow the closed extremes 0 and 1
+(legitimate degenerate strategies), unlike `continuation_probability`.
+
+**#27 — 2026-07-04 — axelrod cross-validation methodology (DESIGN §7).** Dev-only
+dependency `axelrod>=4.13,<4.14` (4.14.0 added a heavyweight torch dependency for
+neural-net strategies we don't use); it imports fine on Python 3.13/numpy 2.5, so
+the live oracle is used — no pinned-goldens fallback needed. The test module is
+guarded by `pytest.importorskip`, so the main suite stands alone and the
+headless-engine rule is untouched (nothing outside tests imports axelrod). Method:
+full-match **transcript equality** (30 rounds, noise-free, default payoffs — the
+same (T,R,P,S) in both engines) for the five deterministic strategies across all
+15 pairings incl. self-play, plus scripted Cycler probes ("CCD", "CD") to force
+asymmetric histories, plus the stochastic strategies at their deterministic
+extremes as exact aliases (Random(0)≡Defector, Random(1)≡Cooperator,
+GTFT(0)≡TitForTat, GTFT(1)≡Cooperator). Interior p/g behavior is checked
+statistically in our engine only — cross-library RNG stream equality is neither
+possible nor needed. One payoff-total check against `Match.final_score()` guards
+the scoring path too.
+
+**#28 — 2026-07-04 — Open question (logged, unresolved): per-run strategy
+parameters in configs.** `population.composition` maps machine name → count only;
+there is currently no way to express `Random(p=0.9)` — or a population mixing two
+different p values — in an `ExperimentConfig`/YAML. Strategy parameters exist in
+the Parameter Registry and `create_strategy` accepts overrides, so the machinery
+is ready; what's missing is the config schema surface. Deferred until M4 (engine
+instantiates populations) / M6 (UI) make the need concrete.
+
+**#29 — 2026-07-04 — Workflow: all repo changes flow through Claude Code; commits
+are performed exclusively by the owner.** The owner does not hand-edit repo files:
+every change — code and docs — is made by Claude Code, arriving either as prompts
+the owner pastes (often drafted in the design chat) or as in-session decisions. A
+session must never end by asking the owner to edit a file manually; Claude Code
+does the edit. Git commits are the owner's act, never Claude Code's (`git commit`
+is never run by Claude Code). At every milestone completion — and whenever a
+commit is warranted — Claude Code presents (a) a summary of what was done, (b) the
+list of files to stage, and (c) a suggested commit message; the owner performs the
+commit himself. Rationale: the owner retains sole authorship of repository history
+while all mechanical editing stays with Claude Code, matching the environment
+split in #1. Codified in `CLAUDE.md` ("About the developer") this session.

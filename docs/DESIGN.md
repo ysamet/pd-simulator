@@ -63,6 +63,14 @@ All strategies implement the `Strategy` ABC. Initial set:
 
 Each strategy carries: machine name, display name, novice-friendly description,
 parameter definitions (registered in the Parameter Registry), and literature notes.
+This metadata lives in the **Strategy Registry**
+(`pdsim/core/strategies/registry.py`): one `StrategyInfo` declaration per strategy
+module, auto-discovered by importing the package (see DECISIONS #25). The v1
+machine names — the identifiers configs use — are `always_cooperate`,
+`always_defect`, `random`, `tit_for_tat`, `generous_tit_for_tat`, `grim_trigger`,
+`pavlov`. Strategy parameters use registry keys `strategy.<machine_name>.<param>`;
+defaults: Random p = 0.5, GTFT g = 1/3 (see DECISIONS #26, including Pavlov's
+moves-only "win = opponent cooperated" derivation).
 
 ### 2.4 Matching (who plays whom)
 
@@ -121,7 +129,8 @@ pdsim/
   core/
     game.py          # Game ABC; PrisonersDilemma; (v2: PublicGoodsGame)
     strategy.py      # Strategy ABC; history/memory views handed to strategies
-    strategies/      # one module per strategy
+    strategies/      # one module per strategy, auto-discovered on package import
+      registry.py    #   Strategy Registry: StrategyInfo metadata + create_strategy
     agent.py         # Agent: identity, strategy instance, score, history store
     matcher.py       # Matcher ABC; RoundRobin; RandomK; (future: SpatialKernel)
     match.py         # plays one match (length mode, noise ε) between participants

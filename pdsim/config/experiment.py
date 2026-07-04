@@ -215,21 +215,35 @@ class PopulationConfig(_RegistryBackedModel):
 
     @model_validator(mode="after")
     def _check_composition(self) -> Self:
-        """Validate the strategy mix against the population size.
-
-        Strategy *names* are checked against the strategy registry once it
-        exists (milestone 3); until then any name is accepted here.
+        """Validate the strategy mix: known names, positive counts, exact sum.
 
         Returns:
             The model, unchanged.
 
         Raises:
-            ValueError: If the composition is empty, contains a non-positive
-                count, or does not sum to ``size``.
+            ValueError: If the composition is empty, names an unknown
+                strategy, contains a non-positive count, or does not sum to
+                ``size``.
         """
+        # Lazy import (new concept): importing inside the function, at call
+        # time, instead of at the top of the module. Necessary here because
+        # the modules import each other in a cycle otherwise (core.game
+        # imports this module; the strategies import core.game). By the time
+        # a config is *constructed*, both modules exist and the import is
+        # cheap. Importing the package also runs strategy auto-discovery,
+        # so the roster is guaranteed to be populated.
+        from pdsim.core.strategies import all_strategy_names
+
         if not self.composition:
             raise ValueError(
                 "population.composition must list at least one strategy with its agent count."
+            )
+        valid = all_strategy_names()
+        unknown = sorted(name for name in self.composition if name not in valid)
+        if unknown:
+            raise ValueError(
+                f"population.composition contains unknown strategy name(s): "
+                f"{', '.join(unknown)}. Valid strategy names: {', '.join(sorted(valid))}."
             )
         for name, count in self.composition.items():
             if count < 1:

@@ -13,6 +13,7 @@ Milestone order (each lands with tests + docs):
    ✅ M2 landed 2026-07-03, 70 tests passing.
 3. **Strategy roster.** The seven v1 strategies with decision-table tests and
    `axelrod` cross-validation.
+   ✅ M3 landed 2026-07-04, 200 tests passing.
 4. **Evolutionary dynamics.** Synchronous generations; Fermi selection (β);
    strategy-switch mutation (μ); seeded RNG discipline; golden validation tests.
 5. **Event stream + persistence.** Typed events; run folders (config + seed +

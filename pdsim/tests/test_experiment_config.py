@@ -12,8 +12,8 @@ from pydantic import ValidationError
 from pdsim.config import ExperimentConfig, get_spec, load_config, save_config
 from pdsim.config.experiment import GameConfig, PopulationConfig
 
-# Strategy names are not validated until the strategy registry lands
-# (milestone 3), so tests use the planned v1 machine names.
+# Machine names from the strategy registry (pdsim/core/strategies/) —
+# composition names are validated against the registered roster.
 _COMPOSITION = {"tit_for_tat": 60, "always_defect": 40}
 
 
@@ -106,6 +106,16 @@ class TestPopulationComposition:
         """Zero-count entries must be removed, not listed."""
         with pytest.raises(ValidationError, match="at least one agent"):
             PopulationConfig(size=60, composition={"tit_for_tat": 60, "random": 0})
+
+    def test_unknown_strategy_name_rejected(self) -> None:
+        """Names are validated against the strategy registry (DECISIONS #25)."""
+        with pytest.raises(ValidationError, match="unknown strategy name"):
+            PopulationConfig(size=100, composition={"tit_for_tot": 100})
+
+    def test_unknown_name_error_lists_the_valid_roster(self) -> None:
+        """The error message must teach the user the valid names."""
+        with pytest.raises(ValidationError, match="pavlov"):
+            PopulationConfig(size=100, composition={"telepathy": 100})
 
 
 class TestStrictnessAndImmutability:

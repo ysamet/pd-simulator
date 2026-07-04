@@ -1,9 +1,11 @@
 """Trivial Strategy implementations for engine tests.
 
-These are deliberately minimal stand-ins so milestone 2's engine is testable
-before the real roster lands in milestone 3. They live here — not in
-``pdsim/core/strategies/`` — because that package is reserved for the
-auto-discovered production roster (DECISIONS #24).
+These are deliberately minimal stand-ins that keep the engine tests
+independent of the production roster in ``pdsim/core/strategies/``, plus
+test-only probes (:class:`StubCycler`, :class:`RecordingStrategy`) that are
+not model strategies at all. They live here — not in the strategies package
+— because that package is reserved for the auto-discovered production
+roster (DECISIONS #24).
 """
 
 from __future__ import annotations
@@ -49,8 +51,9 @@ class StubAlwaysDefect(Strategy):
 class StubMirror(Strategy):
     """Cooperates first, then copies the opponent's last visible move.
 
-    A Tit-for-Tat stand-in for golden-style match tests (the real TitForTat,
-    with metadata and decision-table tests, is milestone 3).
+    A Tit-for-Tat stand-in that keeps the match tests decoupled from the
+    production roster (the real ``TitForTat`` lives in
+    ``pdsim/core/strategies/tit_for_tat.py``).
     """
 
     def decide(self, view: HistoryView, rng: np.random.Generator) -> Action:
@@ -110,6 +113,37 @@ class StubDefectOnceThenCooperate(Strategy):
             ``DEFECT`` on the first-ever round, ``COOPERATE`` afterwards.
         """
         return Action.DEFECT if view.round_number == 0 else Action.COOPERATE
+
+
+class StubCycler(Strategy):
+    """Plays a fixed move pattern over and over, ignoring the opponent.
+
+    A probe for cross-validation and decision tests: it reproduces
+    ``axelrod.Cycler``'s behavior so both engines can face the same scripted
+    opponent. Keyed off ``round_number`` (not the visible window) on
+    purpose — a script follows the clock, not the relationship.
+    """
+
+    def __init__(self, cycle: str) -> None:
+        """Create a cycler.
+
+        Args:
+            cycle: The repeating pattern as a string of ``C``/``D``,
+                e.g. ``"CCD"``.
+        """
+        self.cycle = tuple(Action(ch) for ch in cycle)
+
+    def decide(self, view: HistoryView, rng: np.random.Generator) -> Action:
+        """Play the next move of the cycle.
+
+        Args:
+            view: Only ``round_number`` is read, to index into the cycle.
+            rng: Ignored (deterministic strategy).
+
+        Returns:
+            The cycle move for this round, wrapping around forever.
+        """
+        return self.cycle[view.round_number % len(self.cycle)]
 
 
 class RecordingStrategy(Strategy):

@@ -12,6 +12,15 @@ generator, ABC, vectorization trick), add a brief explanatory comment the first 
 it appears. Where a design maps to functional-programming ideas (strategies as
 composable functions), point it out — it's a learning thread of this project.
 
+The project owner does not hand-edit repo files. All changes — code and docs —
+are made by Claude Code, arriving either as prompts pasted by the owner (often
+drafted in the design chat) or as decisions made in-session. Never end a session
+by asking the owner to manually edit a file; do the edit. Git commits are the
+OWNER'S act, never Claude Code's: never run git commit. At every milestone
+completion (and whenever a commit is warranted), present: (a) a summary of what
+was done, (b) the list of files to stage, and (c) a suggested commit message —
+the owner performs the commit himself.
+
 ## Hard rules
 
 1. **Documentation is mandatory, always.** Every module, class, function, and method

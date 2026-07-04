@@ -23,6 +23,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
+    # Correctness oracle for the v1 strategy roster (docs/DESIGN.md §7).
+    # Pinned below 4.14: 4.14.0 added a heavyweight torch dependency for
+    # neural-network strategies this project does not use.
+    "axelrod>=4.13,<4.14",
 ]
 
 [tool.hatch.build.targets.wheel]

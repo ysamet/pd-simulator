@@ -68,11 +68,11 @@ class Strategy(ABC):
 
     Implementations decide from the :class:`HistoryView` alone — they never
     see agents, matches, or any engine internals. Stochastic strategies (e.g.
-    Random(p), coming in milestone 3) draw from the injected ``rng``, never
-    from a hidden random source (hard rule 5).
+    Random(p)) draw from the injected ``rng``, never from a hidden random
+    source (hard rule 5).
 
-    Strategy metadata (machine name, display name, novice description) and
-    registry hookup arrive with the real roster in milestone 3.
+    Strategy metadata (machine name, display name, novice description) lives
+    in the Strategy Registry — see :mod:`pdsim.core.strategies.registry`.
     """
 
     @abstractmethod
