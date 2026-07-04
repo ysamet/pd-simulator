@@ -19,7 +19,10 @@ by asking the owner to manually edit a file; do the edit. Git commits are the
 OWNER'S act, never Claude Code's: never run git commit. At every milestone
 completion (and whenever a commit is warranted), present: (a) a summary of what
 was done, (b) the list of files to stage, and (c) a suggested commit message —
-the owner performs the commit himself.
+the owner performs the commit himself. Additionally, after EVERY implementation,
+show the owner how to run manual validation: the exact commands to launch or
+exercise what was built (with the venv-activation reminder), plus a short
+checklist of what to look at to confirm it works.
 
 ## Hard rules
 
@@ -113,6 +116,35 @@ decisions ends with these steps, in order:
 
 Never end a significant session without step 2. Stale or silent docs are bugs —
 they cause other advisors to give wrong advice with full confidence.
+
+## Session continuity (context-limit protocol)
+
+The end-of-session ritual has one blind spot: a session that runs out of
+context never reaches its end. This protocol covers that gap (DECISIONS #43).
+
+**When a session approaches its context limit mid-work, STOP working** and
+write `docs/WIP.md` containing:
+
+1. **State of the work**, at file-and-task granularity: what is done, what is
+   in flight, what comes next.
+2. **Pending docs obligations**: every decision made this session that is NOT
+   yet logged in `docs/DECISIONS.md` or reflected in `docs/DESIGN.md` /
+   `docs/ROADMAP.md`. These obligations transfer to the resuming session.
+3. Anything else the resuming session must know that exists only in this
+   conversation.
+
+Then tell the owner to start a fresh session — and still perform the
+mandatory end-of-session ritual (report DOCS CHANGED/UNCHANGED as usual;
+`WIP.md` itself does NOT count as a docs change).
+
+**Every session MUST check for `docs/WIP.md` at start.** If it exists: read
+it, resume from it (including the pending docs obligations), and delete it
+once its contents are absorbed. A `WIP.md` left behind after its work is
+complete is a bug.
+
+`docs/WIP.md` is **ephemeral**: it is not part of the knowledge-preservation
+contract (never uploaded to the design chat), it is git-ignored, and it must
+never appear in a suggested commit file list.
 
 ## Current phase
 

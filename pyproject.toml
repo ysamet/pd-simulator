@@ -16,6 +16,10 @@ dependencies = [
     "numpy>=1.26",
     "pydantic>=2.5",
     "pyyaml>=6.0",
+    # UI layer (M6). The engine never imports these (hard rule 4); they are
+    # main dependencies because the v1 product ships with its web UI.
+    "plotly>=5.18",
+    "streamlit>=1.30",
 ]
 
 [project.optional-dependencies]

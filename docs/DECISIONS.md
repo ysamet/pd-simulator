@@ -386,3 +386,88 @@ experiment), `defectors_paradise` (TFT minority, continuation w = 0.98,
 strong selection). The registry is the designated home of the v3 real-world
 scenario presets (DESIGN §6.3). Every scenario is smoke-run end-to-end in
 tests via a shrunk copy of its config.
+
+**#37 — 2026-07-04 — Viz layer: RunTimeseries accumulator + pure chart
+builders.** The intermediate shape between events and charts is
+`RunTimeseries` (`pdsim/core/timeseries.py`): folds `GenerationFinished`/
+`CycleFinished` into aligned per-strategy series (newcomers backfilled with
+0/None; the extinct get 0 agents / `None` score — a gap in charts, the honest
+picture) and keeps the closing `RunFinished`. Placed in **core**, not viz,
+because it is plotting-free data processing and M7's recorder (in `io/`,
+which may never import plotting code — hard rule 4) is expected to share it.
+`pdsim/viz/charts.py` holds pure builders — `RunTimeseries` in, plotly Figure
+out, no Streamlit — so the viz layer survives the §6.4 dashboard migration;
+the final summary is returned as **plain table rows** rather than a figure so
+any front end renders it natively. Per-strategy colors come from one mapping
+derived from Strategy Registry order (stable across charts/modes/reruns);
+legends show display names, machine names stay internal.
+
+**#38 — 2026-07-04 — UI panel is generated from the Parameter Registry.**
+Widget mapping per `ParameterSpec`: bool → checkbox, choice → selectbox,
+int/float → number_input with the spec's bounds, nullable int → a "limit?"
+checkbox plus a number input (None = unlimited). Widget keys ARE registry
+keys; tooltips are the registry descriptions (+ learn_more) — hard rule 3 in
+the UI with zero duplicated text. Sections render as expanders in registry
+order; `run.mode` is a prominent radio. Bespoke pieces: per-strategy
+composition inputs (labels and tooltips from the Strategy Registry) with a
+live sum indicator that disables Run until the mix equals the population
+size. Mode-awareness: ignored parameters are greyed out (`disabled=True`)
+with an appended tooltip note — never hidden (#34). `app.py` stays
+presentation-only; all branchy logic (config assembly, scenario→widget
+mapping, default composition, error formatting) lives in the Streamlit-free
+`pdsim/ui/helpers.py`, unit-tested without Streamlit.
+
+**#39 — 2026-07-04 — Live-update batching in the UI event loop.** Charts are
+rebuilt **only on period events** (RunTimeseries only changes then);
+fine-grained `RoundPlayed`/`MatchFinished` events advance a one-line progress
+caption at most every 200 events and never touch a figure. The playback-speed
+control is a pause after each period redraw. Each redraw uses a fresh
+Streamlit element key (Streamlit forbids duplicate element IDs within one
+script run). Stop is a session-state flag checked per event (Streamlit's own
+rerun interruption is the backstop). Verified end-to-end with
+`streamlit.testing.v1.AppTest`, which proved able to drive everything
+including a tiny live run — no coverage limitation to log.
+
+**#40 — 2026-07-04 — Scenario-editing behavior in the UI.** Selecting a
+scenario writes its config into widget session state exactly once (on
+selection change); afterwards the user's edits are never fought and the
+dropdown keeps showing the scenario's name. No "(modified)" indicator in M6
+(nice-to-have; revisit in M8 if missed). Re-selecting a *different* scenario
+and coming back reloads the original pristine. "Custom" starts from registry
+defaults plus an even composition split (remainder to the earliest strategy
+names) — the registry deliberately has no composition default, so the UI
+supplies the most neutral one.
+
+**#41 — 2026-07-04 — strategy_params exposed in the UI (stretch goal
+implemented, not deferred).** A "Per-strategy parameters" expander renders
+every `StrategyInfo.params` spec; only values **differing from their registry
+defaults** are written into `config.strategy_params`, so an untouched panel
+produces a config with no strategy_params section and defaults stay implicit
+(consistent with #30's one-set-per-strategy rule).
+
+**#42 — 2026-07-04 — Workflow addition (extends #29): every implementation ends
+with manual-validation instructions.** After every implementation, Claude Code
+presents the exact commands to launch or exercise what was built (including
+the venv-activation reminder) plus a short checklist of what to look at to
+confirm it works — automated tests complement, never replace, the owner seeing
+the thing run. Owner decision this session; codified in `CLAUDE.md`.
+
+**#43 — 2026-07-04 — Session-continuity protocol: `docs/WIP.md` for
+context-limit handoffs.** When a session approaches its context limit
+mid-work, it stops working and writes `docs/WIP.md` with (a) work state at
+file-and-task granularity (done / in-flight / next), (b) every decision made
+but not yet logged in DECISIONS.md or reflected in DESIGN.md/ROADMAP.md —
+pending docs obligations that transfer to the resuming session, and (c)
+anything else that exists only in that conversation; it then tells the owner
+to start a fresh session and still performs the end-of-session ritual
+(`WIP.md` does not count as a docs change). Every session checks for
+`docs/WIP.md` at start; if present it resumes from it and deletes it once
+absorbed — a `WIP.md` outliving its work is a bug. The file is ephemeral: not
+part of the knowledge-preservation contract, never uploaded to the design
+chat, git-ignored (added to `.gitignore`), and never listed in a suggested
+commit. Rationale: interrupted sessions otherwise lose unlogged decisions and
+in-flight state — the one gap the end-of-session ritual cannot cover, because
+an out-of-context session never reaches its end. Alternative considered:
+relying on per-prompt manual instructions to hand sessions over — rejected as
+unreliable, for the same reason explicit triggers and rituals replaced
+general principles in #19. Codified in `CLAUDE.md` ("Session continuity").

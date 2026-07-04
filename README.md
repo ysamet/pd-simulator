@@ -21,12 +21,24 @@ a geographic layer for modeling real-world scenarios. See
 ## Project status
 
 v1 is under construction, milestone by milestone (see
-[docs/ROADMAP.md](docs/ROADMAP.md)). **Currently completed: Milestone 5 of 8** —
-the whole headless platform works end to end: the seven classic strategies
-(cross-validated against the `axelrod` library), evolutionary dynamics (Fermi
-selection, mutation), two run modes (evolution and Axelrod-style tournaments),
-a typed event stream, and a registry of five curated, ready-to-run scenarios.
-Next up: the interactive web UI (M6).
+[docs/ROADMAP.md](docs/ROADMAP.md)). **Currently completed: Milestone 6 of 8** —
+the interactive web app is live: pick a curated scenario (or build your own
+experiment), tweak any parameter with plain-language tooltips, and watch the
+population evolve — or a tournament unfold — in live charts. Under it sits the
+full headless platform: seven classic strategies (cross-validated against the
+`axelrod` library), evolutionary dynamics, two run modes, and a typed event
+stream. Next up: saving runs to disk + the headless CLI (M7).
+
+## Launch the app
+
+```powershell
+streamlit run pdsim/ui/app.py
+```
+
+Your browser opens the simulator: choose a scenario from the dropdown (each
+states the question it explores and what to try changing), press **Run**, and
+watch. Every parameter is editable — hover any widget for a plain-language
+explanation. Same seed + same settings = the same run, exactly.
 
 ## Requirements
 
@@ -50,8 +62,8 @@ pip install -e ".[dev]"
 
 ## What you can run today
 
-With Milestone 5 complete, full simulations run end to end in both run modes,
-streamed as typed events (the same pattern the upcoming web UI consumes):
+The web app above is the main event. The same simulations also run from the
+terminal, streamed as typed events (the exact pattern the app consumes):
 
 ```powershell
 python examples\quickstart.py        # evolution: watch reciprocity take over
@@ -104,13 +116,13 @@ Each milestone unlocks something concrete:
 | **M3 — done** | Use all seven classic strategies (cross-validated against the `axelrod` library) | Python API |
 | **M4 — done** | Run a full evolutionary simulation (generations, selection, mutation) | `python examples\quickstart.py` |
 | **M5 — done** | Run **tournament or evolution** modes as an event stream; launch curated scenarios | both example scripts |
-| M6 — Streamlit UI | Use the **interactive web app**: scenario picker, parameter panel with tooltips, live mode-aware charts | `streamlit run pdsim/ui/app.py` |
+| **M6 — done** | Use the **interactive web app**: scenario picker, parameter panel with tooltips, live mode-aware charts | `streamlit run pdsim/ui/app.py` |
 | M7 — persistence + CLI | Run headless from a YAML file with results saved to `runs/`; browse past runs in the UI | `python -m pdsim.run my_experiment.yaml` |
 | M8 — polish | Read generated parameter docs; use the RandomK matcher | — |
 
-In short: end-to-end simulations work **today** from the example scripts and
-Python API; the point-and-click experience arrives with **Milestone 6**, and
-one-command YAML runs with saved results with **Milestone 7**.
+In short: the point-and-click experience works **today** (`streamlit run
+pdsim/ui/app.py`), as do the example scripts and the Python API; one-command
+YAML runs with saved results arrive with **Milestone 7**.
 
 ## Repository layout
 
@@ -118,9 +130,9 @@ one-command YAML runs with saved results with **Milestone 7**.
 pdsim/
   core/       # headless engine: game, strategies, dynamics, engine + event stream
   config/     # Parameter Registry + ExperimentConfig + Scenario Registry
-  io/         # run-folder persistence (M7)
-  viz/        # Plotly figure builders (M6)
-  ui/         # Streamlit app (M6)  ← next
+  io/         # run-folder persistence (M7)  ← next
+  viz/        # pure plotly chart builders
+  ui/         # Streamlit app + testable helpers
   tests/      # pytest suite
 examples/     # runnable demos (event-stream consumers)
 docs/         # design spec, roadmap, decision log — the project's source of truth

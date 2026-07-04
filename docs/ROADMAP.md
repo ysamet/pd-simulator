@@ -27,6 +27,7 @@ Milestone order (each lands with tests + docs):
    tournament) with ignored-parameter greying; live updates with granularity
    (round/match/generation) + playback speed; run launcher. No results browser
    yet.
+   ✅ M6 landed 2026-07-04, 303 tests passing.
 7. **Persistence + CLI.** Run folders (config + seed + parquet + summary);
    runs index; headless CLI (`python -m pdsim.run`); results browser in the UI.
 8. **Polish.** `docs/PARAMETERS.md` generation; README quick start; RandomK matcher

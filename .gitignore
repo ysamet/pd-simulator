@@ -15,6 +15,10 @@ build/
 # Simulation output (each run folder holds config + results; see DESIGN.md §8)
 runs/
 
+# Ephemeral session-handoff notes (CLAUDE.md session-continuity protocol) —
+# never committed, never uploaded to the design chat.
+docs/WIP.md
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

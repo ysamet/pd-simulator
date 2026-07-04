@@ -177,16 +177,18 @@ pdsim/
                      #   v2: growth/energy economy, carrying capacity, async/Moran)
     events.py        # typed event dataclasses (see §4)
     engine.py        # run(config, granularity) -> Iterator[Event] (see §4)
+    timeseries.py    # RunTimeseries: folds period events into chart/recorder series
   config/
     registry.py      # Parameter Registry (single source of truth; see §5)
     experiment.py    # ExperimentConfig schema (pydantic); YAML load/save; validation
     scenarios.py     # Scenario Registry: curated presets (see §5.1; v3 scenario home)
   io/
-    results.py       # persistence: run folder = config.yaml + results.parquet + meta
+    results.py       # persistence: run folder = config.yaml + results.parquet + meta (M7)
   viz/
-    charts.py        # Plotly figure builders (composition area, score trajectories, summary)
+    charts.py        # pure builders: RunTimeseries -> plotly figures; summary rows (§4)
   ui/
-    app.py           # Streamlit app: parameter panel (from registry) + live charts
+    app.py           # Streamlit app: scenario picker + generated panel + live charts (§4.1)
+    helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
   tests/             # pytest; includes validation against known results (see §7)
 ```
 
@@ -249,6 +251,47 @@ Consumers:
 - **Recorder** (M7): writes the time series to disk regardless of UI granularity.
 - **Demos**: `examples/quickstart.py` (evolution) and
   `examples/tournament_demo.py` (tournament) show the consumer pattern.
+
+All charting consumers share one intermediate shape: `RunTimeseries`
+(`pdsim/core/timeseries.py`) folds period events into aligned per-strategy
+series (newcomers backfilled, the extinct gap out). It lives in `core` — pure
+data processing, no plotting imports — so M7's recorder can reuse it without
+touching the viz layer (DECISIONS #37). `pdsim/viz/charts.py` holds pure
+builders (`RunTimeseries` in → plotly Figure out; final summaries as plain
+table rows) with a per-strategy color map derived from Strategy Registry
+order, stable across charts, modes, and reruns.
+
+### 4.1 The v1 Streamlit app (`pdsim/ui/app.py`)
+
+Launched with `streamlit run pdsim/ui/app.py`. Layout (NetLogo-style: model on
+top, parameters, live plots below):
+
+1. **Scenario dropdown** — Scenario Registry entries by display name plus
+   "Custom" (registry defaults + an even population split). Selecting loads
+   the scenario's config into the widgets *once*; every widget stays editable
+   (a scenario is a starting point, not a lock — DECISIONS #40) and its
+   question/things-to-try text is shown.
+2. **Generated parameter panel** — built from the Parameter Registry: widget
+   kind from each spec (bool→checkbox, choice→selectbox, numeric→bounded
+   number input, nullable→"limit?" checkbox + input), tooltips from the
+   novice descriptions, one expander per registry section, widget keys =
+   registry keys (DECISIONS #38). Bespoke pieces: the per-strategy
+   composition inputs (names/descriptions from the Strategy Registry, live
+   sum check gating Run) and a per-strategy parameter expander writing only
+   non-default values into `strategy_params` (DECISIONS #41).
+3. **Mode-awareness** — `run.mode` as a prominent radio; ignored parameters
+   are greyed out (never hidden) with a tooltip explaining why (#34).
+4. **Run controls** — granularity (labelled "cycle" at the coarse level in
+   tournament mode), playback delay, Run (disabled while the mix ≠ size),
+   Stop (session-state flag checked per event).
+5. **Live charts** — placeholders redrawn only on period events; fine-grained
+   events advance a progress line, batched every 200 events (DECISIONS #39);
+   after the run, the final summary table and periods-elapsed message.
+
+Config assembly and scenario↔widget mapping live in the Streamlit-free
+`pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences
+via `st.error`. The seed is an ordinary, visible widget: same seed + same
+settings = same charts.
 
 ## 5. Parameter Registry (novice-first explanations)
 
