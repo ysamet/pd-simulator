@@ -137,3 +137,46 @@ this project spans; instructions phrased as explicit triggers and rituals are
 followed far more reliably than general principles. Alternative considered:
 automated enforcement via session hooks — deferred unless instruction-based
 compliance proves insufficient.
+
+**#20 — 2026-07-03 — Noise records executed actions only.** With execution error ε,
+the post-flip (executed) action is the single truth per round: payoffs are computed
+from it, both agents' histories store it, and an agent observes its own executed
+action (your hand trembled; everyone — including you — saw what your hand did).
+Intended actions are discarded. Rationale: DESIGN §2.6 defines ε as *execution*
+error, a realized-world event; one truth per round reserves divergent observations
+cleanly for the future perception-error mechanism. Alternative rejected: the actor
+seeing its intended action — conflates execution error with perception error.
+
+**#21 — 2026-07-03 — Strategies are stateless; §3 contract amended to
+`Strategy.decide(view, rng) -> Action`.** A strategy is a pure function of the
+history view plus the injected RNG; strategies carry no mutable state — all memory
+lives in engine-owned history. Rationale: the `memory_depth` cap (#5) is only
+enforceable if memory is engine-controlled (a stateful GrimTrigger would remember a
+defection forever, silently defeating the cap); the explicit `rng` parameter
+satisfies the seeded-randomness rule for Random(p)/GTFT(g) arriving in M3.
+Documented consequence: under cap k, GrimTrigger means "grim within the visible
+k-round window". Alternatives rejected: mutable per-match strategy state (defeats
+the cap); rng smuggled into the view (the view is knowledge, the rng a capability).
+
+**#22 — 2026-07-03 — History-view semantics.** `round_number` is 0-based and equals
+the true number of rounds recorded against this opponent, cumulative across matches
+within a generation (direct reciprocity per DESIGN §2.2). `memory_depth` truncates
+both move sequences (last k, kept aligned) but never `round_number` — the cap
+constrains memory of behavior, not awareness of time. Views expose moves only: no
+payoffs (every v1 strategy is decidable from moves) and no total match length, so
+fixed-horizon backward induction is impossible from the view alone.
+
+**#23 — 2026-07-03 — Match mechanics.** Fixed per-round RNG draw order for
+reproducibility: decide A, decide B, noise A, noise B, then (continuation mode) the
+continue/stop draw; noise draws occur only when ε > 0. Continuation mode always
+plays at least one round, then continues while `rng.random() < w` (geometric
+length, E[L] = 1/(1−w); w = 0 ⇒ exactly one round). `Match.play` updates agent
+scores/histories as rounds complete and returns a full-transcript `MatchResult`
+(feeds M5's event stream and the §7 golden tests).
+
+**#24 — 2026-07-03 — Core constructors take whole config models.**
+`PrisonersDilemma(GameConfig)`, `Match(game, MatchConfig, rng)`,
+`build_matcher(MatchingConfig)` — validated frozen models cross module boundaries,
+never bare primitives/dicts (CLAUDE.md style rule). Test stub strategies live in
+`pdsim/tests/stub_strategies.py`, not `pdsim/core/strategies/`, which stays
+reserved for M3's auto-discovered roster.

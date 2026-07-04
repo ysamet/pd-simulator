@@ -144,9 +144,11 @@ pdsim/
 
 Key contracts:
 
-- `Strategy.decide(view) -> Action` where `view` exposes: my history vs this opponent,
-  opponent's actions vs me, round number, (optionally, later: public reputation info).
-  Strategies never see engine internals.
+- `Strategy.decide(view, rng) -> Action` where `view` exposes: my history vs this opponent,
+  opponent's actions vs me, round number, (optionally, later: public reputation info);
+  `rng` is the injected seeded generator, so stochastic strategies stay reproducible
+  (see DECISIONS #21). Strategies are stateless — pure functions of (view, rng) — and
+  never see engine internals.
 - `Game.play(actions: Mapping[AgentId, Action]) -> Mapping[AgentId, Payoff]` —
   arity-agnostic so PGG fits the same interface.
 - `Engine.run(config) -> Iterator[Event]` — the engine **yields events** rather than

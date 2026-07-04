@@ -6,9 +6,11 @@ Milestone order (each lands with tests + docs):
 
 1. **Skeleton + registry.** Repo scaffold, `pyproject.toml`, ruff, pytest;
    Parameter Registry; `ExperimentConfig` (pydantic) + YAML load/save.
+   ✅ M1 landed 2026-07-03, 38 tests passing.
 2. **Core game loop.** `Game` ABC + PrisonersDilemma (payoff validation toggles);
    `Strategy` ABC + history views; Agent; Match (fixed rounds + continuation-prob w;
    execution noise ε); RoundRobin matcher.
+   ✅ M2 landed 2026-07-03, 70 tests passing.
 3. **Strategy roster.** The seven v1 strategies with decision-table tests and
    `axelrod` cross-validation.
 4. **Evolutionary dynamics.** Synchronous generations; Fermi selection (β);

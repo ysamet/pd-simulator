@@ -21,8 +21,9 @@ a geographic layer for modeling real-world scenarios. See
 ## Project status
 
 v1 is under construction, milestone by milestone (see
-[docs/ROADMAP.md](docs/ROADMAP.md)). **Currently completed: Milestone 1 of 7**
-(skeleton, Parameter Registry, experiment configuration with YAML load/save).
+[docs/ROADMAP.md](docs/ROADMAP.md)). **Currently completed: Milestone 2 of 7**
+(skeleton + Parameter Registry + experiment configuration; core game loop —
+agents, matches with noise and both length modes, round-robin matching).
 
 ## Requirements
 
@@ -46,7 +47,18 @@ pip install -e ".[dev]"
 
 ## What you can run today
 
-With Milestone 1 complete, the configuration layer is fully functional:
+With Milestone 2 complete, the core game loop works end to end — you can watch
+a round-robin tournament of repeated, noisy Prisoner's Dilemma matches
+(evolution itself arrives with Milestone 4):
+
+```powershell
+python examples\tournament_demo.py
+```
+
+The constants at the top of [examples/tournament_demo.py](examples/tournament_demo.py)
+(seed, noise, continuation probability) are meant to be edited — try them.
+
+The configuration layer is also fully functional:
 
 ```powershell
 pytest                          # run the test suite
@@ -83,7 +95,7 @@ Each milestone unlocks something concrete:
 | After milestone | You will be able to... | How |
 |---|---|---|
 | **M1 — done** | Build/validate/save/load experiment configs; run the test suite | `pytest`; Python API above |
-| M2 — core game loop | Play individual matches between two strategies and inspect the moves and scores | Python API |
+| **M2 — done** | Play matches/tournaments between (stub) strategies and inspect moves and scores | `python examples\tournament_demo.py` |
 | M3 — strategy roster | Use all seven v1 strategies in those matches | Python API |
 | **M4 — evolutionary dynamics** | **Run a full evolutionary simulation** (generations, selection, mutation) | Python API |
 | **M5 — events + persistence** | **Run a simulation with one command from a YAML file**, with results saved to `runs/` | `python -m pdsim.run my_experiment.yaml` |
