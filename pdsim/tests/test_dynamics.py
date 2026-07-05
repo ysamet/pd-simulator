@@ -119,6 +119,7 @@ class TestSingleGeneration:
             index=0,
             composition={"tit_for_tat": 1, "always_defect": 1},
             mean_scores={"tit_for_tat": 2.0, "always_defect": 7.0},
+            rounds_played={"tit_for_tat": 3, "always_defect": 3},
         )
 
     def test_generation_boundary_resets_scores_and_histories(self) -> None:
@@ -324,6 +325,8 @@ class TestTournamentDynamics:
             {"tit_for_tat": 14.0, "always_defect": 19.0},
         ]
         assert reports[-1].mean_scores == {"tit_for_tat": 14.0, "always_defect": 19.0}
+        # Rounds played are cumulative like the scores (DECISIONS #44).
+        assert [r.rounds_played["tit_for_tat"] for r in reports] == [5, 10, 15]
 
     def test_histories_accumulate_across_cycles(self) -> None:
         """The run is one long generation: round_number spans cycles (#34)."""

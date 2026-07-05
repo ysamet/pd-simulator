@@ -136,6 +136,7 @@ def _run_evolution(
             index=report.index,
             composition=report.composition,
             mean_scores=report.mean_scores,
+            rounds_played=report.rounds_played,
         )
     yield RunFinished(
         mode="evolution",
@@ -178,6 +179,7 @@ def _run_tournament(
             composition=report.composition,
             total_scores=report.total_scores,
             mean_scores=report.mean_scores,
+            rounds_played=report.rounds_played,
         )
     yield RunFinished(
         mode="tournament",

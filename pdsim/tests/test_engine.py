@@ -97,6 +97,16 @@ class TestGranularityCounts:
         assert _counts(events) == {"GenerationFinished": GENERATIONS, "RunFinished": 1}
         assert [e.index for e in events if isinstance(e, GenerationFinished)] == [0, 1]
 
+    def test_period_events_carry_exact_rounds_played(self) -> None:
+        """DECISIONS #44: each strategy's agent-rounds for the period.
+
+        Fixed mode, 4 agents: every agent plays 3 opponents x 3 rounds = 9
+        rounds, so each 2-agent strategy logs 18 agent-rounds.
+        """
+        events = list(engine.run(_evolution_config()))
+        first = next(e for e in events if isinstance(e, GenerationFinished))
+        assert first.rounds_played == {"tit_for_tat": 18, "always_defect": 18}
+
     def test_match_granularity_adds_match_events(self) -> None:
         """One MatchFinished per pairing per generation, plus the coarser events."""
         events = list(engine.run(_evolution_config(), granularity="match"))

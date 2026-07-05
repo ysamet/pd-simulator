@@ -225,11 +225,13 @@ unfolds. Five event types (DECISIONS #35):
 - `RoundPlayed` — pair identity, round index, executed actions, payoffs.
 - `MatchFinished` — pair identity, per-agent match totals, match length.
 - `GenerationFinished` (evolution mode) — generation index, population
-  composition (strategy → count), per-strategy mean scores.
+  composition (strategy → count), per-strategy mean scores, and per-strategy
+  rounds played (agent-rounds; the exact per-round denominator — DECISIONS #44).
 - `CycleFinished` (tournament mode) — cycle index, composition (constant), and
-  per-strategy **cumulative** totals + per-agent mean scores. A distinct type
-  from `GenerationFinished` because the payloads differ: a generation reports
-  that generation's scores; a cycle reports run-long cumulative standings.
+  per-strategy **cumulative** totals + per-agent mean scores + rounds played.
+  A distinct type from `GenerationFinished` because the payloads differ: a
+  generation reports that generation's scores; a cycle reports run-long
+  cumulative standings.
 - `RunFinished` — always emitted, exactly once, last: mode, periods completed,
   final composition, and final scores/standings.
 
@@ -286,7 +288,13 @@ top, parameters, live plots below):
    Stop (session-state flag checked per event).
 5. **Live charts** — placeholders redrawn only on period events; fine-grained
    events advance a progress line, batched every 200 events (DECISIONS #39);
-   after the run, the final summary table and periods-elapsed message.
+   after the run, the final summary table and periods-elapsed message. The
+   mean-score chart has a **score view** toggle (DECISIONS #44): "Total" is
+   the raw per-generation/cumulative score selection acts on (scale ≈ payoff
+   × (N−1) × rounds); "Per round" divides by rounds actually played, landing
+   on the payoff-matrix scale so different setups compare directly. The last
+   run's results persist in session state, so flipping the view re-renders
+   without re-running.
 
 Config assembly and scenario↔widget mapping live in the Streamlit-free
 `pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences

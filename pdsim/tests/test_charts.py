@@ -27,6 +27,7 @@ def _evolution_series() -> RunTimeseries:
             index=0,
             composition={"tit_for_tat": 2, "always_defect": 2},
             mean_scores={"tit_for_tat": 2.0, "always_defect": 7.0},
+            rounds_played={"tit_for_tat": 2, "always_defect": 2},
         )
     )
     timeseries.add(
@@ -34,6 +35,7 @@ def _evolution_series() -> RunTimeseries:
             index=1,
             composition={"tit_for_tat": 3, "always_defect": 1},
             mean_scores={"tit_for_tat": 4.0, "always_defect": 6.0},
+            rounds_played={"tit_for_tat": 3, "always_defect": 1},
         )
     )
     return timeseries
@@ -97,6 +99,14 @@ class TestEvolutionCharts:
         figure = charts.mean_score_chart(_evolution_series())
         assert list(figure.data[0].y) == [2.0, 4.0]
         assert "generation" in figure.layout.yaxis.title.text.lower()
+
+    def test_per_round_view_lands_on_the_payoff_scale(self) -> None:
+        """DECISIONS #44: totals / rounds — hand-checked values."""
+        figure = charts.mean_score_chart(_evolution_series(), per_round=True)
+        # Gen 0: TFT total 4.0 over 2 agent-rounds = 2.0/round;
+        # gen 1: total 12.0 over 3 agent-rounds = 4.0/round.
+        assert list(figure.data[0].y) == [2.0, 4.0]
+        assert "per round" in figure.layout.yaxis.title.text.lower()
 
     def test_total_score_chart_is_tournament_only(self) -> None:
         """Evolution has no run-long totals (#31) — asking is an error."""

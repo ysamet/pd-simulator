@@ -115,3 +115,34 @@ class TestTinyRunCompletes:
         assert not app.exception
         assert len(app.success) == 1
         assert "2 generations" in app.success[0].value
+
+    def test_results_persist_and_score_view_toggles_after_the_run(self) -> None:
+        """The score view re-renders the last run without re-running it.
+
+        DECISIONS #44: results persist in session state, so flipping the
+        toggle after a run redraws the same data on the per-round scale.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        app.number_input(key="population.size").set_value(4)
+        for name in (
+            "always_cooperate",
+            "generous_tit_for_tat",
+            "grim_trigger",
+            "pavlov",
+            "random",
+        ):
+            app.number_input(key=f"composition.{name}").set_value(0)
+        app.number_input(key="composition.tit_for_tat").set_value(2)
+        app.number_input(key="composition.always_defect").set_value(2)
+        app.number_input(key="dynamics.generations").set_value(2)
+        app.number_input(key="match.rounds_per_match").set_value(5)
+        app.slider(key="playback_delay").set_value(0.0)
+        app.run()
+        app.button(key="run_button").click()
+        app.run()
+        assert "last_run" in app.session_state
+        app.radio(key="score_view").set_value("per_round")
+        app.run()
+        assert not app.exception  # persisted charts re-rendered per-round

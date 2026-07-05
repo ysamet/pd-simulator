@@ -34,7 +34,7 @@ existing interfaces.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -63,11 +63,16 @@ class GenerationReport:
             population that played this generation.
         mean_scores: Mean end-of-generation score per strategy machine name
             (same keys as ``composition``).
+        rounds_played: Rounds played per strategy this generation, summed
+            over its agents ("agent-rounds") — the exact denominator for a
+            per-round score view, whatever the match-length mode
+            (DECISIONS #44).
     """
 
     index: int
     composition: dict[str, int]
     mean_scores: dict[str, float]
+    rounds_played: dict[str, int] = field(default_factory=dict)
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -199,30 +204,36 @@ class PopulationDynamics:
         Returns:
             Composition counts and mean scores keyed by machine name.
         """
-        counts, totals = _tally_by_strategy(self._population)
+        counts, totals, rounds = _tally_by_strategy(self._population)
         return GenerationReport(
             index=self._generation,
             composition=counts,
             mean_scores={name: totals[name] / counts[name] for name in counts},
+            rounds_played=rounds,
         )
 
 
-def _tally_by_strategy(population: list[Agent]) -> tuple[dict[str, int], dict[str, float]]:
-    """Count agents and sum scores per strategy machine name.
+def _tally_by_strategy(
+    population: list[Agent],
+) -> tuple[dict[str, int], dict[str, float], dict[str, int]]:
+    """Count agents, sum scores, and sum rounds played per strategy.
 
     Args:
         population: The agents to tally.
 
     Returns:
-        Two dicts with identical keys: agent counts and score totals.
+        Three dicts with identical keys: agent counts, score totals, and
+        rounds-played totals (agent-rounds).
     """
     counts: dict[str, int] = {}
     totals: dict[str, float] = {}
+    rounds: dict[str, int] = {}
     for agent in population:
         name = strategy_name_of(agent.strategy)
         counts[name] = counts.get(name, 0) + 1
         totals[name] = totals.get(name, 0.0) + agent.score
-    return counts, totals
+        rounds[name] = rounds.get(name, 0) + agent.rounds_played
+    return counts, totals, rounds
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,12 +251,16 @@ class CycleReport:
             and over ALL cycles so far (scores never reset in a tournament).
         mean_scores: Cumulative mean score per agent, per strategy
             (``total_scores[name] / composition[name]``).
+        rounds_played: Cumulative rounds played per strategy, summed over
+            its agents — cumulative like the scores, since nothing resets
+            in a tournament (DECISIONS #44).
     """
 
     index: int
     composition: dict[str, int]
     total_scores: dict[str, float]
     mean_scores: dict[str, float]
+    rounds_played: dict[str, int] = field(default_factory=dict)
 
 
 class TournamentDynamics:
@@ -315,12 +330,13 @@ class TournamentDynamics:
             result = self._match.play(agent_a, agent_b)
             if on_match is not None:
                 on_match(result)
-        counts, totals = _tally_by_strategy(self._population)
+        counts, totals, rounds = _tally_by_strategy(self._population)
         report = CycleReport(
             index=self._cycle,
             composition=counts,
             total_scores=totals,
             mean_scores={name: totals[name] / counts[name] for name in counts},
+            rounds_played=rounds,
         )
         self._cycle += 1
         return report

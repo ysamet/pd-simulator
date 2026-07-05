@@ -471,3 +471,25 @@ an out-of-context session never reaches its end. Alternative considered:
 relying on per-prompt manual instructions to hand sessions over — rejected as
 unreliable, for the same reason explicit triggers and rituals replaced
 general principles in #19. Codified in `CLAUDE.md` ("Session continuity").
+
+**#44 — 2026-07-04 — Score views: raw totals AND per-round means; period
+events carry rounds played.** Owner observation: the mean-score chart plots
+each strategy's mean *full-generation total* (scale ≈ payoff × (N−1) ×
+rounds_per_match, e.g. ~2,600 at the mutual-cooperation ceiling of a
+30-agent/30-round run), which reads as "everything bunched at the top" even
+though it is exactly the quantity Fermi selection acts on. Decision: keep the
+raw total as the default view (it is selection's input — the theoretically
+honest series) and add a per-round view (total ÷ rounds actually played),
+which lands on the payoff-matrix scale (S..T) and compares across configs;
+the UI gets a "Score view" toggle. To make per-round **exact in both
+match-length modes** (continuation-mode lengths vary), `GenerationFinished`
+and `CycleFinished` now carry `rounds_played` per strategy (agent-rounds),
+computed from a new `Agent.rounds_played` property (histories store all
+rounds; the memory cap only limits views, #22). Tournament per-round =
+cumulative total ÷ cumulative rounds. The last run's `RunTimeseries` is kept
+in Streamlit session state, so toggling the view re-renders finished results
+without re-running (previously any interaction cleared them). Alternatives
+rejected: per-round only (hides what selection sees); config-derived
+denominator (wrong under continuation mode); axis rescaling only (doesn't
+answer "who wins per interaction"). No RNG or result changes — bookkeeping
+only.

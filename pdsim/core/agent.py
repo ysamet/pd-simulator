@@ -60,6 +60,20 @@ class Agent:
         self.score: float = 0.0
         self._histories: dict[AgentId, _PairHistory] = {}
 
+    @property
+    def rounds_played(self) -> int:
+        """Total rounds played against all opponents since the last reset.
+
+        Counts every recorded round once (per participant). Unaffected by
+        ``memory_depth`` — the underlying histories store everything; the
+        cap only limits what strategies *see* (DECISIONS #22). Used to
+        normalize scores to a per-round scale (DECISIONS #44).
+
+        Returns:
+            The number of rounds this agent has played.
+        """
+        return sum(len(history.my_moves) for history in self._histories.values())
+
     def view_of(self, opponent_id: AgentId) -> HistoryView:
         """Build the (possibly capped) history view against one opponent.
 

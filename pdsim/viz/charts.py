@@ -133,16 +133,30 @@ def composition_chart(timeseries: RunTimeseries) -> go.Figure:
     return figure
 
 
-def mean_score_chart(timeseries: RunTimeseries) -> go.Figure:
+def mean_score_chart(timeseries: RunTimeseries, *, per_round: bool = False) -> go.Figure:
     """Per-strategy mean-score trajectories over time (both modes).
+
+    Two views of the same run (DECISIONS #44): the raw totals are exactly
+    what selection sees; the per-round view divides by rounds actually
+    played, landing on the payoff-matrix scale (S..T) so runs with
+    different population sizes and match lengths compare directly.
 
     Args:
         timeseries: The run's accumulated series.
+        per_round: If True, plot mean payoff per round instead of the raw
+            mean score.
 
     Returns:
-        One line per strategy; in evolution mode the per-generation mean,
-        in tournament mode the cumulative mean per agent.
+        One line per strategy; in evolution mode that generation's figure,
+        in tournament mode the cumulative one.
     """
+    if per_round:
+        return _line_chart(
+            timeseries,
+            timeseries.mean_scores_per_round,
+            "Mean payoff per round",
+            "Mean payoff per round",
+        )
     y_title = (
         "Cumulative mean score per agent"
         if timeseries.mode == "tournament"

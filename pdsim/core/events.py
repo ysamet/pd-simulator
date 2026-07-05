@@ -23,7 +23,7 @@ these five" — so consumers dispatch with ``isinstance`` (or
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pdsim.core.game import Action, AgentId, Payoff
 
@@ -72,11 +72,15 @@ class GenerationFinished:
         index: 0-based generation number.
         composition: Agent count per strategy machine name, as played.
         mean_scores: Mean end-of-generation score per strategy machine name.
+        rounds_played: Rounds played per strategy this generation, summed
+            over its agents — the denominator for the per-round score view
+            (DECISIONS #44).
     """
 
     index: int
     composition: dict[str, int]
     mean_scores: dict[str, float]
+    rounds_played: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,12 +96,15 @@ class CycleFinished:
             the run — nothing evolves in a tournament).
         total_scores: Cumulative score per strategy over all cycles so far.
         mean_scores: Cumulative mean score per agent, per strategy.
+        rounds_played: Cumulative rounds played per strategy, summed over
+            its agents (cumulative like the scores — DECISIONS #44).
     """
 
     index: int
     composition: dict[str, int]
     total_scores: dict[str, float]
     mean_scores: dict[str, float]
+    rounds_played: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

@@ -33,6 +33,10 @@ class RunTimeseries:
         mean_scores: Per-strategy mean scores, one value per period
             (that period's mean in evolution; cumulative per-agent mean in
             tournament).
+        mean_scores_per_round: Per-strategy mean payoff per round, one
+            value per period — total score ÷ rounds played, so it lives on
+            the payoff-matrix scale (S..T; DECISIONS #44). ``None`` where a
+            period carried no rounds information.
         total_scores: Per-strategy cumulative totals, one value per period
             (tournament mode only; stays empty in evolution).
         final: The closing ``RunFinished`` event, once it has arrived.
@@ -49,6 +53,7 @@ class RunTimeseries:
         self.periods: list[int] = []
         self.composition: dict[str, list[int]] = {}
         self.mean_scores: dict[str, list[float | None]] = {}
+        self.mean_scores_per_round: dict[str, list[float | None]] = {}
         self.total_scores: dict[str, list[float | None]] = {}
         self.final: RunFinished | None = None
 
@@ -63,11 +68,26 @@ class RunTimeseries:
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
+            # Per-strategy total = mean x count; divide by agent-rounds.
+            per_round = {
+                name: (
+                    mean * event.composition[name] / event.rounds_played[name]
+                    if event.rounds_played.get(name)
+                    else None
+                )
+                for name, mean in event.mean_scores.items()
+            }
+            self._append(self.mean_scores_per_round, per_round, fill=None)
         elif isinstance(event, CycleFinished):
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.total_scores, event.total_scores, fill=None)
+            per_round = {
+                name: (total / event.rounds_played[name] if event.rounds_played.get(name) else None)
+                for name, total in event.total_scores.items()
+            }
+            self._append(self.mean_scores_per_round, per_round, fill=None)
         elif isinstance(event, RunFinished):
             self.final = event
 
@@ -83,7 +103,7 @@ class RunTimeseries:
     def _append(
         self,
         series: dict[str, list],
-        values: dict[str, int] | dict[str, float],
+        values: dict[str, int] | dict[str, float] | dict[str, float | None],
         fill: int | float | None,
     ) -> None:
         """Append one period's values, keeping all series aligned.

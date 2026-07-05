@@ -29,6 +29,21 @@ class TestEvolutionFolding:
         assert timeseries.mean_scores == {"a": [1.0, 2.0, None], "b": [None, 5.0, 6.0]}
         assert timeseries.total_scores == {}  # evolution never fills totals
 
+    def test_per_round_means_divide_by_agent_rounds(self) -> None:
+        """Per-round = (mean x count) / rounds; None without rounds info."""
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(
+            GenerationFinished(
+                index=0,
+                composition={"a": 2, "b": 1},
+                mean_scores={"a": 30.0, "b": 50.0},
+                rounds_played={"a": 20, "b": 10},
+            )
+        )
+        timeseries.add(GenerationFinished(index=1, composition={"a": 3}, mean_scores={"a": 33.0}))
+        assert timeseries.mean_scores_per_round["a"] == [3.0, None]  # no rounds info in gen 1
+        assert timeseries.mean_scores_per_round["b"] == [5.0, None]
+
     def test_fine_events_are_ignored_and_final_is_kept(self) -> None:
         """Only period events build columns; RunFinished is stored."""
         timeseries = RunTimeseries(mode="evolution")
@@ -57,6 +72,29 @@ class TestEvolutionFolding:
 
 class TestTournamentFolding:
     """CycleFinished events also fill the cumulative-totals series."""
+
+    def test_per_round_means_use_cumulative_rounds(self) -> None:
+        """Tournament per-round = cumulative total / cumulative rounds."""
+        timeseries = RunTimeseries(mode="tournament")
+        timeseries.add(
+            CycleFinished(
+                index=0,
+                composition={"a": 1},
+                total_scores={"a": 15.0},
+                mean_scores={"a": 15.0},
+                rounds_played={"a": 5},
+            )
+        )
+        timeseries.add(
+            CycleFinished(
+                index=1,
+                composition={"a": 1},
+                total_scores={"a": 20.0},
+                mean_scores={"a": 20.0},
+                rounds_played={"a": 10},
+            )
+        )
+        assert timeseries.mean_scores_per_round == {"a": [3.0, 2.0]}
 
     def test_totals_and_means_fold_per_cycle(self) -> None:
         """All three series grow one column per cycle."""
