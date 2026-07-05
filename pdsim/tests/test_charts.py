@@ -108,6 +108,22 @@ class TestEvolutionCharts:
         assert list(figure.data[0].y) == [2.0, 4.0]
         assert "per round" in figure.layout.yaxis.title.text.lower()
 
+    def test_whole_game_view_uses_running_averages(self) -> None:
+        """DECISIONS #45: cumulative score / cumulative agents so far.
+
+        TFT: gen 0 total 4.0 over 2 agents; gen 1 total 12.0 over 3 agents
+        → whole-game means [2.0, 16/5 = 3.2].
+        """
+        figure = charts.mean_score_chart(_evolution_series(), whole_game=True)
+        assert list(figure.data[0].y) == [2.0, 3.2]
+        assert "whole game" in figure.layout.title.text.lower()
+
+    def test_whole_game_flag_is_ignored_in_tournament_mode(self) -> None:
+        """Tournament series are already cumulative — same chart either way."""
+        plain = charts.mean_score_chart(_tournament_series())
+        flagged = charts.mean_score_chart(_tournament_series(), whole_game=True)
+        assert [list(t.y) for t in flagged.data] == [list(t.y) for t in plain.data]
+
     def test_total_score_chart_is_tournament_only(self) -> None:
         """Evolution has no run-long totals (#31) — asking is an error."""
         with pytest.raises(ValueError, match="tournament-only"):

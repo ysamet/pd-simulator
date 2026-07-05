@@ -146,3 +146,6 @@ class TestTinyRunCompletes:
         app.radio(key="score_view").set_value("per_round")
         app.run()
         assert not app.exception  # persisted charts re-rendered per-round
+        app.radio(key="time_scope").set_value("whole_game")
+        app.run()
+        assert not app.exception  # and again under the whole-game scope (#45)

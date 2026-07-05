@@ -493,3 +493,20 @@ rejected: per-round only (hides what selection sees); config-derived
 denominator (wrong under continuation mode); axis rescaling only (doesn't
 answer "who wins per interaction"). No RNG or result changes — bookkeeping
 only.
+
+**#45 — 2026-07-04 — Time-scope toggle for the mean-score chart: this
+generation vs whole game (running averages).** Owner request: per-generation
+scores are jumpy; a whole-game view should move gradually. Decision: a second,
+orthogonal "Time scope" toggle. "Whole game" plots running averages over the
+run so far — cumulative score ÷ cumulative agent-generations (total view) and
+cumulative score ÷ cumulative rounds played (per-round view), accumulated in
+`RunTimeseries` (`running_mean_scores`, `running_mean_scores_per_round`,
+evolution mode only). A currently-extinct strategy's whole-game line carries
+forward flat rather than gapping: its accumulated average is unchanged while
+it sits out (unlike the per-generation view, where absence honestly gaps).
+In tournament mode the toggle is greyed out with an explanatory tooltip —
+tournament scores never reset, so the plain series are already whole-game
+figures (the #34 greyed-never-hidden pattern). All four view combinations are
+pure re-renderings of the same run: no engine or payload changes this time,
+and the persisted last run re-renders under any combination without
+re-running (#44).

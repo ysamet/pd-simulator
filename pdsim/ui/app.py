@@ -308,6 +308,7 @@ def _draw_charts(
     right: DeltaGenerator,
     draw_id: int,
     per_round: bool,
+    whole_game: bool,
 ) -> None:
     """Redraw both mode-appropriate charts into their placeholders.
 
@@ -318,6 +319,7 @@ def _draw_charts(
         draw_id: Monotonic counter — Streamlit requires a fresh element key
             for each redraw within one script run.
         per_round: Score view for the mean chart (DECISIONS #44).
+        whole_game: Time scope for the mean chart (DECISIONS #45).
     """
     if not timeseries.periods:
         return
@@ -327,13 +329,19 @@ def _draw_charts(
         left_figure = charts.composition_chart(timeseries)
     left.plotly_chart(left_figure, use_container_width=True, key=f"chart_left_{draw_id}")
     right.plotly_chart(
-        charts.mean_score_chart(timeseries, per_round=per_round),
+        charts.mean_score_chart(timeseries, per_round=per_round, whole_game=whole_game),
         use_container_width=True,
         key=f"chart_right_{draw_id}",
     )
 
 
-def _run_live(config: ExperimentConfig, granularity: str, delay: float, per_round: bool) -> None:
+def _run_live(
+    config: ExperimentConfig,
+    granularity: str,
+    delay: float,
+    per_round: bool,
+    whole_game: bool,
+) -> None:
     """Consume the event stream, updating charts as periods finish.
 
     Batching (DECISIONS #39): charts are rebuilt only on period events —
@@ -347,6 +355,7 @@ def _run_live(config: ExperimentConfig, granularity: str, delay: float, per_roun
         granularity: Finest event level to request from the engine.
         delay: Playback pause (seconds) after each chart refresh.
         per_round: Score view for the mean chart (DECISIONS #44).
+        whole_game: Time scope for the mean chart (DECISIONS #45).
     """
     timeseries = RunTimeseries(mode=config.mode)
     progress = st.empty()
@@ -367,11 +376,11 @@ def _run_live(config: ExperimentConfig, granularity: str, delay: float, per_roun
                 progress.caption(f"... {fine_events} match/round events so far")
         elif isinstance(event, GenerationFinished | CycleFinished):
             draws += 1
-            _draw_charts(timeseries, chart_left, chart_right, draws, per_round)
+            _draw_charts(timeseries, chart_left, chart_right, draws, per_round, whole_game)
             progress.caption(f"{period_label} {event.index + 1} finished")
             if delay > 0:
                 time.sleep(delay)
-    _draw_charts(timeseries, chart_left, chart_right, draws + 1, per_round)
+    _draw_charts(timeseries, chart_left, chart_right, draws + 1, per_round, whole_game)
     note = f"Results of the last run (seed {config.seed})"
     if stopped:
         st.warning("Run stopped — the charts show progress up to the stop.")
@@ -403,7 +412,7 @@ def main() -> None:
         )
 
     tournament = values["run.mode"] == "tournament"
-    col_gran, col_speed, col_view, col_run, col_stop = st.columns([2, 2, 2, 1, 1])
+    col_gran, col_speed, col_view, col_scope, col_run, col_stop = st.columns([2, 2, 2, 2, 1, 1])
     granularity = col_gran.selectbox(
         "Update granularity",
         options=["generation", "match", "round"],
@@ -441,6 +450,22 @@ def main() -> None:
         ),
     )
     per_round = score_view == "per_round"
+    scope = col_scope.radio(
+        "Time scope",
+        options=["generation", "whole_game"],
+        key="time_scope",
+        horizontal=True,
+        disabled=tournament,
+        format_func=lambda s: "This generation" if s == "generation" else "Whole game",
+        help=(
+            "'This generation' plots each generation's own scores — jumpy but "
+            "immediate. 'Whole game' plots the running average over the entire run "
+            "so far, so lines move gradually as evidence accumulates. In tournament "
+            "mode this is greyed out: tournament scores never reset, so they are "
+            "already whole-game figures."
+        ),
+    )
+    whole_game = scope == "whole_game" and not tournament
     run_clicked = col_run.button(
         "Run", type="primary", key="run_button", disabled=mix_total != size
     )
@@ -454,14 +479,14 @@ def main() -> None:
             for message in helpers.validation_messages(error):
                 st.error(message)
         else:
-            _run_live(config, granularity, delay, per_round)
+            _run_live(config, granularity, delay, per_round, whole_game)
     else:
         last = st.session_state.get("last_run")
         if last is not None:
             timeseries = last["timeseries"]
-            st.caption(f"{last['note']} — switch the score view to re-render, or press Run.")
+            st.caption(f"{last['note']} — switch the score views to re-render, or press Run.")
             col_left, col_right = st.columns(2)
-            _draw_charts(timeseries, col_left.empty(), col_right.empty(), 0, per_round)
+            _draw_charts(timeseries, col_left.empty(), col_right.empty(), 0, per_round, whole_game)
             if timeseries.final is not None:
                 st.dataframe(charts.final_summary_rows(timeseries.final), use_container_width=True)
 

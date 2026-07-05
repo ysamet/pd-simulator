@@ -133,29 +133,44 @@ def composition_chart(timeseries: RunTimeseries) -> go.Figure:
     return figure
 
 
-def mean_score_chart(timeseries: RunTimeseries, *, per_round: bool = False) -> go.Figure:
+def mean_score_chart(
+    timeseries: RunTimeseries, *, per_round: bool = False, whole_game: bool = False
+) -> go.Figure:
     """Per-strategy mean-score trajectories over time (both modes).
 
-    Two views of the same run (DECISIONS #44): the raw totals are exactly
-    what selection sees; the per-round view divides by rounds actually
-    played, landing on the payoff-matrix scale (S..T) so runs with
-    different population sizes and match lengths compare directly.
+    Two orthogonal views of the same run (DECISIONS #44/#45):
+
+    * ``per_round`` — divide by rounds actually played, landing on the
+      payoff-matrix scale (S..T) so different setups compare directly;
+      otherwise plot the raw scores selection acts on.
+    * ``whole_game`` — running whole-game-so-far averages instead of each
+      generation's own figure: the lines move gradually as evidence
+      accumulates. Evolution only; in tournament mode the plain series are
+      already whole-game cumulative, so the flag is ignored there.
 
     Args:
         timeseries: The run's accumulated series.
-        per_round: If True, plot mean payoff per round instead of the raw
-            mean score.
+        per_round: If True, plot mean payoff per round.
+        whole_game: If True (evolution), plot running whole-game averages.
 
     Returns:
-        One line per strategy; in evolution mode that generation's figure,
-        in tournament mode the cumulative one.
+        One line per strategy.
     """
+    whole_game = whole_game and timeseries.mode != "tournament"
     if per_round:
+        series = (
+            timeseries.running_mean_scores_per_round
+            if whole_game
+            else timeseries.mean_scores_per_round
+        )
+        title = "Mean payoff per round" + (" (whole game so far)" if whole_game else "")
+        return _line_chart(timeseries, series, title, title)
+    if whole_game:
         return _line_chart(
             timeseries,
-            timeseries.mean_scores_per_round,
-            "Mean payoff per round",
-            "Mean payoff per round",
+            timeseries.running_mean_scores,
+            "Mean scores (whole game so far)",
+            "Mean score per agent-generation, whole game",
         )
     y_title = (
         "Cumulative mean score per agent"

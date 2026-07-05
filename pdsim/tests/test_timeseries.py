@@ -44,6 +44,37 @@ class TestEvolutionFolding:
         assert timeseries.mean_scores_per_round["a"] == [3.0, None]  # no rounds info in gen 1
         assert timeseries.mean_scores_per_round["b"] == [5.0, None]
 
+    def test_running_means_average_over_the_whole_game(self) -> None:
+        """DECISIONS #45: cumulative score / cumulative agents (or rounds).
+
+        Gen 0: strategy "a" totals 60 over 2 agents and 20 rounds; gen 1:
+        totals 99 over 3 agents and 30 rounds. Whole-game so far at gen 1:
+        159/5 = 31.8 per agent-generation, 159/50 = 3.18 per round. A
+        strategy absent from a generation carries forward flat.
+        """
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(
+            GenerationFinished(
+                index=0,
+                composition={"a": 2, "b": 1},
+                mean_scores={"a": 30.0, "b": 50.0},
+                rounds_played={"a": 20, "b": 10},
+            )
+        )
+        timeseries.add(
+            GenerationFinished(
+                index=1,
+                composition={"a": 3},
+                mean_scores={"a": 33.0},
+                rounds_played={"a": 30},
+            )
+        )
+        assert timeseries.running_mean_scores["a"] == [30.0, 31.8]
+        assert timeseries.running_mean_scores_per_round["a"] == [3.0, 3.18]
+        # "b" sat generation 1 out: its whole-game average stays flat.
+        assert timeseries.running_mean_scores["b"] == [50.0, 50.0]
+        assert timeseries.running_mean_scores_per_round["b"] == [5.0, 5.0]
+
     def test_fine_events_are_ignored_and_final_is_kept(self) -> None:
         """Only period events build columns; RunFinished is stored."""
         timeseries = RunTimeseries(mode="evolution")

@@ -289,12 +289,14 @@ top, parameters, live plots below):
 5. **Live charts** — placeholders redrawn only on period events; fine-grained
    events advance a progress line, batched every 200 events (DECISIONS #39);
    after the run, the final summary table and periods-elapsed message. The
-   mean-score chart has a **score view** toggle (DECISIONS #44): "Total" is
-   the raw per-generation/cumulative score selection acts on (scale ≈ payoff
-   × (N−1) × rounds); "Per round" divides by rounds actually played, landing
-   on the payoff-matrix scale so different setups compare directly. The last
-   run's results persist in session state, so flipping the view re-renders
-   without re-running.
+   mean-score chart has two orthogonal toggles (DECISIONS #44/#45): **score
+   view** — "Total" is the raw score selection acts on (scale ≈ payoff ×
+   (N−1) × rounds), "Per round" divides by rounds actually played, landing on
+   the payoff-matrix scale; and **time scope** — "This generation" plots each
+   generation's own figure, "Whole game" plots running averages over the run
+   so far (gradual movement; greyed out in tournament mode, whose scores are
+   already whole-game cumulative). The last run's results persist in session
+   state, so flipping any view re-renders without re-running.
 
 Config assembly and scenario↔widget mapping live in the Streamlit-free
 `pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences

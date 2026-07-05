@@ -37,6 +37,14 @@ class RunTimeseries:
             value per period — total score ÷ rounds played, so it lives on
             the payoff-matrix scale (S..T; DECISIONS #44). ``None`` where a
             period carried no rounds information.
+        running_mean_scores: Whole-game-so-far view (evolution only,
+            DECISIONS #45): cumulative score ÷ cumulative agent-generations
+            up to each period — a running average that moves gradually. A
+            currently-extinct strategy's line carries forward flat (its
+            whole-game average is unchanged while it sits out). Empty in
+            tournament mode, whose plain series are already cumulative.
+        running_mean_scores_per_round: Whole-game per-round view (evolution
+            only): cumulative score ÷ cumulative rounds played.
         total_scores: Per-strategy cumulative totals, one value per period
             (tournament mode only; stays empty in evolution).
         final: The closing ``RunFinished`` event, once it has arrived.
@@ -54,8 +62,14 @@ class RunTimeseries:
         self.composition: dict[str, list[int]] = {}
         self.mean_scores: dict[str, list[float | None]] = {}
         self.mean_scores_per_round: dict[str, list[float | None]] = {}
+        self.running_mean_scores: dict[str, list[float | None]] = {}
+        self.running_mean_scores_per_round: dict[str, list[float | None]] = {}
         self.total_scores: dict[str, list[float | None]] = {}
         self.final: RunFinished | None = None
+        # Whole-game accumulators behind the running_* series (evolution).
+        self._cumulative_scores: dict[str, float] = {}
+        self._cumulative_agents: dict[str, int] = {}
+        self._cumulative_rounds: dict[str, int] = {}
 
     def add(self, event: Event) -> None:
         """Fold one event into the series (ignores fine-grained events).
@@ -78,6 +92,31 @@ class RunTimeseries:
                 for name, mean in event.mean_scores.items()
             }
             self._append(self.mean_scores_per_round, per_round, fill=None)
+            # Whole-game running averages (DECISIONS #45): fold this
+            # generation into the accumulators, then report values for
+            # EVERY strategy seen so far — an extinct strategy's whole-game
+            # average simply stays flat while it sits out.
+            for name, mean in event.mean_scores.items():
+                count = event.composition[name]
+                self._cumulative_scores[name] = (
+                    self._cumulative_scores.get(name, 0.0) + mean * count
+                )
+                self._cumulative_agents[name] = self._cumulative_agents.get(name, 0) + count
+                self._cumulative_rounds[name] = self._cumulative_rounds.get(
+                    name, 0
+                ) + event.rounds_played.get(name, 0)
+            running = {
+                name: score / self._cumulative_agents[name]
+                for name, score in self._cumulative_scores.items()
+            }
+            running_per_round = {
+                name: (score / self._cumulative_rounds[name])
+                if self._cumulative_rounds.get(name)
+                else None
+                for name, score in self._cumulative_scores.items()
+            }
+            self._append(self.running_mean_scores, running, fill=None)
+            self._append(self.running_mean_scores_per_round, running_per_round, fill=None)
         elif isinstance(event, CycleFinished):
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
