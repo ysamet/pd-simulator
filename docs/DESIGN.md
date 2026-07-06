@@ -195,7 +195,8 @@ pdsim/
 Key contracts:
 
 - `Strategy.decide(view, rng) -> Action` where `view` exposes: my history vs this opponent,
-  opponent's actions vs me, round number, (optionally, later: public reputation info);
+  opponent's actions vs me, round number (optionally, later: public reputation
+  info and the opponent's visible attributes — the §6.5 extension surface);
   `rng` is the injected seeded generator, so stochastic strategies stay reproducible
   (see DECISIONS #21). Strategies are stateless — pure functions of (view, rng) — and
   never see engine internals.
@@ -212,9 +213,20 @@ Key contracts:
 - v1 engine is object-per-agent, optimized for readability and debuggability.
   Practical envelope (order of magnitude, 50 rounds/match, round-robin):
   N=100 → several generations/sec; N=300 → seconds/generation; N≥1000 → too slow.
-- The interfaces are designed so a **vectorized NumPy backend** (strategies as batch
-  state machines over arrays) can be added later for N in the thousands (~10–100×).
-  Rule: nothing in configs, UI, or persistence may assume the object backend.
+- The performance strategy has **two independent dimensions** (DECISIONS #46):
+  1. **Faster execution/rendering of a given interaction count.** Engine side:
+     the **vectorized NumPy backend** (strategies as batch state machines over
+     arrays; v2, ~10–100×). UI side: headroom exists in incremental trace
+     updates, series downsampling, and ultimately the §6.4 dashboard
+     migration.
+  2. **Fewer interactions per period**, via sampling matchers behind the
+     existing `Matcher` ABC: **RandomK** (O(N·k) instead of round-robin's
+     O(N²); scoped for M8 per DECISIONS #6) and later **SpatialKernel**.
+- For large N the binding constraint is **match-phase compute, not chart
+  rendering** — round-robin's O(N²) matches dominate long before plotting
+  does; the two dimensions pair to reach thousands of agents at interactive
+  speed.
+- Rule: nothing in configs, UI, or persistence may assume the object backend.
 
 ## 4. Event stream and live visualization
 
@@ -360,11 +372,49 @@ as map visualizations. Implication now: `Agent` carries an optional position att
 from day one; matching is already an interface; the results schema reserves room for
 per-agent spatial snapshots.
 
+**Movement (v3, DECISIONS #46):** positions are not static — agents move over
+time via a `MovementRule` ABC (candidate rules: random walk, drift toward
+similar neighbors, post-interaction relocation), applied on a configurable
+schedule and feeding the same distance-weighted `SpatialKernel` matching.
+Design intent: movement is a **population-dynamics concern, orthogonal to
+strategies** — strategies do not decide movement in the base design (a
+strategy-driven movement variant may become a later option, but the ABC is
+not designed around it).
+
 ### 6.4 GUI evolution
 Streamlit v1 → richer dashboard (Dash or FastAPI+React) when maps and heavy
 interactivity arrive. Safe because of the headless-engine rule (§1.2). YAML configs
 remain first-class alongside the UI forever — they are the batch/scripting interface
 (e.g., scheduled experiment sweeps in Claude Cowork).
+
+### 6.5 Agent attributes and attribute-conditional strategies (v2, with v3 extensions)
+
+Agents carry a generic **attributes mapping** (e.g. color, group membership,
+location-derived tags — extensible key/value data, not hard-coded fields),
+with two per-attribute policies:
+
+- **Visibility**: which attributes an opponent's history view exposes
+  (public tag vs private trait).
+- **Inheritance**: what offspring receive under selection and mutation
+  (copied from the parent, mutated, redrawn, ...).
+
+Strategies may then **condition on the opponent's visible attributes** —
+"cooperate with my color, defect against others" and its relatives. The
+reference frame is the tag-based cooperation / ethnocentrism literature
+(Riolo's tag model; Hammond & Axelrod's ethnocentrism model), which is why
+this pairs naturally with v2's reciprocity machinery (§6.2) and becomes
+richer still once the v3 spatial layer (§6.3) supplies location-derived tags.
+
+Design guards effective **now** (DECISIONS #46):
+
+1. The `Strategy` view contract's optional-extension point (§3) explicitly
+   includes a visible-attributes surface, alongside the reputation extension
+   already anticipated.
+2. Composition, mutation, selection, and charts must not permanently assume
+   **strategy is the only agent dimension** — an agent is a strategy *plus
+   attributes*, and future charts may partition by either.
+3. The M7 persistence schema reserves room for **per-agent attribute
+   snapshots**, exactly as §6.3 already reserves spatial room (see §8).
 
 ## 7. Validation
 
@@ -384,3 +434,6 @@ remain first-class alongside the UI forever — they are the batch/scripting int
   per-strategy counts and score stats; Parquet chosen over CSV for size/speed with
   long runs — pandas reads both trivially), `summary.json`, and exported Plotly HTML
   charts. A `runs/index.csv` catalogs all runs for cross-experiment comparison.
+- The schema must leave room for **per-agent attribute snapshots** (§6.5), the
+  same way it already reserves room for per-agent spatial snapshots (§6.3) —
+  an M7 requirement, not an option (DECISIONS #46).

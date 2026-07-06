@@ -49,12 +49,22 @@ Out of scope for v1 (but nothing may block them): everything below.
   n-player snowdrift; group-size parameter.
 - **Reciprocity machinery for group games:** public reputation, targeted peer
   punishment (costly fines), exclusion.
-- **Vectorized NumPy engine backend** for populations in the thousands.
+- **Agent attributes + attribute-conditional strategies:** generic attributes
+  mapping with visibility and inheritance policies; strategies conditioning on
+  an opponent's visible tags (Riolo tags; Hammond & Axelrod ethnocentrism —
+  richer with the v3 spatial layer). See DESIGN §6.5, DECISIONS #46.
+- **Vectorized NumPy engine backend** for populations in the thousands —
+  paired with sampling matchers (RandomK in M8, SpatialKernel in v3) to reach
+  thousands of agents at interactive speed (see DESIGN §3.1).
 
 ## v3+ — Geography and real-world scenario modeling
 
 - Spatial layer: `Agent.position`, SpatialKernel matcher (distance-weighted
   interaction), configurable initial dispersion.
+- Agent movement over time: `MovementRule` ABC (random walk, drift toward
+  similar neighbors, post-interaction relocation) on a configurable schedule,
+  feeding SpatialKernel matching; movement is population dynamics, not a
+  strategy decision (DESIGN §6.3, DECISIONS #46).
 - Real geographies: countries/states/municipalities (GeoJSON), map visualizations
   of population composition and spread.
 - Scenario modeling toolkit for societal/geopolitical conflicts (asymmetric payoffs,

@@ -510,3 +510,33 @@ figures (the #34 greyed-never-hidden pattern). All four view combinations are
 pure re-renderings of the same run: no engine or payload changes this time,
 and the persisted last run re-renders under any combination without
 re-running (#44).
+
+**#46 — 2026-07-05 — Three future directions logged from owner's hands-on M6
+usage; design guards only, M7/M8 order unchanged, nothing implemented now.**
+(a) **Performance has two independent dimensions** (DESIGN §3.1 updated):
+faster execution/rendering of a given interaction count (v2 vectorized
+backend; UI-side headroom in incremental trace updates, downsampling, and the
+§6.4 dashboard migration) versus fewer interactions per period (sampling
+matchers: RandomK in M8 per #6, SpatialKernel in v3). For large N the binding
+constraint is match-phase compute — round-robin's O(N²) — not chart
+rendering; the two dimensions pair to reach thousands of agents at
+interactive speed (ROADMAP v2 updated). (b) **Agent movement over time is a
+v3 mechanism** (DESIGN §6.3, ROADMAP v3): a `MovementRule` ABC (random walk,
+drift toward similar neighbors, post-interaction relocation) on a
+configurable schedule feeding SpatialKernel matching; movement is a
+population-dynamics concern, orthogonal to strategies — strategies do not
+decide movement in the base design (a strategy-driven variant is a possible
+later option, not a design driver). (c) **Agent attributes +
+attribute-conditional strategies** (new DESIGN §6.5): a generic attributes
+mapping with per-attribute visibility and inheritance policies; strategies
+may condition on an opponent's visible attributes (reference frame: Riolo's
+tag-based cooperation, Hammond & Axelrod's ethnocentrism). Placed under
+**v2** in the ROADMAP (placement call: tags need no geography and pair with
+v2's reciprocity machinery; ethnocentrism variants get richer once v3 adds
+space). Guards effective now: the §3 view contract names visible attributes
+as an extension surface; composition/mutation/selection/charts must not
+permanently assume strategy is the only agent dimension; §8 requires the M7
+persistence schema to reserve per-agent attribute-snapshot room alongside
+the existing spatial reservation. Rationale throughout: owner observations
+from real app usage. Explicit non-decision: M7 (persistence + CLI) and M8
+(polish) proceed unchanged.
