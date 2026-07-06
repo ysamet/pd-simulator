@@ -17,7 +17,9 @@ appears here with zero UI edits.
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 
 import streamlit as st
 from pydantic import ValidationError
@@ -30,6 +32,7 @@ from pdsim.core import engine
 from pdsim.core.events import CycleFinished, GenerationFinished, MatchFinished, RoundPlayed
 from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
+from pdsim.io.results import RunRecorder, delete_run, load_run, rename_run, sync_index
 from pdsim.ui import helpers
 from pdsim.viz import charts
 
@@ -46,6 +49,9 @@ IGNORED_IN_TOURNAMENT = (
     "dynamics.mutation_rate",
 )
 """Widgets greyed out in tournament mode (valid but ignored — DECISIONS #34)."""
+
+RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
+"""Where recordings go; the env override exists for tests (DECISIONS #49)."""
 
 st.set_page_config(page_title="pdsim — Evolutionary Prisoner's Dilemma", layout="wide")
 
@@ -309,6 +315,7 @@ def _draw_charts(
     draw_id: int,
     per_round: bool,
     whole_game: bool,
+    key_prefix: str = "chart",
 ) -> None:
     """Redraw both mode-appropriate charts into their placeholders.
 
@@ -320,6 +327,8 @@ def _draw_charts(
             for each redraw within one script run.
         per_round: Score view for the mean chart (DECISIONS #44).
         whole_game: Time scope for the mean chart (DECISIONS #45).
+        key_prefix: Distinguishes chart elements rendered by different app
+            areas in the same script run (live view vs results browser).
     """
     if not timeseries.periods:
         return
@@ -327,11 +336,11 @@ def _draw_charts(
         left_figure = charts.total_score_chart(timeseries)
     else:
         left_figure = charts.composition_chart(timeseries)
-    left.plotly_chart(left_figure, use_container_width=True, key=f"chart_left_{draw_id}")
+    left.plotly_chart(left_figure, use_container_width=True, key=f"{key_prefix}_left_{draw_id}")
     right.plotly_chart(
         charts.mean_score_chart(timeseries, per_round=per_round, whole_game=whole_game),
         use_container_width=True,
-        key=f"chart_right_{draw_id}",
+        key=f"{key_prefix}_right_{draw_id}",
     )
 
 
@@ -341,6 +350,8 @@ def _run_live(
     delay: float,
     per_round: bool,
     whole_game: bool,
+    record: bool,
+    scenario: str | None,
 ) -> None:
     """Consume the event stream, updating charts as periods finish.
 
@@ -356,7 +367,10 @@ def _run_live(
         delay: Playback pause (seconds) after each chart refresh.
         per_round: Score view for the mean chart (DECISIONS #44).
         whole_game: Time scope for the mean chart (DECISIONS #45).
+        record: Persist this run to a run folder as it streams (#49).
+        scenario: Scenario name for the recording's index row, if any.
     """
+    recorder = RunRecorder(config, out_dir=RUNS_DIR, scenario=scenario) if record else None
     timeseries = RunTimeseries(mode=config.mode)
     progress = st.empty()
     col_left, col_right = st.columns(2)
@@ -370,6 +384,8 @@ def _run_live(
             stopped = True
             break
         timeseries.add(event)
+        if recorder is not None:
+            recorder.add(event)
         if isinstance(event, RoundPlayed | MatchFinished):
             fine_events += 1
             if fine_events % PROGRESS_EVERY == 0:
@@ -385,6 +401,11 @@ def _run_live(
     if stopped:
         st.warning("Run stopped — the charts show progress up to the stop.")
         note += " — stopped early"
+        if recorder is not None:
+            st.caption(
+                f"Stopped runs are not recorded (a reproducible config.yaml was still "
+                f"kept at {recorder.folder})."
+            )
     elif timeseries.final is not None:
         final = timeseries.final
         st.success(
@@ -392,13 +413,199 @@ def _run_live(
             "(same seed + same settings = same charts)."
         )
         st.dataframe(charts.final_summary_rows(final), use_container_width=True)
+        if recorder is not None:
+            folder = recorder.finalize()
+            charts.export_run_charts(recorder.timeseries, folder)
+            st.caption(f"Recorded to {folder} — see the Results browser tab.")
     st.session_state["last_run"] = {"timeseries": timeseries, "note": note}
 
 
-def main() -> None:
-    """Lay out the app: scenario, panel, run controls, live charts."""
-    st.title("Evolutionary Prisoner's Dilemma Simulator")
+def _queue_config_load(folder: str) -> None:
+    """Ask the next script run to load a recorded config (button callback).
+
+    Args:
+        folder: The run folder whose config should fill the panel.
+    """
+    st.session_state["_pending_load"] = folder
+
+
+def _apply_pending_load() -> None:
+    """Load a queued recorded config into the panel, before widgets render.
+
+    The browser's "load into panel" button queues a folder; this runs at
+    the top of the script (widget state may only be written before the
+    widgets are instantiated) and reuses the scenario-loading machinery —
+    the panel lands on "Custom" with the run's exact values (#49).
+    """
+    pending = st.session_state.pop("_pending_load", None)
+    if pending is None:
+        return
+    loaded = load_run(Path(pending))
+    _load_state(
+        helpers.widget_values_from_config(loaded.config),
+        dict(loaded.config.population.composition),
+        loaded.config.strategy_params,
+    )
+    st.session_state["scenario_choice"] = CUSTOM
+    st.session_state["_loaded_scenario"] = CUSTOM
+    st.session_state["_load_note"] = (
+        f"Loaded the config of {Path(pending).name} into the panel — press Run to "
+        "reproduce it exactly, or edit it as a starting point."
+    )
+
+
+def _results_browser() -> None:
+    """Render the results browser: index table, run charts, config loading.
+
+    Lists the run folders that actually exist (folder truth — survives
+    hand-deleted or renamed folders, DECISIONS #50) and reconstructs the
+    selected run via :func:`pdsim.io.results.load_run`; the charts are the
+    same pure builders the live view uses, with their own #44/#45 toggles —
+    pure re-renderings of the persisted raw data.
+    """
+    rows = sync_index(RUNS_DIR)  # also reconciles index.csv with the folders (#52)
+    if not rows:
+        st.info(
+            "No recorded runs yet. Turn on **Record this run** in the Run lab, or "
+            "record one headlessly: `python -m pdsim.run --scenario classic_tournament`."
+        )
+        return
+    st.dataframe(rows, use_container_width=True)
+    run_ids = [str(row["run_id"]) for row in rows]
+    # A widget's own key may only be written BEFORE the widget exists in a
+    # script run, so delete/rename stage the next selection under
+    # "_select_run" and we apply it here, at the top (#52). Explicit
+    # assignment, not pop: Streamlit resurrects popped widget values from
+    # the frontend, which left deleted names showing in the dropdown.
+    staged = st.session_state.pop("_select_run", None)
+    if staged in run_ids:
+        st.session_state["browser_run"] = staged
+    elif st.session_state.get("browser_run") not in run_ids:
+        st.session_state["browser_run"] = run_ids[0]
+    run_id = st.selectbox(
+        "Open a run",
+        options=run_ids,
+        key="browser_run",
+        help=(
+            "Every run folder currently under runs/ (newest first); each can be "
+            "reproduced from its config.yaml."
+        ),
+    )
+    try:
+        loaded = load_run(RUNS_DIR / run_id)
+    except (FileNotFoundError, ValueError, OSError) as error:
+        # E.g. the folder vanished between listing and loading, or a file
+        # inside it is missing/corrupt — report, don't crash.
+        st.error(f"Could not load {run_id}: {error}")
+        return
+    summary = loaded.summary
+    st.caption(
+        f"{summary['mode']} · N={summary['population_size']} · "
+        f"{summary['periods_completed']} periods · seed {summary['seed']} · "
+        f"{summary['headline']} · recorded by pdsim "
+        f"{summary.get('code_version', {}).get('package', '?')}"
+    )
+    tournament = loaded.timeseries.mode == "tournament"
+    col_view, col_scope, col_load, col_delete = st.columns([2, 2, 2, 1])
+    score_view = col_view.radio(
+        "Score view",
+        options=["total", "per_round"],
+        key="browser_score_view",
+        horizontal=True,
+        format_func=lambda view: "Total" if view == "total" else "Per round",
+        help="Same views as the live charts — recomputed from the recorded raw data.",
+    )
+    scope = col_scope.radio(
+        "Time scope",
+        options=["generation", "whole_game"],
+        key="browser_time_scope",
+        horizontal=True,
+        disabled=tournament,
+        format_func=lambda s: "This generation" if s == "generation" else "Whole game",
+        help="Greyed out for tournaments: their scores are already whole-game figures.",
+    )
+    col_load.button(
+        "Load config into panel",
+        key="browser_load",
+        on_click=_queue_config_load,
+        args=(str(RUNS_DIR / run_id),),
+        help="Fills the Run lab panel with this run's exact config (as 'Custom').",
+    )
+    if col_delete.button(
+        "Delete…",
+        key="browser_delete",
+        help="Remove this run's folder and its index entry (asks for confirmation).",
+    ):
+        st.session_state["_confirm_delete"] = run_id
+    if st.session_state.get("_confirm_delete") == run_id:
+        st.warning(
+            f"Permanently delete **{run_id}**? The run folder and its index entry "
+            "will be removed — this cannot be undone."
+        )
+        col_yes, col_no = st.columns([1, 5])
+        if col_yes.button("Yes, delete", key="browser_delete_confirm", type="primary"):
+            try:
+                delete_run(RUNS_DIR, run_id)
+            except OSError as error:
+                # Windows: something briefly holds the folder (an Explorer
+                # window, OneDrive sync, antivirus). Report and let the
+                # user retry — never a traceback (DECISIONS #51).
+                st.error(
+                    f"Could not delete {run_id}: {error}. Something is still "
+                    "holding the folder open — close any Explorer window "
+                    "showing it, give OneDrive a moment to finish syncing, "
+                    "then press 'Yes, delete' again."
+                )
+            else:
+                st.session_state.pop("_confirm_delete", None)
+                remaining = [r for r in run_ids if r != run_id]
+                if remaining:
+                    st.session_state["_select_run"] = remaining[0]
+                st.rerun()
+        if col_no.button("Cancel", key="browser_delete_cancel"):
+            st.session_state.pop("_confirm_delete", None)
+            st.rerun()
+    with st.expander("Rename this run"):
+        new_name = st.text_input(
+            "New folder name",
+            value=run_id,
+            key=f"browser_rename#{run_id}",  # per-run key: switching runs refreshes the field
+            help="Letters, digits, dots, underscores, spaces, and hyphens.",
+        )
+        if st.button("Apply rename", key="browser_rename_apply"):
+            try:
+                final_name = rename_run(RUNS_DIR, run_id, new_name)
+            except (ValueError, FileExistsError, FileNotFoundError) as error:
+                st.error(str(error))
+            except OSError as error:
+                st.error(
+                    f"Could not rename {run_id}: {error}. Something is holding the "
+                    "folder open — close Explorer windows / let OneDrive settle, "
+                    "then try again."
+                )
+            else:
+                st.session_state["_select_run"] = final_name
+                st.rerun()
+    col_left, col_right = st.columns(2)
+    _draw_charts(
+        loaded.timeseries,
+        col_left.empty(),
+        col_right.empty(),
+        0,
+        score_view == "per_round",
+        scope == "whole_game" and not tournament,
+        key_prefix="browser",
+    )
+    if loaded.timeseries.final is not None:
+        st.dataframe(charts.final_summary_rows(loaded.timeseries.final), use_container_width=True)
+
+
+def _run_lab() -> None:
+    """Lay out the live-run experience: scenario, panel, controls, charts."""
     _scenario_area()
+    load_note = st.session_state.pop("_load_note", None)
+    if load_note:
+        st.success(load_note)
     values, composition, strategy_params = _parameter_panel()
 
     mix_total = sum(composition.values())
@@ -450,6 +657,17 @@ def main() -> None:
         ),
     )
     per_round = score_view == "per_round"
+    record = st.checkbox(
+        "Record this run",
+        value=True,
+        key="record_run",
+        help=(
+            "Save the run to a folder under runs/ as it streams: the exact config "
+            "(re-runnable), the raw time series, a summary, and chart exports. "
+            "Recorded runs appear in the Results browser tab. On by default — "
+            "reproducibility is the platform's ethos, and the folders are small."
+        ),
+    )
     scope = col_scope.radio(
         "Time scope",
         options=["generation", "whole_game"],
@@ -479,7 +697,11 @@ def main() -> None:
             for message in helpers.validation_messages(error):
                 st.error(message)
         else:
-            _run_live(config, granularity, delay, per_round, whole_game)
+            # "Custom" is recorded as the scenario label too — a blank
+            # scenario cell in the browser table read as missing data (#52).
+            choice = st.session_state.get("_loaded_scenario")
+            scenario = str(choice) if choice else CUSTOM
+            _run_live(config, granularity, delay, per_round, whole_game, record, scenario)
     else:
         last = st.session_state.get("last_run")
         if last is not None:
@@ -489,6 +711,17 @@ def main() -> None:
             _draw_charts(timeseries, col_left.empty(), col_right.empty(), 0, per_round, whole_game)
             if timeseries.final is not None:
                 st.dataframe(charts.final_summary_rows(timeseries.final), use_container_width=True)
+
+
+def main() -> None:
+    """Lay out the app: the live Run lab and the Results browser tabs."""
+    st.title("Evolutionary Prisoner's Dilemma Simulator")
+    _apply_pending_load()
+    tab_lab, tab_browser = st.tabs(["Run lab", "Results browser"])
+    with tab_lab:
+        _run_lab()
+    with tab_browser:
+        _results_browser()
 
 
 main()

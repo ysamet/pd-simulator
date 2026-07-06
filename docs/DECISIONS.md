@@ -540,3 +540,114 @@ persistence schema to reserve per-agent attribute-snapshot room alongside
 the existing spatial reservation. Rationale throughout: owner observations
 from real app usage. Explicit non-decision: M7 (persistence + CLI) and M8
 (polish) proceed unchanged.
+
+**#47 — 2026-07-06 — Persistence design: raw data only, schema-versioned,
+comment-carried code version.** (a) **Raw-vs-derived**: `timeseries.parquet`
+persists only raw per-period per-strategy rows (period, strategy, agents,
+mean_score, total_score [tournament], rounds_played); derived views —
+per-round means (#44), whole-game running averages (#45) — are recomputed on
+load by refeeding the rebuilt events through `RunTimeseries`, so persisted
+truth is never duplicated and every future derived view works on old
+recordings for free. `RunTimeseries` gained a raw `rounds_played` series to
+support this (extended in core with tests, per #37's sharing intent).
+(b) **Code version**: `pdsim.__version__` plus a best-effort short git hash
+(stdlib subprocess; silently `None` outside a checkout), written into
+`config.yaml` as YAML **comments** — extra keys would be rejected by the
+strict config schema (#18b), comments are invisible to the parser — and
+machine-readably into `summary.json`. (c) **Schema guard** (#46 requirement):
+`summary.json` carries `schema_version` (1); loaders reject newer versions;
+the per-strategy table's file name (`timeseries.parquet`) leaves
+`agents.parquet` free for future per-agent spatial/attribute snapshots — no
+empty columns written today. (d) `config.yaml` is written at recorder
+construction (a crashed run still leaves its reproducible config); a
+recording without a `RunFinished` cannot be finalized (stopped runs never
+masquerade as completed). (e) `runs/index.csv` appends one row per run
+(id, timestamp, mode, N, periods, seed, scenario, headline); concurrent
+writers are out of scope for v1. pandas + pyarrow become explicit main
+dependencies.
+
+**#48 — 2026-07-06 — Orchestration seams: chart export lives in viz; the CLI
+lives at the package top level.** `pdsim/io` never imports plotting code
+(hard rule 4): chart HTML export is `viz.charts.export_run_charts(timeseries,
+folder)` (plotly with CDN-hosted JS, ~10 kB per file), called by the CLI and
+the UI after a recording finalizes — a run folder is complete without charts.
+The CLI is `pdsim/run.py` (`python -m pdsim.run`), matching the command
+documented since M1; it sits outside `io/` because it orchestrates config
+loading + engine + recorder + chart export. It accepts a YAML path or
+`--scenario NAME` (exactly one), plus `--out/--slug/--quiet`; exit codes 0/1;
+validation errors print the same plain-language sentences as the UI by
+reusing `ui.helpers.validation_messages` (kept Streamlit-free by design,
+#38 — reused rather than moved, to avoid churning tested M6 code).
+
+**#49 — 2026-07-06 — Results browser and recording UX.** The app becomes two
+`st.tabs` ("Run lab" / "Results browser") — the lightest Streamlit mechanism
+that keeps one file and one session state; the live-run experience is
+unchanged. **Record this run** is a checkbox in the lab, **default ON**
+(reproducibility is the platform's ethos; folders are small); stopped runs
+are not finalized (config.yaml remains, noted in the UI). The browser lists
+`runs/index.csv` newest-first, reconstructs the selected run via
+`io.results.load_run`, and renders the same pure chart builders with its own
+#44/#45 toggles — pure re-renderings of persisted raw data, the #47 payoff.
+**Load config into panel** shipped (not deferred): a button queues the run's
+folder; the next script run reuses the scenario-loading machinery to fill
+the panel (landing on "Custom") before widgets render. The runs directory is
+overridable via the `PDSIM_RUNS_DIR` environment variable so AppTest suites
+never touch the real `runs/`. AppTest proved able to drive the browser
+(empty state, run rendering, config loading) — no coverage limitation to
+log.
+
+**#50 — 2026-07-06 — Browser lists by folder scan (folder = truth); runs are
+deletable from the app.** Owner-observed bug: the browser listed
+`runs/index.csv`, so hand-deleted or renamed folders left stale dropdown
+entries that crashed on selection. Fixes: (a) the browser now lists via a new
+`io.results.list_runs` — a scan of the runs directory for folders containing
+a readable `summary.json`, carded from that summary with `run_id` taken from
+the *current* folder name (so renamed folders appear under their new names),
+sorted by recorded timestamp; unreadable folders are skipped silently.
+`index.csv` remains the append-only catalog for external analysis and may
+lag hand edits — documented, not reconciled retroactively. (b) The load path
+is guarded: a folder vanishing between listing and loading renders an
+`st.error`, never a traceback. (c) A **Delete…** control in the browser with
+an explicit confirm/cancel step calls `io.results.delete_run`, which removes
+the folder AND its index row (keeping the catalog in sync for app-initiated
+deletions) and refuses anything but a plain direct-child folder name (no
+path traversal). Alternative considered: reconciling `index.csv` against the
+disk on every read — rejected: it silently rewrites a file the owner may be
+analyzing externally, and still misses renames.
+
+**#51 — 2026-07-06 — Deletion must tolerate Windows transient file locks.**
+Owner hit `PermissionError` (WinError 5) deleting a run from the app: plain
+`shutil.rmtree` fails when anything briefly holds a handle inside the folder
+— and this project lives under **OneDrive**, whose sync engine routinely
+holds fresh files, as do Explorer windows and antivirus scans. Fixes:
+`io.results._rmtree_robust` clears read-only attributes and retries with a
+growing delay (6 attempts, ~4 s worst case) before re-raising; the UI wraps
+the delete in a handler that renders a plain-language message with concrete
+advice (close Explorer, let OneDrive settle, press delete again) — never a
+traceback. Tested both ways: a read-only file is recovered automatically; a
+genuinely held handle fails cleanly after retries (Windows-only test).
+Standing note for future file operations in this repo: **the working copy
+sits under OneDrive — any code that deletes or renames run artifacts must
+tolerate transient locks.**
+
+**#52 — 2026-07-06 — Runs-catalog reconciliation, in-app rename, and browser
+polish (supersedes part of #50; owner decisions after hands-on use).**
+(a) **`index.csv` now follows the disk** (reversing #50's append-only
+stance at the owner's direction): `io.results.sync_index` regenerates the
+catalog from the run folders — deleted folders' rows vanish, renamed folders
+appear under their current names — rewriting the file only when stale
+(pointless writes would churn OneDrive sync, #51). The browser calls
+`sync_index` on every render; `delete_run`/`rename_run` call it too, so the
+catalog stays truthful however a run is removed. `RunRecorder.finalize`
+keeps its cheap append. (b) **Stale dropdown fix**: Streamlit resurrects a
+*popped* widget value from the frontend, and a widget's own key may only be
+written before the widget is instantiated in a script run — so delete/rename
+stage the next selection under a separate `_select_run` key and the browser
+applies it at the top of the next run. (c) **In-app rename**:
+`io.results.rename_run(out_dir, run_id, new_name)` — validates a
+filesystem-safe plain name, refuses collisions, retries transient locks
+(#51), updates the `run_id` inside `summary.json`, reconciles the index; the
+browser exposes it as a "Rename this run" expander whose text field is keyed
+per run (switching runs refreshes the prefill). (d) **"Custom" is recorded
+as the scenario label** instead of a blank cell — a blank read as missing
+data in the runs table.

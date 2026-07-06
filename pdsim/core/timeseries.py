@@ -47,6 +47,9 @@ class RunTimeseries:
             only): cumulative score ÷ cumulative rounds played.
         total_scores: Per-strategy cumulative totals, one value per period
             (tournament mode only; stays empty in evolution).
+        rounds_played: Per-strategy rounds played (agent-rounds), one value
+            per period, exactly as the events reported them — raw data the
+            recorder persists (DECISIONS #47).
         final: The closing ``RunFinished`` event, once it has arrived.
     """
 
@@ -65,6 +68,7 @@ class RunTimeseries:
         self.running_mean_scores: dict[str, list[float | None]] = {}
         self.running_mean_scores_per_round: dict[str, list[float | None]] = {}
         self.total_scores: dict[str, list[float | None]] = {}
+        self.rounds_played: dict[str, list[int]] = {}
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -82,6 +86,7 @@ class RunTimeseries:
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
+            self._append(self.rounds_played, event.rounds_played, fill=0)
             # Per-strategy total = mean x count; divide by agent-rounds.
             per_round = {
                 name: (
@@ -121,6 +126,7 @@ class RunTimeseries:
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
+            self._append(self.rounds_played, event.rounds_played, fill=0)
             self._append(self.total_scores, event.total_scores, fill=None)
             per_round = {
                 name: (total / event.rounds_played[name] if event.rounds_played.get(name) else None)

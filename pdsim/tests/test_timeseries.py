@@ -43,6 +43,8 @@ class TestEvolutionFolding:
         timeseries.add(GenerationFinished(index=1, composition={"a": 3}, mean_scores={"a": 33.0}))
         assert timeseries.mean_scores_per_round["a"] == [3.0, None]  # no rounds info in gen 1
         assert timeseries.mean_scores_per_round["b"] == [5.0, None]
+        # The raw rounds series is kept for the recorder (DECISIONS #47).
+        assert timeseries.rounds_played == {"a": [20, 0], "b": [10, 0]}
 
     def test_running_means_average_over_the_whole_game(self) -> None:
         """DECISIONS #45: cumulative score / cumulative agents (or rounds).

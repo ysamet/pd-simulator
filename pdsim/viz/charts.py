@@ -12,6 +12,8 @@ internal.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import plotly.graph_objects as go
 from plotly.colors import qualitative
 
@@ -198,6 +200,35 @@ def total_score_chart(timeseries: RunTimeseries) -> go.Figure:
     return _line_chart(
         timeseries, timeseries.total_scores, "Cumulative total scores", "Total score"
     )
+
+
+def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
+    """Write a run's charts as standalone HTML files into a run folder.
+
+    The chart-export seam (DECISIONS #48): recording (``pdsim/io``) never
+    imports plotting code — the CLI and the UI call this after a recording
+    finalizes, so a run folder is complete without charts and charts are a
+    bonus artifact on top.
+
+    Args:
+        timeseries: The run's accumulated (or reconstructed) series.
+        folder: The run folder to write into.
+
+    Returns:
+        The written file paths (composition or totals, plus mean scores).
+    """
+    if timeseries.mode == "tournament":
+        figures = {"total_scores": total_score_chart(timeseries)}
+    else:
+        figures = {"composition": composition_chart(timeseries)}
+    figures["mean_scores"] = mean_score_chart(timeseries)
+    written = []
+    for name, figure in figures.items():
+        path = folder / f"{name}.html"
+        # include_plotlyjs="cdn" keeps each file ~10 kB instead of ~3 MB.
+        figure.write_html(path, include_plotlyjs="cdn")
+        written.append(path)
+    return written
 
 
 def final_summary_rows(final: RunFinished) -> list[dict[str, object]]:

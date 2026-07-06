@@ -183,12 +183,14 @@ pdsim/
     experiment.py    # ExperimentConfig schema (pydantic); YAML load/save; validation
     scenarios.py     # Scenario Registry: curated presets (see §5.1; v3 scenario home)
   io/
-    results.py       # persistence: run folder = config.yaml + results.parquet + meta (M7)
+    results.py       # RunRecorder + load_run/read_index: run folders (§8)
   viz/
-    charts.py        # pure builders: RunTimeseries -> plotly figures; summary rows (§4)
+    charts.py        # pure builders: RunTimeseries -> plotly figures; summary rows;
+                     #   HTML export seam (§4, §8)
   ui/
-    app.py           # Streamlit app: scenario picker + generated panel + live charts (§4.1)
+    app.py           # Streamlit app: Run lab + Results browser tabs (§4.1, §8)
     helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
+  run.py             # headless CLI: python -m pdsim.run (orchestrates engine+io+viz)
   tests/             # pytest; includes validation against known results (see §7)
 ```
 
@@ -262,7 +264,9 @@ Consumers:
   in evolution mode; cumulative/mean standings in tournament mode; user-chosen
   granularity with playback speed. Fine granularity is for small N;
   per-generation updates for large N.
-- **Recorder** (M7): writes the time series to disk regardless of UI granularity.
+- **Recorder** (`pdsim/io/results.py`): persists the raw time series to a run
+  folder regardless of UI granularity (§8) — used by the CLI and the UI's
+  record control.
 - **Demos**: `examples/quickstart.py` (evolution) and
   `examples/tournament_demo.py` (tournament) show the consumer pattern.
 
@@ -427,13 +431,53 @@ Design guards effective **now** (DECISIONS #46):
 - Statistical sanity checks: with β=0, strategy frequencies follow neutral drift;
   with μ>0, no strategy goes permanently extinct.
 
-## 8. Results and conventions (chosen defaults; see DECISIONS.md #9)
+## 8. Results and persistence (implemented in M7; see DECISIONS #47-#49)
 
-- Each run writes a folder `runs/<timestamp>_<slug>/` containing `config.yaml`
-  (complete, including seed and code version), `timeseries.parquet` (per-generation
-  per-strategy counts and score stats; Parquet chosen over CSV for size/speed with
-  long runs — pandas reads both trivially), `summary.json`, and exported Plotly HTML
-  charts. A `runs/index.csv` catalogs all runs for cross-experiment comparison.
-- The schema must leave room for **per-agent attribute snapshots** (§6.5), the
-  same way it already reserves room for per-agent spatial snapshots (§6.3) —
-  an M7 requirement, not an option (DECISIONS #46).
+Recording is just another event-stream consumer (`pdsim/io/results.py`,
+`RunRecorder`), reusing the same `RunTimeseries` accumulator as the charts.
+Each recorded run is a folder `runs/<timestamp>_<slug>/` (name collisions get
+`-2`, `-3` suffixes) containing:
+
+- **`config.yaml`** — the complete config including seed; this file alone
+  exactly reproduces the run (hard rule 8; `python -m pdsim.run <file>`). The
+  code version (package version + best-effort git hash) is recorded as YAML
+  *comments* at the top — comments survive the strict schema, extra keys
+  would not. Written up front, so even a crashed run leaves its config.
+- **`timeseries.parquet`** — RAW per-period, per-strategy rows only: period,
+  strategy, agents, mean_score, total_score (tournament; NaN in evolution),
+  rounds_played. Derived views (per-round means, whole-game running averages)
+  are deliberately NOT persisted — they are cheap recomputations, and
+  persisting them would duplicate truth (DECISIONS #47). Loading rebuilds the
+  period events and refeeds a fresh `RunTimeseries`, so every derived view is
+  recomputed by the same code the live run used.
+- **`summary.json`** — `schema_version` (currently 1), run id, timestamps,
+  code version, mode, seed, N, periods completed, scenario name (if any),
+  wall-clock duration, headline outcome, and the final
+  composition/means/totals — everything a run card renders without opening
+  the parquet.
+- **Chart HTML exports** — written by the CLI/UI layers via
+  `viz.charts.export_run_charts` (never by `pdsim/io`, hard rule 4); a run
+  folder is complete without them.
+
+A `runs/index.csv` catalogs all runs (recorder appends one row each: id,
+timestamp, mode, N, periods, seed, scenario — "Custom" for custom runs —
+and headline outcome; not guarded against concurrent writers in v1). **The
+folders on disk are the truth**: the UI's browser lists by scanning them
+(`list_runs`) and reconciles the catalog to them on every render
+(`sync_index`, rewritten only when stale), so hand-deleted folders disappear
+and hand-renamed ones show their new names (DECISIONS #50/#52). Runs can be
+deleted (confirmation step, `delete_run`) and renamed (`rename_run`:
+validated names, collision-safe, keeps `summary.json` and the index
+coherent) from the browser.
+
+**Schema guard** (§6.3/§6.5, DECISIONS #46/#47): `summary.json`'s
+`schema_version` plus the file-naming convention — the per-strategy table is
+`timeseries.parquet` so a future per-agent table (`agents.parquet`, for
+spatial and attribute snapshots) can sit alongside without a breaking
+migration. Loaders reject folders written by a newer schema version.
+
+Consumers: the headless CLI (`python -m pdsim.run <config.yaml>` or
+`--scenario NAME`) records every run; the UI's "Record this run" control
+(default ON) records live runs; the UI's Results browser tab lists the index
+and re-renders any recorded run with the full #44/#45 view toggles, and can
+load a recorded config back into the parameter panel.

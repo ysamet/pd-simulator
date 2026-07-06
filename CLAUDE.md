@@ -64,9 +64,10 @@ not have `pdsim` or its dependencies installed.
 
 - Run tests: `pytest`
 - Lint/format: `ruff check . && ruff format .`
-- Demo simulation (until the M5 CLI lands): `python examples/quickstart.py`
 - Launch UI: `streamlit run pdsim/ui/app.py`
-- Headless run: `python -m pdsim.run path/to/config.yaml`
+- Headless recorded run: `python -m pdsim.run path/to/config.yaml` or
+  `python -m pdsim.run --scenario <name>` (folders land in `runs/`)
+- Terminal demos: `python examples/quickstart.py`, `python examples/tournament_demo.py`
 
 (Keep this section updated as tooling lands.)
 

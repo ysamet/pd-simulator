@@ -20,6 +20,9 @@ dependencies = [
     # main dependencies because the v1 product ships with its web UI.
     "plotly>=5.18",
     "streamlit>=1.30",
+    # Persistence layer (M7): parquet time series (DESIGN §8).
+    "pandas>=2.0",
+    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]
