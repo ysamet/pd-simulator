@@ -85,7 +85,16 @@ its configured parameters then apply.
 Behind a `Matcher` interface:
 
 - **RoundRobin** (v1 default): every pair plays one match per generation. O(N²) matches.
-- **RandomK** (v1 if cheap, else v1.5): each agent plays k randomly drawn opponents.
+- **RandomK** (v1, shipped in M8): every agent *initiates* k matches against k
+  distinct opponents drawn uniformly without replacement
+  (`matching.opponents_per_agent`); duplicate pairs across initiators are
+  allowed, so total matches = N·k and per-agent participation varies (k
+  initiated + however often the agent is drawn). Raw scores therefore include
+  participation luck — deliberate: the raw total remains what selection acts
+  on, and the per-round score view is the participation-normalized comparison.
+  All pairings are drawn at the start of the match phase, in agent-id order;
+  k ≤ N−1 is validated cross-parameter, and k is ignored (greyed in the UI)
+  under round_robin. Exact semantics and RNG order: DECISIONS #57.
 - **SpatialKernel** (future): agents have positions; interaction probability decays
   with distance. See §6.3.
 
@@ -191,6 +200,7 @@ pdsim/
     app.py           # Streamlit app: Run lab + Results browser tabs (§4.1, §8)
     helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
   run.py             # headless CLI: python -m pdsim.run (orchestrates engine+io+viz)
+  gendocs.py         # generates docs/PARAMETERS.md from the registries (§5)
   tests/             # pytest; includes validation against known results (see §7)
 ```
 
@@ -223,7 +233,8 @@ Key contracts:
      migration.
   2. **Fewer interactions per period**, via sampling matchers behind the
      existing `Matcher` ABC: **RandomK** (O(N·k) instead of round-robin's
-     O(N²); scoped for M8 per DECISIONS #6) and later **SpatialKernel**.
+     O(N²); shipped in M8 — this dimension's first implementation, DECISIONS
+     #57) and later **SpatialKernel**.
 - For large N the binding constraint is **match-phase compute, not chart
   rendering** — round-robin's O(N²) matches dominate long before plotting
   does; the two dimensions pair to reach thousands of agents at interactive
@@ -298,7 +309,10 @@ top, parameters, live plots below):
    sum check gating Run) and a per-strategy parameter expander writing only
    non-default values into `strategy_params` (DECISIONS #41).
 3. **Mode-awareness** — `run.mode` as a prominent radio; ignored parameters
-   are greyed out (never hidden) with a tooltip explaining why (#34).
+   are greyed out (never hidden) with a tooltip explaining why (#34). The
+   same pattern keys `matching.opponents_per_agent` off the *matcher*
+   widget's current value: k is greyed while round_robin is selected (#57).
+   The greying rules live in the Streamlit-free `ui/helpers.py`.
 4. **Run controls** — granularity (labelled "cycle" at the coarse level in
    tournament mode), playback delay, Run (disabled while the mix ≠ size),
    Stop (session-state flag checked per event).
@@ -332,6 +346,15 @@ more" note. From this registry we generate:
 
 It is structurally impossible for a parameter to exist without an explanation: the
 registry entry *is* the parameter's existence.
+
+`docs/PARAMETERS.md` (implemented in M8, DECISIONS #56) is a **committed,
+generated artifact**: `python -m pdsim.gendocs` (top-level `pdsim/gendocs.py`,
+no UI/plotting imports) renders the Parameter, Strategy, and Scenario
+Registries into it deterministically, and a pytest drift test regenerates the
+document in memory and compares it to the committed file — a stale copy is a
+failing test, the registry's structural-impossibility pattern applied to the
+docs. Committed rather than on-demand because of the knowledge-preservation
+contract: the design chat sees only `docs/` files.
 
 ### 5.1 Scenario Registry (curated presets)
 

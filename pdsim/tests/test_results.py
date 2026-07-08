@@ -112,6 +112,27 @@ class TestRoundTrip:
         folder, _ = _record(config, tmp_path)
         assert load_config(folder / "config.yaml") == config
 
+    @pytest.mark.parametrize("mode", ["evolution", "tournament"])
+    def test_random_k_runs_round_trip(self, mode: str, tmp_path: Path) -> None:
+        """Recorded random_k runs need no recorder changes (DECISIONS #57).
+
+        The recorder only ever sees period events, so a sampled matcher —
+        with its uneven per-agent participation — must persist and reload
+        exactly like round-robin. Verified, not assumed.
+        """
+        data = _config(mode).model_dump()
+        data["matching"] = {"matcher": "random_k", "opponents_per_agent": 3}
+        config = ExperimentConfig.model_validate(data)
+        folder, live = _record(config, tmp_path)
+        loaded = load_run(folder).timeseries
+        assert loaded.periods == live.periods
+        assert loaded.composition == live.composition
+        assert loaded.mean_scores == live.mean_scores
+        assert loaded.rounds_played == live.rounds_played
+        assert loaded.total_scores == live.total_scores
+        assert loaded.final == live.final
+        assert load_config(folder / "config.yaml") == config
+
 
 class TestSchemaGuards:
     """DECISIONS #46/#47: room to grow without breaking migrations."""

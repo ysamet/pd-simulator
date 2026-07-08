@@ -33,6 +33,9 @@ Milestone order (each lands with tests + docs):
    ✅ M7 landed 2026-07-06, 347 tests passing.
 8. **Polish.** `docs/PARAMETERS.md` generation; README quick start; RandomK matcher
    if not already landed.
+   ✅ M8 landed 2026-07-07, 382 tests passing — **v1 complete**: PARAMETERS.md
+   is a committed generated artifact with a drift test (`python -m
+   pdsim.gendocs`, DECISIONS #56); RandomK shipped (DECISIONS #57).
 
 Out of scope for v1 (but nothing may block them): everything below.
 
@@ -55,8 +58,8 @@ Out of scope for v1 (but nothing may block them): everything below.
   an opponent's visible tags (Riolo tags; Hammond & Axelrod ethnocentrism —
   richer with the v3 spatial layer). See DESIGN §6.5, DECISIONS #46.
 - **Vectorized NumPy engine backend** for populations in the thousands —
-  paired with sampling matchers (RandomK in M8, SpatialKernel in v3) to reach
-  thousands of agents at interactive speed (see DESIGN §3.1).
+  paired with sampling matchers (RandomK shipped in v1/M8, SpatialKernel in
+  v3) to reach thousands of agents at interactive speed (see DESIGN §3.1).
 
 ## v3+ — Geography and real-world scenario modeling
 

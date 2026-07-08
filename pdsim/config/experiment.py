@@ -158,12 +158,23 @@ class MatchingConfig(_RegistryBackedModel):
     """Who plays whom each generation (``docs/DESIGN.md`` §2.4).
 
     Attributes:
-        matcher: Matching scheme name; v1 ships ``"round_robin"``.
+        matcher: Matching scheme name — ``"round_robin"`` (every pair plays
+            once) or ``"random_k"`` (each agent initiates matches against k
+            randomly drawn opponents).
+        opponents_per_agent: k for the ``"random_k"`` scheme. Ignored — valid
+            but without effect, consuming no RNG draws — under
+            ``"round_robin"`` (the DECISIONS #34 ignored-parameter pattern).
+            Must be at most N - 1; checked at the experiment level, where the
+            population size is known.
     """
 
-    _registry_keys: ClassVar[dict[str, str]] = {"matcher": "matching.matcher"}
+    _registry_keys: ClassVar[dict[str, str]] = {
+        "matcher": "matching.matcher",
+        "opponents_per_agent": "matching.opponents_per_agent",
+    }
 
     matcher: str = _registry_field("matching.matcher")
+    opponents_per_agent: int = _registry_field("matching.opponents_per_agent")
 
 
 class MatchConfig(_RegistryBackedModel):
@@ -337,6 +348,35 @@ class ExperimentConfig(_RegistryBackedModel):
     population: PopulationConfig
     dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
     strategy_params: dict[str, dict[str, registry.ParamValue]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_matching_fits_population(self) -> Self:
+        """Check that random_k's k fits the population (k at most N - 1).
+
+        A cross-parameter check, like the composition-sum rule: it involves
+        two config sections, so it lives here on the full experiment, where
+        both are visible. Under ``"round_robin"`` the k value is ignored
+        entirely (DECISIONS #34), so no check applies — configs can switch
+        matchers without surgery.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If the matcher is ``"random_k"`` and each agent would
+                need more distinct opponents than the population offers.
+        """
+        if self.matching.matcher == "random_k":
+            k = self.matching.opponents_per_agent
+            available = self.population.size - 1
+            if k > available:
+                raise ValueError(
+                    f"matching.opponents_per_agent is {k}, but in a population of "
+                    f"{self.population.size} each agent has only {available} possible "
+                    "opponents. Lower the opponents per agent (or grow the "
+                    "population) so k is at most N - 1."
+                )
+        return self
 
     @model_validator(mode="after")
     def _check_strategy_params(self) -> Self:

@@ -25,6 +25,55 @@ from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
 # its parameters live at the top level of the config (DECISIONS #34).
 _SECTIONS = ("game", "matching", "match", "population", "dynamics")
 
+IGNORED_IN_TOURNAMENT = (
+    "dynamics.generations",
+    "dynamics.selection_rule",
+    "dynamics.selection_beta",
+    "dynamics.mutation_rate",
+)
+"""Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
+
+
+def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
+    """Decide whether a panel widget is greyed out right now, and why.
+
+    The #34 greyed-never-hidden pattern, centralized: a parameter that the
+    current widget choices make irrelevant is disabled with an explanatory
+    tooltip note — never removed from the panel. Three cases:
+
+    * the four dynamics parameters, ignored in tournament mode;
+    * ``run.tournament_cycles``, ignored in evolution mode;
+    * ``matching.opponents_per_agent``, ignored under round-robin matching
+      (keyed off the matcher widget's current value, not the run mode).
+
+    The app renders widgets in registry order, so by the time a dependent
+    widget renders, the value it keys off (``run.mode``, or
+    ``matching.matcher``) is already in ``values``.
+
+    Args:
+        key: The registry key of the widget about to render.
+        values: The widget values gathered so far this script run.
+
+    Returns:
+        ``(disabled, note)`` — whether to grey the widget out, and the
+        tooltip line explaining why (empty when enabled).
+    """
+    tournament = values.get("run.mode") == "tournament"
+    if key == "run.tournament_cycles" and not tournament:
+        return True, "NOTE: only used in tournament mode — ignored right now."
+    if key in IGNORED_IN_TOURNAMENT and tournament:
+        return True, (
+            "NOTE: this parameter exists but is IGNORED in tournament mode — "
+            "nothing evolves there (see the run-mode help)."
+        )
+    if key == "matching.opponents_per_agent" and values.get("matching.matcher") == "round_robin":
+        return True, (
+            "NOTE: this parameter exists but is IGNORED under round-robin "
+            "matching — every pair plays once anyway. Switch the matching "
+            "scheme to 'random_k' to use it."
+        )
+    return False, ""
+
 
 def panel_specs() -> tuple[ParameterSpec, ...]:
     """Return the specs the generated parameter panel renders.

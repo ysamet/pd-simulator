@@ -118,6 +118,34 @@ class TestPopulationComposition:
             PopulationConfig(size=100, composition={"telepathy": 100})
 
 
+class TestMatchingValidation:
+    """The random_k cross-parameter check (DECISIONS #57)."""
+
+    def test_random_k_accepts_k_up_to_n_minus_one(self) -> None:
+        """The exhaustive edge case k = N - 1 must validate."""
+        cfg = _minimal_config(matching={"matcher": "random_k", "opponents_per_agent": 99})
+        assert cfg.matching.opponents_per_agent == 99
+
+    def test_random_k_rejects_k_beyond_the_population(self) -> None:
+        """Beyond N - 1 opponents, a plain-language cross-parameter error."""
+        with pytest.raises(ValidationError, match="only 99 possible"):
+            _minimal_config(matching={"matcher": "random_k", "opponents_per_agent": 100})
+
+    def test_k_is_ignored_under_round_robin(self) -> None:
+        """The #34 ignored-parameter pattern: oversized k is fine when unused.
+
+        Valid, no effect, no RNG consumed — so configs can switch matchers
+        without surgery and the UI greys k out instead of hiding it.
+        """
+        cfg = _minimal_config(matching={"matcher": "round_robin", "opponents_per_agent": 5000})
+        assert cfg.matching.opponents_per_agent == 5000
+
+    def test_random_k_config_round_trips(self, tmp_path: Path) -> None:
+        """Matching fields survive YAML save/load exactly (hard rule 8)."""
+        cfg = _minimal_config(matching={"matcher": "random_k", "opponents_per_agent": 7})
+        assert load_config(save_config(cfg, tmp_path / "rk.yaml")) == cfg
+
+
 class TestRunMode:
     """The run-mode fields (DECISIONS #34)."""
 

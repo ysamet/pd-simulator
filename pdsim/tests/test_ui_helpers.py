@@ -90,6 +90,48 @@ class TestStrategyParams:
         assert overrides == {"random": {"cooperation_probability": 0.9}}
 
 
+class TestGreying:
+    """Mode- and matcher-aware widget greying (the #34 pattern, plus #57)."""
+
+    def test_dynamics_parameters_grey_out_in_tournament_mode(self) -> None:
+        """Selection/mutation widgets disable with an explanatory note."""
+        disabled, note = helpers.greying("dynamics.selection_beta", {"run.mode": "tournament"})
+        assert disabled
+        assert "tournament" in note
+
+    def test_dynamics_parameters_stay_active_in_evolution_mode(self) -> None:
+        """Evolution mode uses every dynamics parameter."""
+        assert helpers.greying("dynamics.selection_beta", {"run.mode": "evolution"}) == (False, "")
+
+    def test_tournament_cycles_grey_out_in_evolution_mode(self) -> None:
+        """The inverse case: cycles matter only to tournaments."""
+        disabled, note = helpers.greying("run.tournament_cycles", {"run.mode": "evolution"})
+        assert disabled
+        assert "tournament" in note
+
+    def test_opponents_per_agent_greys_out_under_round_robin(self) -> None:
+        """The k widget disables when the MATCHER says round_robin (#57)."""
+        values = {"run.mode": "evolution", "matching.matcher": "round_robin"}
+        disabled, note = helpers.greying("matching.opponents_per_agent", values)
+        assert disabled
+        assert "random_k" in note
+
+    def test_opponents_per_agent_active_under_random_k(self) -> None:
+        """Choosing random_k un-greys k immediately."""
+        values = {"run.mode": "evolution", "matching.matcher": "random_k"}
+        assert helpers.greying("matching.opponents_per_agent", values) == (False, "")
+
+    def test_matcher_greying_is_keyed_off_the_matcher_not_the_mode(self) -> None:
+        """Tournament mode does not grey k — only the matcher choice does."""
+        values = {"run.mode": "tournament", "matching.matcher": "random_k"}
+        disabled, _ = helpers.greying("matching.opponents_per_agent", values)
+        assert not disabled
+
+    def test_unrelated_parameters_never_grey(self) -> None:
+        """Widgets outside the ignored sets are always active."""
+        assert helpers.greying("game.payoff_reward", {"run.mode": "tournament"}) == (False, "")
+
+
 class TestValidationMessages:
     """pydantic errors become plain sentences for st.error."""
 

@@ -42,14 +42,6 @@ CUSTOM = "Custom"
 PROGRESS_EVERY = 200
 """Fine-grained events between progress-line refreshes (DECISIONS #39)."""
 
-IGNORED_IN_TOURNAMENT = (
-    "dynamics.generations",
-    "dynamics.selection_rule",
-    "dynamics.selection_beta",
-    "dynamics.mutation_rate",
-)
-"""Widgets greyed out in tournament mode (valid but ignored — DECISIONS #34)."""
-
 RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
 """Where recordings go; the env override exists for tests (DECISIONS #49)."""
 
@@ -232,15 +224,13 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         help=_help_text(mode_spec),
     )
     values["run.mode"] = mode
-    tournament = mode == "tournament"
     col_seed, col_cycles = st.columns(2)
     with col_seed:
         values["run.seed"] = _widget(specs["run.seed"])
     with col_cycles:
+        disabled, note = helpers.greying("run.tournament_cycles", values)
         values["run.tournament_cycles"] = _widget(
-            specs["run.tournament_cycles"],
-            disabled=not tournament,
-            note="" if tournament else "NOTE: only used in tournament mode — ignored right now.",
+            specs["run.tournament_cycles"], disabled=disabled, note=note
         )
 
     sections: dict[str, list[ParameterSpec]] = {}
@@ -253,13 +243,10 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         with st.expander(section, expanded=section in ("Population", "Dynamics")):
             columns = st.columns(2)
             for i, spec in enumerate(section_specs):
-                disabled = tournament and spec.key in IGNORED_IN_TOURNAMENT
-                note = (
-                    "NOTE: this parameter exists but is IGNORED in tournament mode — "
-                    "nothing evolves there (see the run-mode help)."
-                    if disabled
-                    else ""
-                )
+                # Widgets render in registry order, so the values a widget's
+                # greying keys off (run.mode, matching.matcher) are already
+                # gathered when it renders (helpers.greying, DECISIONS #34).
+                disabled, note = helpers.greying(spec.key, values)
                 with columns[i % 2]:
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
             if section == "Population":

@@ -371,13 +371,46 @@ register(
         key="matching.matcher",
         kind="choice",
         default="round_robin",
-        choices=("round_robin",),
+        choices=("round_robin", "random_k"),
         label="Matching scheme",
         section="Matching",
         description=(
-            "How opponents are paired up each generation. 'round_robin' means every "
-            "agent plays every other agent exactly once per generation. More schemes "
-            "(random opponents, distance-based) arrive in later versions."
+            "How opponents are paired up each generation (or tournament cycle). "
+            "'round_robin' means every agent plays every other agent exactly once — "
+            "thorough, but the match count grows with the SQUARE of the population. "
+            "'random_k' means each agent starts matches against a few randomly drawn "
+            "opponents instead, so big populations stay fast. Distance-based "
+            "matching arrives with the geographic layer in a later version."
+        ),
+        learn_more=(
+            "Round-robin plays about N²/2 matches per period; random_k plays exactly "
+            "N x k. Sampling who meets whom is the first lever for scaling to "
+            "thousands of agents (see docs/DESIGN.md §3.1)."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="matching.opponents_per_agent",
+        kind="int",
+        default=5,
+        minimum=1,
+        maximum=9_999,
+        label="Opponents per agent (k)",
+        section="Matching",
+        description=(
+            "How many randomly drawn opponents each agent starts matches against per "
+            "generation (or tournament cycle) when the matching scheme is "
+            "'random_k'. Every agent initiates this many matches and can ALSO be "
+            "drawn by others, so some agents play more rounds than others — part of "
+            "the model, and the 'per round' score view divides that luck away. Must "
+            "be smaller than the population size. Ignored under 'round_robin', "
+            "where every pair plays anyway."
+        ),
+        learn_more=(
+            "Fewer matches per period is what makes large populations affordable: "
+            "N x k matches instead of round-robin's ~N²/2."
         ),
     )
 )

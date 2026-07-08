@@ -180,6 +180,45 @@ class TestGranularityChangesNothing:
         assert periods["round"] == periods["match"] == periods["generation"]
 
 
+class TestRandomKStreams:
+    """random_k emits well-formed streams in both modes (DECISIONS #57)."""
+
+    K = 2
+
+    def _with_random_k(self, config: ExperimentConfig) -> ExperimentConfig:
+        """Return a copy of a config that matches via random_k.
+
+        Args:
+            config: Any validated experiment config.
+
+        Returns:
+            The same experiment with the matching section swapped.
+        """
+        data = config.model_dump()
+        data["matching"] = {"matcher": "random_k", "opponents_per_agent": self.K}
+        return ExperimentConfig.model_validate(data)
+
+    def test_evolution_stream_is_well_formed(self) -> None:
+        """N·k matches per generation; period events and the closer intact."""
+        events = list(engine.run(self._with_random_k(_evolution_config()), granularity="match"))
+        assert _counts(events) == {
+            "MatchFinished": N_AGENTS * self.K * GENERATIONS,
+            "GenerationFinished": GENERATIONS,
+            "RunFinished": 1,
+        }
+        assert isinstance(events[-1], RunFinished)
+
+    def test_tournament_stream_is_well_formed(self) -> None:
+        """One random_k pass per cycle: N·k matches each, cumulative reports."""
+        events = list(engine.run(self._with_random_k(_tournament_config()), granularity="match"))
+        assert _counts(events) == {
+            "MatchFinished": N_AGENTS * self.K * 2,
+            "CycleFinished": 2,
+            "RunFinished": 1,
+        }
+        assert isinstance(events[-1], RunFinished)
+
+
 class TestModes:
     """Each mode emits its own period event, never the other's."""
 

@@ -700,3 +700,61 @@ a clean run never shows it. The ``finally`` now only performs the deletion
 standing note: session-state messages that must survive a script kill are
 staged *before* the risky section, write-ahead-log style — never from the
 teardown path.
+
+**#56 — 2026-07-07 — `docs/PARAMETERS.md` is a COMMITTED, generated artifact
+guarded by a pytest drift test.** New top-level module `pdsim/gendocs.py`
+(beside `run.py`, the #48 orchestration-seam convention; it imports the
+config and core registries only — no UI or plotting code, hard rule 4),
+runnable as `python -m pdsim.gendocs`, renders the Parameter, Strategy, and
+Scenario Registries into `docs/PARAMETERS.md`: simulation parameters grouped
+by registry section in registry order (key, display name, type,
+range/choices, default, novice description, learn-more note), the strategy
+roster (display/machine names, descriptions, literature notes, per-strategy
+parameters), and the scenarios (names, question explored, things-to-try).
+Zero hand-written parameter text; output is deterministic — registry/
+definition order only, no timestamps or environment content, LF-normalized —
+which is what makes the guard possible: a **drift test** regenerates the
+document in memory and compares it to the committed file, so a stale doc is
+a failing test whose message says to rerun the command and stage the result.
+Rationale: the knowledge-preservation contract (#19) — the design chat sees
+only `docs/` files, so an on-demand-only document is invisible to it; the
+drift test makes staleness structurally impossible, the same pattern that
+makes a parameter-without-explanation impossible in the registry itself.
+Alternatives rejected: generate-on-demand only (invisible to the chat side);
+committing without a drift test (silent staleness).
+
+**#57 — 2026-07-07 — RandomK matcher: semantics, validation, and RNG draw
+order (extends #23/#32 — a seeded-history contract).** The registry's
+`matching.matcher` choice gains `"random_k"` (default stays `"round_robin"`)
+alongside a new `matching.opponents_per_agent` (int, k ≥ 1). Semantics: per
+generation (or tournament cycle — one cycle = one RandomK pass; cumulative
+standings and rounds_played accounting unchanged), every agent INITIATES k
+matches against k DISTINCT opponents drawn uniformly without replacement
+from the other N−1 agents. Duplicate pairs across initiators are allowed
+(A drawing B and B drawing A produces two matches). Total matches = N·k;
+per-agent participation varies (k initiated + however often the agent is
+drawn). Stated consequence: raw generation scores now include participation
+luck — deliberate; the raw total remains what selection acts on (#44's
+theoretical-honesty stance), and the per-round view is the
+participation-normalized comparison (period events already carry the exact
+rounds_played denominator, #44). RNG draw order: at the START of the match
+phase, ALL pairings are drawn in agent-id order — for each initiator, one
+without-replacement draw of k indices (`rng.choice`) over the other agents
+in agent-id order — and matches then play in exactly that order, each
+following #23's per-round order; the matcher draws eagerly (not lazily) so
+pairing draws can never interleave with in-match draws. Selection/mutation
+phases are unchanged (#32); RoundRobin continues to consume zero RNG draws.
+Any change to this pairing draw order changes every seeded random_k run's
+history: breaking change, new DECISIONS entry required. Validation:
+cross-parameter check k ≤ N−1 on `ExperimentConfig` (the composition-sum
+precedent) with a plain-language error; `opponents_per_agent` is IGNORED
+(valid, no effect, no RNG consumed) under round_robin — the #34
+ignored-parameter pattern, so configs switch matchers without surgery. UI:
+the Matching panel generates from the registry as designed (verified — the
+new k widget appeared with zero UI edits); k is greyed (never hidden) while
+the *matcher widget's* current value is round_robin — the first greying
+keyed off another widget rather than run.mode — via a new
+`ui/helpers.greying` function that now centralizes all #34-pattern rules,
+Streamlit-free and unit-tested. Recorder and persistence needed no changes
+(verified by a random_k round-trip test, not assumed); scenario configs are
+untouched (all use the round_robin default).

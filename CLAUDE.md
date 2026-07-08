@@ -67,6 +67,9 @@ not have `pdsim` or its dependencies installed.
 - Launch UI: `streamlit run pdsim/ui/app.py`
 - Headless recorded run: `python -m pdsim.run path/to/config.yaml` or
   `python -m pdsim.run --scenario <name>` (folders land in `runs/`)
+- Regenerate parameter docs: `python -m pdsim.gendocs` (rewrites the committed
+  `docs/PARAMETERS.md`; a pytest drift test fails while it is stale — rerun
+  this after ANY registry change and stage the result)
 - Terminal demos: `python examples/quickstart.py`, `python examples/tournament_demo.py`
 
 (Keep this section updated as tooling lands.)

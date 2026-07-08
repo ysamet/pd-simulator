@@ -16,6 +16,7 @@ from __future__ import annotations
 import itertools
 
 import numpy as np
+import pytest
 
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core.dynamics import (
@@ -38,6 +39,7 @@ def _config(
     generations: int = 5,
     memory_depth: int | None = None,
     strategy_params: dict[str, dict[str, float]] | None = None,
+    matching: dict[str, object] | None = None,
 ) -> ExperimentConfig:
     """Build an experiment config for dynamics tests.
 
@@ -49,6 +51,7 @@ def _config(
         generations: Number of generations to run.
         memory_depth: Optional per-opponent memory cap.
         strategy_params: Optional per-run parameter overrides.
+        matching: Optional matching section (default: round-robin).
 
     Returns:
         A validated config with noise off and fixed-length matches.
@@ -61,6 +64,7 @@ def _config(
                 "memory_depth": memory_depth,
             },
             "match": {"length_mode": "fixed", "rounds_per_match": rounds},
+            "matching": matching or {},
             "dynamics": {
                 "selection_beta": beta,
                 "mutation_rate": mu,
@@ -267,6 +271,7 @@ def _tournament_config(
     *,
     rounds: int = 5,
     cycles: int = 3,
+    matching: dict[str, object] | None = None,
 ) -> ExperimentConfig:
     """Build a tournament-mode config for dynamics tests.
 
@@ -274,6 +279,7 @@ def _tournament_config(
         composition: The fixed cast; population size is its sum.
         rounds: Fixed rounds per match.
         cycles: Number of complete matcher passes.
+        matching: Optional matching section (default: round-robin).
 
     Returns:
         A validated tournament config with noise off.
@@ -284,6 +290,7 @@ def _tournament_config(
             "tournament_cycles": cycles,
             "population": {"size": sum(composition.values()), "composition": composition},
             "match": {"length_mode": "fixed", "rounds_per_match": rounds},
+            "matching": matching or {},
         }
     )
 
@@ -356,3 +363,84 @@ class TestTournamentDynamics:
         # Precondition for the scenario: Random betrayed at least once early.
         assert any(record.actions[random_id].value == "D" for record in cycle_1.rounds)
         assert all(record.actions[grim_id].value == "D" for record in cycle_2.rounds)
+
+
+_RANDOM_K = {"matcher": "random_k", "opponents_per_agent": 3}
+"""The matching section used by the RandomK dynamics tests below."""
+
+
+class TestRandomKDynamics:
+    """The sampled matcher inside both run loops (DECISIONS #57)."""
+
+    @pytest.mark.parametrize("matching", [None, _RANDOM_K])
+    def test_all_tft_population_scores_reward_per_round(
+        self, matching: dict[str, object] | None
+    ) -> None:
+        """Cross-matcher invariant: noise-free all-TFT pays exactly R per round.
+
+        Every round of every match is mutual cooperation, so total score ÷
+        rounds played (the #44 per-round view) must equal R = 3 under BOTH
+        matchers — however unevenly random_k distributes participation.
+        The population size is a power of two, so the mean-score division
+        is float-exact and the equality can be checked exactly.
+        """
+        config = _config({"tit_for_tat": 8}, rounds=5, generations=1, matching=matching)
+        report = PopulationDynamics(config, np.random.default_rng(0)).step()
+        total = report.mean_scores["tit_for_tat"] * report.composition["tit_for_tat"]
+        assert total == 3.0 * report.rounds_played["tit_for_tat"]
+
+    def test_beta_zero_is_neutral_drift_under_random_k(self) -> None:
+        """The β = 0 sanity check holds with sampled matching too.
+
+        Same setup as the round-robin drift test: Always Defect outscores
+        Always Cooperate every generation (participation luck included),
+        yet with β = 0 frequencies only drift around the initial 50%.
+        """
+        config = _config(
+            {"always_cooperate": 10, "always_defect": 10},
+            rounds=1,
+            beta=0.0,
+            mu=0.0,
+            generations=30,
+            matching={"matcher": "random_k", "opponents_per_agent": 5},
+        )
+        reports = list(PopulationDynamics(config, np.random.default_rng(5)).run())
+        cooperate_counts = [report.composition.get("always_cooperate", 0) for report in reports]
+        mean_count = sum(cooperate_counts) / len(cooperate_counts)
+        assert 5.0 <= mean_count <= 15.0  # ~50% ± 25%: drifting, not driven
+
+    def test_rounds_played_equals_the_agents_actual_rounds(self) -> None:
+        """#44's denominator under variable participation, agent by agent.
+
+        The first real test of uneven participation: one random_k tournament
+        cycle, with every match observed via ``on_match``. Each strategy's
+        reported ``rounds_played`` must equal the sum of its own agents'
+        actually-played rounds — reconstructed independently from the match
+        transcripts — and agents genuinely differ in how much they played.
+        """
+        config = _tournament_config(
+            {"tit_for_tat": 3, "always_defect": 3},
+            rounds=4,
+            cycles=1,
+            matching={"matcher": "random_k", "opponents_per_agent": 2},
+        )
+        dynamics = TournamentDynamics(config, np.random.default_rng(2))
+        results: list[MatchResult] = []
+        report = dynamics.step(on_match=results.append)
+
+        assert len(results) == 6 * 2  # N·k matches
+        per_agent: dict[int, int] = {}
+        for result in results:
+            for agent_id in result.agent_ids:
+                per_agent[agent_id] = per_agent.get(agent_id, 0) + result.n_rounds
+        expected: dict[str, int] = {}
+        for agent in dynamics.population:
+            # Tournament agents are never reset, so the agent's own counter
+            # must agree with the transcript reconstruction too.
+            assert agent.rounds_played == per_agent[agent.agent_id]
+            name = strategy_name_of(agent.strategy)
+            expected[name] = expected.get(name, 0) + per_agent[agent.agent_id]
+        assert report.rounds_played == expected
+        # Participation luck is real: initiating k matches each, agents
+        # still differ because being DRAWN varies (DECISIONS #57).
+        assert len(set(per_agent.values())) > 1
