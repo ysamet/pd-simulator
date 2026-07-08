@@ -192,6 +192,19 @@ class RunRecorder:
         """
         self.timeseries.add(event)
 
+    def discard(self) -> None:
+        """Delete the partially-written run folder (a stopped/abandoned run).
+
+        The counterpart of :meth:`finalize` (DECISIONS #53): an explicitly
+        stopped run is a deliberate abandonment, and its half-written folder
+        would otherwise linger as a ghost — on disk but invisible to the
+        browser and the index, which only know finalized runs. Uses the
+        lock-tolerant deleter (#51). Crashes are different: a crashed run
+        never reaches either call, so its ``config.yaml`` folder survives
+        for diagnosis.
+        """
+        _rmtree_robust(self.folder)
+
     def finalize(self) -> Path:
         """Write the parquet, summary, and index row; return the folder.
 

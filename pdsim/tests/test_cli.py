@@ -103,3 +103,32 @@ class TestFailures:
         """A nonexistent path fails cleanly."""
         assert main(["definitely/not/a/file.yaml"]) == 1
         assert "error:" in capsys.readouterr().err
+
+    def test_ctrl_c_discards_the_partial_run(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """DECISIONS #53: an interrupted run leaves no ghost folder.
+
+        Simulates Ctrl+C by making the engine raise KeyboardInterrupt after
+        its first event.
+        """
+        from collections.abc import Iterator
+
+        from pdsim.core import engine
+
+        real_run = engine.run
+
+        def interrupted_run(*args: object, **kwargs: object) -> Iterator[object]:
+            """Yield one real event, then act like Ctrl+C."""
+            yield next(iter(real_run(*args, **kwargs)))
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(engine, "run", interrupted_run)
+        out = tmp_path / "runs"
+        code = main([str(_write_config(tmp_path)), "--out", str(out), "--quiet"])
+        assert code == 130
+        assert "discarded" in capsys.readouterr().err
+        assert not any(p.is_dir() for p in out.iterdir())  # no ghost folder

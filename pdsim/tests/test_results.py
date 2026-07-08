@@ -143,6 +143,19 @@ class TestSchemaGuards:
         with pytest.raises(ValueError, match="RunFinished"):
             recorder.finalize()
 
+    def test_discard_removes_the_partial_folder(self, tmp_path: Path) -> None:
+        """DECISIONS #53: a stopped run leaves no ghost folder behind."""
+        config = _config()
+        recorder = RunRecorder(config, out_dir=tmp_path)
+        for i, event in enumerate(engine.run(config)):
+            recorder.add(event)
+            if i > 2:
+                break  # abandon mid-run, like the UI's Stop button
+        assert recorder.folder.exists()  # config.yaml was written up front
+        recorder.discard()
+        assert not recorder.folder.exists()
+        assert list_runs(tmp_path) == []  # nothing to browse, nothing on disk
+
 
 class TestIndexAndFolders:
     """The runs catalog and folder naming."""

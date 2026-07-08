@@ -109,15 +109,22 @@ def main(argv: list[str] | None = None) -> int:
 
     recorder = RunRecorder(config, out_dir=Path(args.out), slug=args.slug, scenario=scenario)
     period_label = "cycle" if config.mode == "tournament" else "generation"
-    for event in engine.run(config):
-        recorder.add(event)
-        if isinstance(event, GenerationFinished | CycleFinished) and not args.quiet:
-            counts = ", ".join(f"{name}:{n}" for name, n in sorted(event.composition.items()))
-            print(f"{period_label} {event.index + 1}: {counts}")
-        elif isinstance(event, RunFinished):
-            print(f"\nRun complete: {event.completed} {period_label}s, seed {config.seed}.")
-            for row in charts.final_summary_rows(event):
-                print("  " + "  ".join(f"{key}={value}" for key, value in row.items()))
+    try:
+        for event in engine.run(config):
+            recorder.add(event)
+            if isinstance(event, GenerationFinished | CycleFinished) and not args.quiet:
+                counts = ", ".join(f"{name}:{n}" for name, n in sorted(event.composition.items()))
+                print(f"{period_label} {event.index + 1}: {counts}")
+            elif isinstance(event, RunFinished):
+                print(f"\nRun complete: {event.completed} {period_label}s, seed {config.seed}.")
+                for row in charts.final_summary_rows(event):
+                    print("  " + "  ".join(f"{key}={value}" for key, value in row.items()))
+    except KeyboardInterrupt:
+        # Ctrl+C is a deliberate abandonment, like the UI's Stop button:
+        # no ghost folders for partial runs (DECISIONS #53).
+        recorder.discard()
+        print("\nInterrupted — partial run discarded.", file=sys.stderr)
+        return 130  # conventional exit code for SIGINT
     folder = recorder.finalize()
     charts.export_run_charts(recorder.timeseries, folder)
     print(f"\nRecorded to {folder} (re-run exactly: python -m pdsim.run {folder / 'config.yaml'})")

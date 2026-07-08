@@ -442,7 +442,9 @@ Each recorded run is a folder `runs/<timestamp>_<slug>/` (name collisions get
   exactly reproduces the run (hard rule 8; `python -m pdsim.run <file>`). The
   code version (package version + best-effort git hash) is recorded as YAML
   *comments* at the top — comments survive the strict schema, extra keys
-  would not. Written up front, so even a crashed run leaves its config.
+  would not. Written up front, so a *crashed* run leaves its config for
+  diagnosis; an explicitly *stopped* run (UI Stop, CLI Ctrl+C) is discarded
+  — folder deleted, no ghosts (DECISIONS #53).
 - **`timeseries.parquet`** — RAW per-period, per-strategy rows only: period,
   strategy, agents, mean_score, total_score (tournament; NaN in evolution),
   rounds_played. Derived views (per-round means, whole-game running averages)

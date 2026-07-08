@@ -651,3 +651,52 @@ browser exposes it as a "Rename this run" expander whose text field is keyed
 per run (switching runs refreshes the prefill). (d) **"Custom" is recorded
 as the scenario label** instead of a blank cell — a blank read as missing
 data in the runs table.
+
+**#53 — 2026-07-06 — Stopped recordings are discarded, not ghosted.**
+Owner-observed: stopping a recorded run left a folder holding only
+`config.yaml` — on disk but invisible to the browser and index (which know
+only finalized runs). Decision: an explicit stop (the UI's Stop button; the
+CLI's Ctrl+C, which now exits 130) is a deliberate abandonment —
+`RunRecorder.discard()` deletes the partial folder via the lock-tolerant
+deleter (#51), and the UI says so (with delete-by-hand advice if OneDrive
+holds the folder). This refines #47(d): the write-config-up-front behavior
+still protects **crashes** — a crashed run reaches neither `finalize` nor
+`discard`, so its config survives for diagnosis. Alternative considered:
+finalizing stopped runs as partial recordings marked "stopped" — rejected
+for v1 (adds a status dimension to the schema and the browser for little
+value at v1 run lengths; can be revisited if long runs make partial data
+worth keeping).
+
+**#54 — 2026-07-06 — Discard-on-stop must be a try/finally, not a flag branch
+(fixes #53's mechanism; owner-observed).** The #53 implementation discarded
+inside the "stop flag seen" branch — which almost never runs in live
+Streamlit: clicking Stop (or Run mid-run, or changing any widget) makes
+Streamlit **kill the running script** at its next ``st.*`` call by raising a
+control-flow exception; the cooperative flag check and everything after the
+loop are simply never reached (AppTest is synchronous, so tests passed while
+the real app ghosted — the #39 assumption that the rerun interruption was
+merely a "backstop" had it backwards). Fix: the UI run loop is wrapped in
+``try/finally`` with a ``settled`` flag — any exit that neither finalized
+nor deliberately discarded the recording (Stop, mid-run Run click, crash,
+rerun) discards it in ``finally``, and stages a note in session state that
+the *next* script run renders (the killed run cannot draw its own caption).
+Consequence for #53's crash semantics: in the UI, any abnormal end discards
+the partial recording; the crash-keeps-config-for-diagnosis property now
+applies to headless/CLI runs only (where no finally intervenes except
+Ctrl+C). Standing note: **Streamlit kills mid-run scripts on any user
+interaction — cleanup for long-running loops must live in try/finally, and
+messages for the user must be staged via session state.**
+
+**#55 — 2026-07-06 — Interruption banners are write-ahead staged (fixes #54's
+messaging; owner-observed).** #54's banner was written from the dying
+script's ``finally`` — the folder deletion (filesystem) took effect, but the
+session-state write raced the rerun triggered by the very click that killed
+the script, so the banner never appeared. Fix: the "partial folder was
+cleaned up" note is staged **when the recorded run starts** (a moment the
+script is certainly alive) and **cleared on successful finalization**; a
+killed run therefore cannot fail to leave the note for the next render, and
+a clean run never shows it. The ``finally`` now only performs the deletion
+(and best-effort rewrites the note if deletion fails). Refines #54's
+standing note: session-state messages that must survive a script kill are
+staged *before* the risky section, write-ahead-log style — never from the
+teardown path.

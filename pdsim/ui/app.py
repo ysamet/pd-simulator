@@ -371,53 +371,93 @@ def _run_live(
         scenario: Scenario name for the recording's index row, if any.
     """
     recorder = RunRecorder(config, out_dir=RUNS_DIR, scenario=scenario) if record else None
-    timeseries = RunTimeseries(mode=config.mode)
-    progress = st.empty()
-    col_left, col_right = st.columns(2)
-    chart_left, chart_right = col_left.empty(), col_right.empty()
-    period_label = "cycle" if config.mode == "tournament" else "generation"
-    fine_events = 0
-    draws = 0
-    stopped = False
-    for event in engine.run(config, granularity):
-        if st.session_state.get("stop_requested"):
-            stopped = True
-            break
-        timeseries.add(event)
-        if recorder is not None:
-            recorder.add(event)
-        if isinstance(event, RoundPlayed | MatchFinished):
-            fine_events += 1
-            if fine_events % PROGRESS_EVERY == 0:
-                progress.caption(f"... {fine_events} match/round events so far")
-        elif isinstance(event, GenerationFinished | CycleFinished):
-            draws += 1
-            _draw_charts(timeseries, chart_left, chart_right, draws, per_round, whole_game)
-            progress.caption(f"{period_label} {event.index + 1} finished")
-            if delay > 0:
-                time.sleep(delay)
-    _draw_charts(timeseries, chart_left, chart_right, draws + 1, per_round, whole_game)
-    note = f"Results of the last run (seed {config.seed})"
-    if stopped:
-        st.warning("Run stopped — the charts show progress up to the stop.")
-        note += " — stopped early"
-        if recorder is not None:
-            st.caption(
-                f"Stopped runs are not recorded (a reproducible config.yaml was still "
-                f"kept at {recorder.folder})."
-            )
-    elif timeseries.final is not None:
-        final = timeseries.final
-        st.success(
-            f"Run complete: {final.completed} {period_label}s, seed {config.seed} "
-            "(same seed + same settings = same charts)."
+    # The recording is "settled" once it was finalized or deliberately
+    # discarded. Anything else — and in live Streamlit that includes the
+    # Stop button and a mid-run Run click, both of which KILL this script
+    # at its next st.* call rather than setting our flag — lands in the
+    # finally block below, which discards the partial folder (#53/#54).
+    settled = recorder is None
+    if recorder is not None:
+        # Write-ahead note (#55): staged NOW, while this script surely
+        # runs, because a session-state write from the dying script's
+        # finally races the rerun the killing click triggers. Cleared on
+        # successful completion; a killed run leaves it for the next
+        # render to show.
+        st.session_state["_discard_note"] = (
+            "The interrupted run was not recorded — its partial folder was cleaned up."
         )
-        st.dataframe(charts.final_summary_rows(final), use_container_width=True)
-        if recorder is not None:
-            folder = recorder.finalize()
-            charts.export_run_charts(recorder.timeseries, folder)
-            st.caption(f"Recorded to {folder} — see the Results browser tab.")
-    st.session_state["last_run"] = {"timeseries": timeseries, "note": note}
+    try:
+        timeseries = RunTimeseries(mode=config.mode)
+        progress = st.empty()
+        col_left, col_right = st.columns(2)
+        chart_left, chart_right = col_left.empty(), col_right.empty()
+        period_label = "cycle" if config.mode == "tournament" else "generation"
+        fine_events = 0
+        draws = 0
+        stopped = False
+        for event in engine.run(config, granularity):
+            if st.session_state.get("stop_requested"):
+                stopped = True
+                break
+            timeseries.add(event)
+            if recorder is not None:
+                recorder.add(event)
+            if isinstance(event, RoundPlayed | MatchFinished):
+                fine_events += 1
+                if fine_events % PROGRESS_EVERY == 0:
+                    progress.caption(f"... {fine_events} match/round events so far")
+            elif isinstance(event, GenerationFinished | CycleFinished):
+                draws += 1
+                _draw_charts(timeseries, chart_left, chart_right, draws, per_round, whole_game)
+                progress.caption(f"{period_label} {event.index + 1} finished")
+                if delay > 0:
+                    time.sleep(delay)
+        _draw_charts(timeseries, chart_left, chart_right, draws + 1, per_round, whole_game)
+        note = f"Results of the last run (seed {config.seed})"
+        if stopped:
+            st.warning("Run stopped — the charts show progress up to the stop.")
+            note += " — stopped early"
+            if recorder is not None:
+                _discard_recording(recorder)
+                settled = True
+                st.caption(st.session_state.pop("_discard_note", ""))
+        elif timeseries.final is not None:
+            final = timeseries.final
+            st.success(
+                f"Run complete: {final.completed} {period_label}s, seed {config.seed} "
+                "(same seed + same settings = same charts)."
+            )
+            st.dataframe(charts.final_summary_rows(final), use_container_width=True)
+            if recorder is not None:
+                folder = recorder.finalize()
+                settled = True
+                st.session_state.pop("_discard_note", None)  # clean end: no banner
+                charts.export_run_charts(recorder.timeseries, folder)
+                st.caption(f"Recorded to {folder} — see the Results browser tab.")
+        st.session_state["last_run"] = {"timeseries": timeseries, "note": note}
+    finally:
+        if recorder is not None and not settled:
+            _discard_recording(recorder)
+
+
+def _discard_recording(recorder: RunRecorder) -> None:
+    """Discard a partial recording; the banner was write-ahead staged (#55).
+
+    Usually called from a script run Streamlit has already killed (Stop /
+    mid-run Run click), so the success message was staged when the run
+    STARTED; only a deletion failure rewrites it (best-effort — this
+    thread's session writes can race the next render).
+
+    Args:
+        recorder: The recorder whose folder should be removed.
+    """
+    try:
+        recorder.discard()
+    except OSError as error:
+        st.session_state["_discard_note"] = (
+            f"A stopped run's partial folder could not be removed ({error}) — "
+            f"delete {recorder.folder} by hand once OneDrive/Explorer lets go."
+        )
 
 
 def _queue_config_load(folder: str) -> None:
@@ -606,6 +646,9 @@ def _run_lab() -> None:
     load_note = st.session_state.pop("_load_note", None)
     if load_note:
         st.success(load_note)
+    discard_note = st.session_state.pop("_discard_note", None)
+    if discard_note:
+        st.info(discard_note)  # staged by a run Streamlit killed mid-loop (#53)
     values, composition, strategy_params = _parameter_panel()
 
     mix_total = sum(composition.values())

@@ -342,3 +342,57 @@ class TestResultsBrowser:
         assert not app.exception
         cards = list_runs(tmp_path)
         assert cards and cards[0]["scenario"] == "Custom"
+        # A cleanly completed run clears the write-ahead note (#55):
+        # no stray "cleaned up" banner on later renders.
+        app.run()
+        assert not any("cleaned up" in item.value for item in app.info)
+
+    def test_run_killed_mid_stream_leaves_no_ghost_folder(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DECISIONS #53: abnormal termination discards the recording.
+
+        In live Streamlit, Stop (or a mid-run Run click) KILLS the running
+        script rather than setting our flag — modeled here by an engine
+        that dies mid-stream. The try/finally must still discard the
+        partial folder so no ghost is left behind.
+        """
+        from collections.abc import Iterator
+
+        from pdsim.core import engine as core_engine
+
+        real_run = core_engine.run
+
+        def dying_run(*args: object, **kwargs: object) -> Iterator[object]:
+            """Yield a few real events, then die like an interrupted script."""
+            stream = real_run(*args, **kwargs)
+            for _ in range(3):
+                yield next(stream)
+            raise RuntimeError("script killed mid-run")
+
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        monkeypatch.setattr(core_engine, "run", dying_run)
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        app.number_input(key="population.size").set_value(4)
+        for name in (
+            "always_cooperate",
+            "generous_tit_for_tat",
+            "grim_trigger",
+            "pavlov",
+            "random",
+        ):
+            app.number_input(key=f"composition.{name}").set_value(0)
+        app.number_input(key="composition.tit_for_tat").set_value(2)
+        app.number_input(key="composition.always_defect").set_value(2)
+        app.number_input(key="match.rounds_per_match").set_value(5)
+        app.slider(key="playback_delay").set_value(0.0)
+        app.run()  # record_run stays default ON — pointed at tmp_path
+        app.button(key="run_button").click()
+        app.run()
+        assert app.exception  # the mid-run death surfaced
+        assert not any(p.is_dir() for p in tmp_path.iterdir())  # no ghost folder
+        # The staged note shows on the next render.
+        app.run()
+        assert any("partial folder was cleaned up" in item.value for item in app.info)
