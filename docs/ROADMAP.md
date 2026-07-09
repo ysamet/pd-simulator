@@ -54,6 +54,12 @@ variable-N-aware from birth.
   (schema_version bump; DECISIONS #60) and a benchmark rider capturing
   wall-clock per generation across N × matcher, so the vectorization
   trigger becomes data.
+  ✅ M9a (part 1 of 2) landed 2026-07-08: the four selection rules
+  (DECISIONS #63), the ScoreAccounting seam with sliding-window and
+  exponential-discount options (DECISIONS #64), and the benchmark rider
+  (`python -m pdsim.bench`) — spec:
+  `docs/specs/M09a-selection-accounting-bench.md`; 440 tests passing.
+  Remaining: M9b — pairwise cooperation-rate recording (#60).
 - **M9.5 — Sweep/search layer** (DECISIONS #59). SweepSpec YAML config
   families (base config + parameter/composition/seed axes), a parallel
   batch runner (`python -m pdsim.sweep`, multiprocessing across runs), the

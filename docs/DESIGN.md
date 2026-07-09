@@ -126,6 +126,15 @@ Per-match round count, two modes (both in v1, UI-selectable):
   sampling and RNG-order semantics in DECISIONS #32.
   - **β = selection intensity**: 0 → pure drift (score irrelevant);
     large → near-deterministic copying of higher scorers. First-class experimental knob.
+  - **Four further rules** shipped in M9a behind the same interface
+    (semantics, draw orders, and tie-breaks pinned in DECISIONS #63):
+    **proportional** (roulette on min-shifted weights), **tournament_k**
+    (k-candidate contests per slot; k ≤ N cross-validated; unrelated to the
+    tournament run mode), **truncation** (elitist: parents drawn from the
+    top-q elite), and **threshold_cloning** (agents at or above θ·mean keep
+    their slots; the rest are refilled from the survivor set). Every rule
+    consumes the **effective** score supplied by score accounting (below);
+    each rule's parameters are ignored (greyed in the UI) under other rules.
 - **Mutation**: with probability **μ**, a newly produced agent receives a uniformly
   random strategy from the enabled roster instead of the copied one (strategy-switch
   mutation). In v1 the enabled roster is the **full registered roster** — mutation may
@@ -133,12 +142,16 @@ Per-match round count, two modes (both in v1, UI-selectable):
   with the run's `strategy_params` (DECISIONS #30/#32). μ=0 ⇒ perfect cloning.
   Parameter-perturbation mutation (Gaussian noise on continuous strategy parameters,
   enabling true strategy evolution) is a v2 mode behind the same reproduction interface.
-- **Score accounting**: scores reset each generation (v1), and per-opponent histories
-  reset with them — selection changes who your neighbors are, so remembered
-  relationships would be stale (DECISIONS #31). Cumulative / sliding-window /
-  exponentially discounted accounting are future `ScoreAccounting` options.
-- Additional selection rules planned behind the same interface: fitness-proportional
-  (roulette), tournament(k), truncation/elitist, threshold-based cloning (see §6.1).
+- **Score accounting** (`pdsim/core/accounting.py`, M9a — DECISIONS #64): a
+  `ScoreAccounting` rule folds each generation's raw scores into per-slot
+  state and supplies the **effective** scores selection consumes —
+  `per_generation` (default: identity, exactly the classic behavior),
+  `sliding_window` (mean of the last W generations), or
+  `exponential_discount` (EMA with discount λ). Accounting state belongs to
+  the agent slot and survives strategy switches; it consumes no RNG draws
+  and is invisible outside the selection phase — raw scores still reset
+  each generation (DECISIONS #31) and remain what events, charts, and
+  persistence report. Cumulative accounting stays a future option (§6.1).
 
 ### 2.8 Randomness
 
@@ -179,7 +192,10 @@ pdsim/
     agent.py         # Agent: identity, strategy instance, score, history store
     matcher.py       # Matcher ABC; RoundRobin; RandomK; (future: SpatialKernel)
     match.py         # plays one match (length mode, noise ε) between participants
-    selection.py     # SelectionRule ABC; Fermi; (future: proportional, tournament, ...)
+    selection.py     # SelectionRule ABC; Fermi, proportional, tournament_k,
+                     #   truncation, threshold_cloning (M9a, DECISIONS #63)
+    accounting.py    # ScoreAccounting ABC; per_generation, sliding_window,
+                     #   exponential_discount (M9a, DECISIONS #64)
     reproduction.py  # StrategySwitchReproduction (mutation μ); (v2: perturbation)
     dynamics.py      # run loops: PopulationDynamics + GenerationReport (evolution);
                      #   TournamentDynamics + CycleReport (tournament) (fixed size v1;
@@ -201,6 +217,7 @@ pdsim/
     helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
   run.py             # headless CLI: python -m pdsim.run (orchestrates engine+io+viz)
   gendocs.py         # generates docs/PARAMETERS.md from the registries (§5)
+  bench.py           # benchmark rider: python -m pdsim.bench (§3.1 trigger data)
   tests/             # pytest; includes validation against known results (see §7)
 ```
 
@@ -245,6 +262,10 @@ Key contracts:
   rendering** — round-robin's O(N²) matches dominate long before plotting
   does; the first two dimensions pair to reach thousands of agents at
   interactive speed.
+- The vectorization trigger is **empirical** (DECISIONS #58): the M9a
+  benchmark rider, `python -m pdsim.bench`, measures median wall-clock
+  seconds per generation across an N × matcher grid — that data, not
+  intuition, decides when the vectorized backend gets built.
 - Rule: nothing in configs, UI, or persistence may assume the object backend.
 
 ## 4. Event stream and live visualization

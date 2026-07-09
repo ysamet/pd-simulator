@@ -885,3 +885,117 @@ Note: (b) extends a docs/specs convention whose founding DECISIONS entry
 is expected from the M9a session, which has NOT yet run — this is a
 deliberate forward reference; when that session lands its convention
 entry, it should reference this one and reconcile.
+
+**#62 — 2026-07-08 — The docs/specs/ convention (founding entry; reconciles
+#61's forward reference).** `docs/specs/` holds milestone-sized
+implementation specs. Conventions:
+- **Naming**: `M<zero-padded milestone><letter>-<slug>.md` (first instance:
+  `M09a-selection-accounting-bench.md`).
+- **Status line**: each spec opens with `Status: draft | in progress |
+  implemented (see DECISIONS #...)`, updated as work proceeds.
+- **Frozen intent**: a spec is authoritative until its milestone lands.
+  Deviations discovered during implementation are logged in DECISIONS.md;
+  the spec is NOT retro-edited beyond its status line. After landing,
+  DESIGN.md/DECISIONS.md are the truth and the spec remains as historical
+  record.
+- **Contract membership**: specs are part of the knowledge-preservation
+  contract (CLAUDE.md's advisor standard already names `docs/specs/*`) —
+  they count as docs for the DOCS CHANGED ritual and are uploaded to the
+  design chat's project knowledge.
+- **Scope**: small fixes still travel as plain prompts; specs are for
+  milestone-scale work.
+Per #61(b), every spec carries a `## Validation` section written at spec
+time (app-first), and the division of labor stands: the design chat
+delivers milestone work as a single Claude Code prompt that FIRST creates
+the spec file and THEN implements it — the spec, not the chat prompt, is
+the durable statement of intent. This is the founding convention entry
+that #61 forward-referenced; #61's two conventions stand unchanged
+within it.
+
+**#63 — 2026-07-08 — Four new selection rules: pinned semantics and RNG
+draw orders (M9a; extends #32 — seeded-history contracts).** All four plug
+into the existing `SelectionRule` ABC via `dynamics.selection_rule`, keep
+#32's synchronous frame (all N slot decisions against the same scored
+population, applied simultaneously; the mutation phase runs identically
+after every rule; Fermi is untouched), and consume the EFFECTIVE score
+supplied by score accounting (#64). Tie-breaks are always deterministic,
+never a random draw. Any change to these semantics is breaking and
+requires a new entry.
+- **proportional** (roulette): weights `w_i = s_i - min(s)` — the shift is
+  mandatory because scores can be negative; documented consequence: the
+  worst scorer has weight 0 and is never drawn. All scores equal ⇒
+  all-zero weights ⇒ uniform fallback. Per slot, in slot order: exactly
+  one weighted index draw (`rng.choice` with the normalized weights).
+  Always N draws.
+- **tournament_k**: machine name deliberately NOT "tournament" — it must
+  not collide with `run.mode="tournament"`, and the registry description
+  disambiguates the two in plain language. New parameter
+  `dynamics.selection_tournament_k` (int ≥ 2, default 3), cross-parameter
+  validated k ≤ N at the ExperimentConfig level (#57 precedent). The check
+  applies only when the rule is selected AND the mode is evolution — in
+  tournament mode every dynamics parameter is inert and ignored parameters
+  are never validation errors (#34). Per slot, in slot order: one
+  without-replacement draw of k candidate indices
+  (`rng.choice(n, size=k, replace=False)` over agent-id order); winner =
+  highest effective score among the candidates; ties break to the earliest
+  position in the drawn array.
+- **truncation** (elitist): new parameter
+  `dynamics.selection_elite_fraction` (float, 0 < q ≤ 1, default 0.2).
+  To express q > 0 the registry's `ParameterSpec` gained a
+  `minimum_exclusive` bound — the mirror of #18(d)'s `maximum_exclusive`.
+  `elite_count = max(1, floor(q·N))`; elite membership and order: sort by
+  (effective score descending, agent id ascending) — boundary ties go to
+  the lower agent id. Per slot, in slot order: one uniform draw of an
+  index into that ordered elite list. Always N draws.
+- **threshold_cloning**: new parameter
+  `dynamics.selection_threshold_multiplier` (float θ, 0 ≤ θ ≤ 10, default
+  1.0). Survivor set = agents with effective score ≥ θ·mean effective
+  score; if empty (possible when θ > 1, and also with θ < 1 when the mean
+  is negative), the survivor set is all agents tied at the maximum.
+  Surviving slots keep their own strategy and consume NO draw; each
+  non-surviving slot, in slot order, consumes one uniform draw of an index
+  into the survivor list (ascending agent-id order). The draw count is
+  data-conditional — a deterministic function of the scores, the #26
+  precedent (GTFT's conditional draw), not a reproducibility hazard.
+UI: `ui/helpers.greying` maps each rule parameter to its owning rule,
+keyed off the selection-rule widget's current value (the #57
+matcher-keyed pattern) — and this includes `selection_beta`: β is fermi's
+parameter and now greys under the other rules, a natural extension beyond
+the spec's "new rules' parameters" (logged here as the one deliberate
+spec-plus). Everything stays visible (#34 greyed-never-hidden).
+
+**#64 — 2026-07-08 — ScoreAccounting: interface and pinned semantics
+(M9a; DESIGN §2.7's seam becomes code).** The seam existed only as prose;
+it is now `pdsim/core/accounting.py`: a `ScoreAccounting` ABC with one
+method — `effective_scores(raw_scores) -> tuple[float, ...]` — called
+exactly once per generation, between the match phase and the selection
+phase; `PopulationDynamics` folds the raw scores through it and hands the
+result to the selection rule. Everything else is unchanged: raw
+per-generation scores, the #31 resets, event payloads, charts,
+persistence — accounting is invisible outside the selection phase in M9
+(surfacing effective scores in events/charts is a possible later
+addition; noted, not built). Pinned semantics:
+- **State belongs to the agent SLOT** and survives strategy switches from
+  selection or mutation — it models the fitness inertia of the lineage
+  occupying the slot. Rejected alternative: reset accounting state on
+  strategy change — ill-defined, because copying your own strategy from a
+  same-strategy model is not a detectable "switch".
+- `dynamics.score_accounting` choices: **per_generation** (default;
+  identity — exactly v1 behavior); **sliding_window**
+  (`dynamics.accounting_window`, int W ≥ 1, default 5): effective = MEAN
+  of the last min(W, generations so far) raw generation scores, current
+  included — mean rather than sum keeps the scale comparable across W
+  values and during warmup, since β interacts with score scale; W = 1 ≡
+  per_generation; **exponential_discount**
+  (`dynamics.accounting_discount`, float 0 ≤ λ < 1, default 0.5):
+  effective(t) = (1−λ)·raw(t) + λ·effective(t−1), effective(0) = raw(0) —
+  the EMA form is scale-stable (a constant raw score is a fixed point at
+  any λ); λ = 0 ≡ per_generation.
+- Greying (#34): W greyed unless sliding_window, λ greyed unless
+  exponential_discount (keyed off the accounting widget), and the whole
+  accounting group is inert in tournament mode — verified by a test that
+  two tournament streams differing only in accounting are byte-identical.
+- RNG: accounting consumes zero draws. With per_generation selected,
+  every seeded v1 run is byte-identical to the pre-M9a engine — enforced
+  by a regression test pinning a 10-generation composition trajectory
+  captured by running the same config on the M8 code (commit b169cf7).

@@ -59,9 +59,12 @@ class ParameterSpec:
         description: Plain-language explanation written for a non-expert.
             This is mandatory and is the text users see as a tooltip.
         section: UI grouping, e.g. ``"Game"`` or ``"Dynamics"``.
-        minimum: Inclusive lower bound (numeric kinds only).
+        minimum: Lower bound (numeric kinds only); inclusive unless
+            ``minimum_exclusive`` is set.
         maximum: Upper bound (numeric kinds only); inclusive unless
             ``maximum_exclusive`` is set.
+        minimum_exclusive: If True, the value must be strictly above
+            ``minimum`` (used e.g. for fractions that must stay > 0).
         maximum_exclusive: If True, the value must be strictly below
             ``maximum`` (used e.g. for probabilities that must stay < 1).
         choices: Allowed values (``"choice"`` kind only).
@@ -78,6 +81,7 @@ class ParameterSpec:
     section: str
     minimum: float | None = None
     maximum: float | None = None
+    minimum_exclusive: bool = False
     maximum_exclusive: bool = False
     choices: tuple[str, ...] | None = None
     nullable: bool = False
@@ -114,6 +118,8 @@ class ParameterSpec:
             )
         if self.maximum_exclusive and self.maximum is None:
             raise ValueError(f"Parameter {self.key!r} sets maximum_exclusive without a maximum.")
+        if self.minimum_exclusive and self.minimum is None:
+            raise ValueError(f"Parameter {self.key!r} sets minimum_exclusive without a minimum.")
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError(f"Parameter {self.key!r} has minimum > maximum.")
         # The default must satisfy the spec — validated here so a bad
@@ -162,8 +168,13 @@ class ParameterSpec:
             raise ValueError(f"{self._name()} expects a whole number, got {value!r}.")
 
         number = float(value)
-        if self.minimum is not None and number < self.minimum:
-            raise ValueError(f"{self._name()} must be at least {self.minimum}, got {value!r}.")
+        if self.minimum is not None:
+            if self.minimum_exclusive and number <= self.minimum:
+                raise ValueError(
+                    f"{self._name()} must be strictly above {self.minimum}, got {value!r}."
+                )
+            if not self.minimum_exclusive and number < self.minimum:
+                raise ValueError(f"{self._name()} must be at least {self.minimum}, got {value!r}.")
         if self.maximum is not None:
             if self.maximum_exclusive and number >= self.maximum:
                 raise ValueError(
@@ -563,14 +574,27 @@ register(
         key="dynamics.selection_rule",
         kind="choice",
         default="fermi",
-        choices=("fermi",),
+        choices=("fermi", "proportional", "tournament_k", "truncation", "threshold_cloning"),
         label="Selection rule",
         section="Dynamics",
         description=(
             "How the next generation is chosen from the current one. 'fermi' "
             "(pairwise comparison) repeatedly picks two random agents and has the "
             "first copy the second's strategy with a probability that grows with "
-            "the score difference. More rules arrive in v2."
+            "the score difference and the selection intensity. 'proportional' "
+            "(roulette wheel) draws each new agent's parent with a weight based on "
+            "how far its score sits above the generation's worst. 'tournament_k' "
+            "holds a mini-contest for every slot: a few randomly drawn candidates, "
+            "the best scorer wins — despite the name, this has NOTHING to do with "
+            "the tournament RUN MODE (which switches selection off entirely); it "
+            "is simply this rule's traditional name. 'truncation' (elitist) only "
+            "copies from the top slice of scorers. 'threshold_cloning' keeps every "
+            "agent scoring above a threshold and replaces the rest with copies of "
+            "those survivors."
+        ),
+        learn_more=(
+            "Fermi comes from statistical physics; roulette and tournament "
+            "selection from genetic algorithms; truncation from selective breeding."
         ),
     )
 )
@@ -585,13 +609,75 @@ register(
         label="Selection intensity (β)",
         section="Dynamics",
         description=(
-            "How strongly scores drive selection. At 0, scores are ignored and "
-            "strategies spread by pure luck (random drift). The higher the value, "
-            "the more reliably higher-scoring strategies get copied. This is the "
-            "main knob for sweeping between 'luck' and 'meritocracy'."
+            "How strongly scores drive selection when the selection rule is "
+            "'fermi'. At 0, scores are ignored and strategies spread by pure luck "
+            "(random drift). The higher the value, the more reliably "
+            "higher-scoring strategies get copied. This is the main knob for "
+            "sweeping between 'luck' and 'meritocracy'. Ignored under the other "
+            "selection rules."
         ),
         learn_more=(
             "This is the temperature-like β in the Fermi update rule from statistical physics."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.selection_tournament_k",
+        kind="int",
+        default=3,
+        minimum=2,
+        maximum=10_000,
+        label="Tournament size (k)",
+        section="Dynamics",
+        description=(
+            "How many randomly drawn candidates compete for each next-generation "
+            "slot when the selection rule is 'tournament_k'. The best scorer among "
+            "the candidates wins the slot. Bigger values mean stronger selection "
+            "pressure — with k equal to the whole population, the top scorer wins "
+            "every slot. Cannot exceed the population size. Not related to the "
+            "tournament run mode. Ignored under other selection rules."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.selection_elite_fraction",
+        kind="float",
+        default=0.2,
+        minimum=0.0,
+        minimum_exclusive=True,
+        maximum=1.0,
+        label="Elite fraction (q)",
+        section="Dynamics",
+        description=(
+            "The top share of scorers that the 'truncation' selection rule copies "
+            "from. At 0.2, only the best-scoring 20% of agents can be parents — "
+            "every next-generation agent is a copy of someone from that elite. At "
+            "least one agent always qualifies, and 1.0 means everyone does. Must "
+            "be above 0. Ignored under other selection rules."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.selection_threshold_multiplier",
+        kind="float",
+        default=1.0,
+        minimum=0.0,
+        maximum=10.0,
+        label="Survival threshold (x mean score)",
+        section="Dynamics",
+        description=(
+            "The survival bar for the 'threshold_cloning' selection rule, as a "
+            "multiple of the generation's mean score. Agents at or above the bar "
+            "keep their strategies; everyone else becomes a copy of a random "
+            "survivor. At 1.0, scoring at least average means survival; higher "
+            "values are stricter (if nobody clears the bar, the top scorers "
+            "survive). Ignored under other selection rules."
         ),
     )
 )
@@ -610,6 +696,71 @@ register(
             "to copy and instead adopts a random strategy from the enabled roster. "
             "A small rate keeps 'extinct' strategies able to reappear; 0 means "
             "perfect copying."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.score_accounting",
+        kind="choice",
+        default="per_generation",
+        choices=("per_generation", "sliding_window", "exponential_discount"),
+        label="Score accounting",
+        section="Dynamics",
+        description=(
+            "Which score selection looks at. 'per_generation' uses only the "
+            "current generation's score — the classic setting. 'sliding_window' "
+            "uses the average of the last few generations, so one lucky or unlucky "
+            "generation matters less. 'exponential_discount' uses a running "
+            "average in which older generations fade out gradually. Only what "
+            "selection sees changes — the charts keep showing the raw "
+            "per-generation scores. Ignored in tournament mode, where nothing is "
+            "selected."
+        ),
+        learn_more=(
+            "Score memory smooths selection pressure — useful under random_k "
+            "matching, where per-generation scores include participation luck."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.accounting_window",
+        kind="int",
+        default=5,
+        minimum=1,
+        maximum=100_000,
+        label="Accounting window (W)",
+        section="Dynamics",
+        description=(
+            "How many recent generations are averaged when score accounting is "
+            "'sliding_window'. The score selection sees is the mean of the last W "
+            "generation scores (fewer while the run is younger than W). A window "
+            "of 1 behaves exactly like per-generation accounting. Ignored under "
+            "other accounting choices."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.accounting_discount",
+        kind="float",
+        default=0.5,
+        minimum=0.0,
+        maximum=1.0,
+        maximum_exclusive=True,
+        label="Accounting discount (λ)",
+        section="Dynamics",
+        description=(
+            "How much of the past is kept when score accounting is "
+            "'exponential_discount'. Each generation, the score selection sees "
+            "blends the new raw score with the previous blended score — higher "
+            "values remember longer. At 0 the past is forgotten entirely, exactly "
+            "like per-generation accounting. Must be below 1, or new scores would "
+            "never matter at all."
         ),
     )
 )

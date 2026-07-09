@@ -159,10 +159,12 @@ How many generations the simulation runs. In each generation everyone plays thei
 #### `dynamics.selection_rule` — Selection rule
 
 - **Type:** choice
-- **Allowed values:** one of: `fermi`
+- **Allowed values:** one of: `fermi`, `proportional`, `tournament_k`, `truncation`, `threshold_cloning`
 - **Default:** `fermi`
 
-How the next generation is chosen from the current one. 'fermi' (pairwise comparison) repeatedly picks two random agents and has the first copy the second's strategy with a probability that grows with the score difference. More rules arrive in v2.
+How the next generation is chosen from the current one. 'fermi' (pairwise comparison) repeatedly picks two random agents and has the first copy the second's strategy with a probability that grows with the score difference and the selection intensity. 'proportional' (roulette wheel) draws each new agent's parent with a weight based on how far its score sits above the generation's worst. 'tournament_k' holds a mini-contest for every slot: a few randomly drawn candidates, the best scorer wins — despite the name, this has NOTHING to do with the tournament RUN MODE (which switches selection off entirely); it is simply this rule's traditional name. 'truncation' (elitist) only copies from the top slice of scorers. 'threshold_cloning' keeps every agent scoring above a threshold and replaces the rest with copies of those survivors.
+
+*Learn more:* Fermi comes from statistical physics; roulette and tournament selection from genetic algorithms; truncation from selective breeding.
 
 #### `dynamics.selection_beta` — Selection intensity (β)
 
@@ -170,9 +172,33 @@ How the next generation is chosen from the current one. 'fermi' (pairwise compar
 - **Allowed values:** 0 to 1000
 - **Default:** `1.0`
 
-How strongly scores drive selection. At 0, scores are ignored and strategies spread by pure luck (random drift). The higher the value, the more reliably higher-scoring strategies get copied. This is the main knob for sweeping between 'luck' and 'meritocracy'.
+How strongly scores drive selection when the selection rule is 'fermi'. At 0, scores are ignored and strategies spread by pure luck (random drift). The higher the value, the more reliably higher-scoring strategies get copied. This is the main knob for sweeping between 'luck' and 'meritocracy'. Ignored under the other selection rules.
 
 *Learn more:* This is the temperature-like β in the Fermi update rule from statistical physics.
+
+#### `dynamics.selection_tournament_k` — Tournament size (k)
+
+- **Type:** whole number
+- **Allowed values:** 2 to 10000
+- **Default:** `3`
+
+How many randomly drawn candidates compete for each next-generation slot when the selection rule is 'tournament_k'. The best scorer among the candidates wins the slot. Bigger values mean stronger selection pressure — with k equal to the whole population, the top scorer wins every slot. Cannot exceed the population size. Not related to the tournament run mode. Ignored under other selection rules.
+
+#### `dynamics.selection_elite_fraction` — Elite fraction (q)
+
+- **Type:** number
+- **Allowed values:** 0 to 1
+- **Default:** `0.2`
+
+The top share of scorers that the 'truncation' selection rule copies from. At 0.2, only the best-scoring 20% of agents can be parents — every next-generation agent is a copy of someone from that elite. At least one agent always qualifies, and 1.0 means everyone does. Must be above 0. Ignored under other selection rules.
+
+#### `dynamics.selection_threshold_multiplier` — Survival threshold (x mean score)
+
+- **Type:** number
+- **Allowed values:** 0 to 10
+- **Default:** `1.0`
+
+The survival bar for the 'threshold_cloning' selection rule, as a multiple of the generation's mean score. Agents at or above the bar keep their strategies; everyone else becomes a copy of a random survivor. At 1.0, scoring at least average means survival; higher values are stricter (if nobody clears the bar, the top scorers survive). Ignored under other selection rules.
 
 #### `dynamics.mutation_rate` — Mutation rate (μ)
 
@@ -181,6 +207,32 @@ How strongly scores drive selection. At 0, scores are ignored and strategies spr
 - **Default:** `0.01`
 
 Chance that a newly created agent ignores the strategy it was supposed to copy and instead adopts a random strategy from the enabled roster. A small rate keeps 'extinct' strategies able to reappear; 0 means perfect copying.
+
+#### `dynamics.score_accounting` — Score accounting
+
+- **Type:** choice
+- **Allowed values:** one of: `per_generation`, `sliding_window`, `exponential_discount`
+- **Default:** `per_generation`
+
+Which score selection looks at. 'per_generation' uses only the current generation's score — the classic setting. 'sliding_window' uses the average of the last few generations, so one lucky or unlucky generation matters less. 'exponential_discount' uses a running average in which older generations fade out gradually. Only what selection sees changes — the charts keep showing the raw per-generation scores. Ignored in tournament mode, where nothing is selected.
+
+*Learn more:* Score memory smooths selection pressure — useful under random_k matching, where per-generation scores include participation luck.
+
+#### `dynamics.accounting_window` — Accounting window (W)
+
+- **Type:** whole number
+- **Allowed values:** 1 to 100000
+- **Default:** `5`
+
+How many recent generations are averaged when score accounting is 'sliding_window'. The score selection sees is the mean of the last W generation scores (fewer while the run is younger than W). A window of 1 behaves exactly like per-generation accounting. Ignored under other accounting choices.
+
+#### `dynamics.accounting_discount` — Accounting discount (λ)
+
+- **Type:** number
+- **Allowed values:** 0 to below 1
+- **Default:** `0.5`
+
+How much of the past is kept when score accounting is 'exponential_discount'. Each generation, the score selection sees blends the new raw score with the previous blended score — higher values remember longer. At 0 the past is forgotten entirely, exactly like per-generation accounting. Must be below 1, or new scores would never matter at all.
 
 ### Run
 

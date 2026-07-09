@@ -146,6 +146,64 @@ class TestMatchingValidation:
         assert load_config(save_config(cfg, tmp_path / "rk.yaml")) == cfg
 
 
+class TestSelectionValidation:
+    """The tournament_k cross-parameter check (DECISIONS #63)."""
+
+    def test_tournament_k_accepts_k_up_to_n(self) -> None:
+        """The exhaustive edge case k = N must validate."""
+        cfg = _minimal_config(
+            dynamics={"selection_rule": "tournament_k", "selection_tournament_k": 100}
+        )
+        assert cfg.dynamics.selection_tournament_k == 100
+
+    def test_tournament_k_rejects_k_beyond_the_population(self) -> None:
+        """Beyond N candidates, a plain-language cross-parameter error."""
+        with pytest.raises(ValidationError, match="only has 100 agents"):
+            _minimal_config(
+                dynamics={"selection_rule": "tournament_k", "selection_tournament_k": 101}
+            )
+
+    def test_k_is_ignored_under_other_rules(self) -> None:
+        """The #34 ignored-parameter pattern: oversized k is fine when unused."""
+        cfg = _minimal_config(dynamics={"selection_tournament_k": 5000})
+        assert cfg.dynamics.selection_rule == "fermi"
+        assert cfg.dynamics.selection_tournament_k == 5000
+
+    def test_k_is_ignored_in_tournament_mode(self) -> None:
+        """In tournament mode ALL dynamics parameters are inert (#34).
+
+        Even an oversized tournament_k under the tournament_k rule passes:
+        nothing in the dynamics section is consumed there.
+        """
+        cfg = _minimal_config(
+            mode="tournament",
+            dynamics={"selection_rule": "tournament_k", "selection_tournament_k": 5000},
+        )
+        assert cfg.mode == "tournament"
+
+    def test_elite_fraction_must_be_above_zero(self) -> None:
+        """An elite fraction of 0 is rejected by the minimum_exclusive bound."""
+        with pytest.raises(ValidationError, match="strictly above"):
+            _minimal_config(dynamics={"selection_elite_fraction": 0.0})
+
+    def test_accounting_discount_must_stay_below_one(self) -> None:
+        """λ = 1 would mean new scores never matter."""
+        with pytest.raises(ValidationError, match="strictly below"):
+            _minimal_config(dynamics={"accounting_discount": 1.0})
+
+    def test_new_dynamics_config_round_trips(self, tmp_path: Path) -> None:
+        """M9a fields survive YAML save/load exactly (hard rule 8)."""
+        cfg = _minimal_config(
+            dynamics={
+                "selection_rule": "truncation",
+                "selection_elite_fraction": 0.25,
+                "score_accounting": "exponential_discount",
+                "accounting_discount": 0.75,
+            }
+        )
+        assert load_config(save_config(cfg, tmp_path / "m9a.yaml")) == cfg
+
+
 class TestRunMode:
     """The run-mode fields (DECISIONS #34)."""
 

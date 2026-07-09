@@ -109,6 +109,18 @@ class TestValueValidation:
         with pytest.raises(ValueError, match="strictly below"):
             spec.validate(1.0)
 
+    def test_exclusive_minimum_rejects_boundary(self) -> None:
+        """elite_fraction-style bounds must reject the minimum itself (M9a)."""
+        spec = _spec(minimum_exclusive=True, default=0.5)
+        with pytest.raises(ValueError, match="strictly above"):
+            spec.validate(0.0)
+        assert spec.validate(0.001) == 0.001
+
+    def test_minimum_exclusive_requires_a_minimum(self) -> None:
+        """The flag without a bound is a malformed spec."""
+        with pytest.raises(ValueError, match="minimum_exclusive without"):
+            _spec(minimum=None, minimum_exclusive=True)
+
     def test_choice_membership_enforced(self) -> None:
         """A choice value outside the declared options is rejected."""
         spec = _spec(kind="choice", default="a", choices=("a", "b"), minimum=None, maximum=None)

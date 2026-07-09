@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
+from pdsim.core.accounting import build_score_accounting
 from pdsim.core.agent import Agent
 from pdsim.core.game import PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
@@ -127,6 +128,7 @@ class PopulationDynamics:
         self._match = Match(PrisonersDilemma(config.game), config.match, rng)
         self._matcher = build_matcher(config.matching)
         self._selection = build_selection_rule(config.dynamics)
+        self._accounting = build_score_accounting(config.dynamics)
         self._reproduction = StrategySwitchReproduction(config)
         self._population = build_initial_population(config)
         self._generation = 0
@@ -176,9 +178,14 @@ class PopulationDynamics:
         report = self._report()
 
         # 2. Selection phase: one parent index per slot, all chosen against
-        #    the same scored population (synchronous — no feedback).
+        #    the same scored population (synchronous — no feedback). What
+        #    selection sees is the EFFECTIVE score: raw per-generation
+        #    scores folded through the accounting rule (M9a; identity under
+        #    the default per_generation accounting). Reports and events
+        #    keep the raw scores — accounting is selection-only (#64).
         scores = [agent.score for agent in self._population]
-        parents = self._selection.select_parents(scores, self._rng)
+        effective = self._accounting.effective_scores(scores)
+        parents = self._selection.select_parents(effective, self._rng)
 
         # 3. Mutation phase: each slot inherits its parent's strategy or,
         #    with probability μ, a random mutant. Computed for ALL slots

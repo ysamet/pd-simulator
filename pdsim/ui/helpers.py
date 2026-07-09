@@ -29,9 +29,29 @@ IGNORED_IN_TOURNAMENT = (
     "dynamics.generations",
     "dynamics.selection_rule",
     "dynamics.selection_beta",
+    "dynamics.selection_tournament_k",
+    "dynamics.selection_elite_fraction",
+    "dynamics.selection_threshold_multiplier",
     "dynamics.mutation_rate",
+    "dynamics.score_accounting",
+    "dynamics.accounting_window",
+    "dynamics.accounting_discount",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
+
+_RULE_PARAMS = {
+    "dynamics.selection_beta": "fermi",
+    "dynamics.selection_tournament_k": "tournament_k",
+    "dynamics.selection_elite_fraction": "truncation",
+    "dynamics.selection_threshold_multiplier": "threshold_cloning",
+}
+"""Selection-rule parameter -> the one rule that reads it (DECISIONS #63)."""
+
+_ACCOUNTING_PARAMS = {
+    "dynamics.accounting_window": "sliding_window",
+    "dynamics.accounting_discount": "exponential_discount",
+}
+"""Accounting parameter -> the one accounting choice that reads it (#64)."""
 
 
 def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
@@ -39,16 +59,20 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
 
     The #34 greyed-never-hidden pattern, centralized: a parameter that the
     current widget choices make irrelevant is disabled with an explanatory
-    tooltip note — never removed from the panel. Three cases:
+    tooltip note — never removed from the panel. The cases:
 
-    * the four dynamics parameters, ignored in tournament mode;
+    * every dynamics parameter, ignored in tournament mode;
     * ``run.tournament_cycles``, ignored in evolution mode;
     * ``matching.opponents_per_agent``, ignored under round-robin matching
-      (keyed off the matcher widget's current value, not the run mode).
+      (keyed off the matcher widget's current value, not the run mode, #57);
+    * each selection rule's parameters, ignored unless that rule is
+      selected (keyed off the selection-rule widget, #63);
+    * each accounting rule's parameter, ignored unless that accounting is
+      selected (keyed off the score-accounting widget, #64).
 
     The app renders widgets in registry order, so by the time a dependent
-    widget renders, the value it keys off (``run.mode``, or
-    ``matching.matcher``) is already in ``values``.
+    widget renders, the value it keys off (``run.mode``, a matcher or rule
+    selectbox) is already in ``values``.
 
     Args:
         key: The registry key of the widget about to render.
@@ -71,6 +95,18 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
             "NOTE: this parameter exists but is IGNORED under round-robin "
             "matching — every pair plays once anyway. Switch the matching "
             "scheme to 'random_k' to use it."
+        )
+    rule = values.get("dynamics.selection_rule")
+    if key in _RULE_PARAMS and rule is not None and rule != _RULE_PARAMS[key]:
+        return True, (
+            f"NOTE: this parameter is only read by the {_RULE_PARAMS[key]!r} "
+            "selection rule — IGNORED under the currently selected rule."
+        )
+    accounting = values.get("dynamics.score_accounting")
+    if key in _ACCOUNTING_PARAMS and accounting not in (None, _ACCOUNTING_PARAMS[key]):
+        return True, (
+            f"NOTE: this parameter is only read by the {_ACCOUNTING_PARAMS[key]!r} "
+            "score accounting — IGNORED under the currently selected choice."
         )
     return False, ""
 

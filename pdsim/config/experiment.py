@@ -276,22 +276,50 @@ class DynamicsConfig(_RegistryBackedModel):
 
     Attributes:
         generations: Number of generations to simulate.
-        selection_rule: Selection rule name; v1 ships ``"fermi"``.
-        selection_beta: Selection intensity β (0 = pure drift).
+        selection_rule: Selection rule name — ``"fermi"``, ``"proportional"``,
+            ``"tournament_k"``, ``"truncation"``, or ``"threshold_cloning"``
+            (M9a; each rule reads only its own parameters below, the others
+            are ignored — the DECISIONS #34 pattern).
+        selection_beta: Selection intensity β for ``"fermi"`` (0 = pure drift).
+        selection_tournament_k: Candidates per slot for ``"tournament_k"``.
+            Must be at most N; checked at the experiment level.
+        selection_elite_fraction: Top score-share parents are drawn from
+            under ``"truncation"`` (0 < q ≤ 1).
+        selection_threshold_multiplier: Survival bar for
+            ``"threshold_cloning"``, as a multiple of the mean score.
         mutation_rate: Strategy-switch mutation probability μ.
+        score_accounting: Which score selection consumes —
+            ``"per_generation"`` (raw, the classic setting),
+            ``"sliding_window"``, or ``"exponential_discount"`` (M9a).
+        accounting_window: Window W for ``"sliding_window"``.
+        accounting_discount: Discount λ for ``"exponential_discount"``.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
         "generations": "dynamics.generations",
         "selection_rule": "dynamics.selection_rule",
         "selection_beta": "dynamics.selection_beta",
+        "selection_tournament_k": "dynamics.selection_tournament_k",
+        "selection_elite_fraction": "dynamics.selection_elite_fraction",
+        "selection_threshold_multiplier": "dynamics.selection_threshold_multiplier",
         "mutation_rate": "dynamics.mutation_rate",
+        "score_accounting": "dynamics.score_accounting",
+        "accounting_window": "dynamics.accounting_window",
+        "accounting_discount": "dynamics.accounting_discount",
     }
 
     generations: int = _registry_field("dynamics.generations")
     selection_rule: str = _registry_field("dynamics.selection_rule")
     selection_beta: float = _registry_field("dynamics.selection_beta")
+    selection_tournament_k: int = _registry_field("dynamics.selection_tournament_k")
+    selection_elite_fraction: float = _registry_field("dynamics.selection_elite_fraction")
+    selection_threshold_multiplier: float = _registry_field(
+        "dynamics.selection_threshold_multiplier"
+    )
     mutation_rate: float = _registry_field("dynamics.mutation_rate")
+    score_accounting: str = _registry_field("dynamics.score_accounting")
+    accounting_window: int = _registry_field("dynamics.accounting_window")
+    accounting_discount: float = _registry_field("dynamics.accounting_discount")
 
 
 class ExperimentConfig(_RegistryBackedModel):
@@ -375,6 +403,34 @@ class ExperimentConfig(_RegistryBackedModel):
                     f"{self.population.size} each agent has only {available} possible "
                     "opponents. Lower the opponents per agent (or grow the "
                     "population) so k is at most N - 1."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_selection_fits_population(self) -> Self:
+        """Check that tournament_k's k fits the population (k at most N).
+
+        The #57 cross-parameter precedent, applied to selection: the check
+        runs only when the parameter is actually consumed — the rule is
+        ``"tournament_k"`` AND the mode is ``"evolution"`` (in tournament
+        mode every dynamics parameter is ignored, and ignored parameters
+        are never validation errors — DECISIONS #34).
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If tournament selection would need more candidates
+                than the population offers.
+        """
+        if self.mode == "evolution" and self.dynamics.selection_rule == "tournament_k":
+            k = self.dynamics.selection_tournament_k
+            if k > self.population.size:
+                raise ValueError(
+                    f"dynamics.selection_tournament_k is {k}, but the population "
+                    f"only has {self.population.size} agents to draw candidates "
+                    "from. Lower the tournament size (or grow the population) so "
+                    "k is at most N."
                 )
         return self
 

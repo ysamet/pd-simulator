@@ -75,6 +75,9 @@ not have `pdsim` or its dependencies installed.
 - Regenerate parameter docs: `python -m pdsim.gendocs` (rewrites the committed
   `docs/PARAMETERS.md`; a pytest drift test fails while it is stale — rerun
   this after ANY registry change and stage the result)
+- Benchmark: `python -m pdsim.bench` (median wall-clock seconds/generation
+  across an N x matcher grid — the vectorization-trigger data, DECISIONS #58;
+  `--out PATH` writes CSV; output is environment-specific, never committed)
 - Terminal demos: `python examples/quickstart.py`, `python examples/tournament_demo.py`
 
 (Keep this section updated as tooling lands.)
@@ -122,6 +125,17 @@ must contain a `## Validation` section, WRITTEN AT SPEC TIME, describing how
 the owner will confirm the milestone's features in the app: the scenario to
 load, the widget interactions, and the expected observable behavior — CLI
 steps only for inherently headless features (DECISIONS #61).
+
+Spec mechanics (DECISIONS #62): file names are
+`M<zero-padded milestone><letter>-<slug>.md`; each spec opens with
+`Status: draft | in progress | implemented (see DECISIONS #...)`, updated as
+work proceeds. Specs are **frozen intent** — authoritative until the
+milestone lands; deviations during implementation are logged in
+`docs/DECISIONS.md` and the spec is not retro-edited beyond its status
+line; after landing, DESIGN/DECISIONS are the truth and the spec is
+historical record. Specs count as docs for the DOCS CHANGED ritual and are
+uploaded to project knowledge. Small fixes still travel as plain prompts —
+specs are for milestone-scale work.
 
 **Mandatory end-of-session ritual.** Every session that changed code or made
 decisions ends with these steps, in order:

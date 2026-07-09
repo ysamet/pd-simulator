@@ -131,6 +131,58 @@ class TestGreying:
         """Widgets outside the ignored sets are always active."""
         assert helpers.greying("game.payoff_reward", {"run.mode": "tournament"}) == (False, "")
 
+    def test_rule_parameters_grey_unless_their_rule_is_selected(self) -> None:
+        """Each selection rule's parameter keys off the rule widget (#63)."""
+        values = {"run.mode": "evolution", "dynamics.selection_rule": "fermi"}
+        for key, owner in [
+            ("dynamics.selection_tournament_k", "tournament_k"),
+            ("dynamics.selection_elite_fraction", "truncation"),
+            ("dynamics.selection_threshold_multiplier", "threshold_cloning"),
+        ]:
+            disabled, note = helpers.greying(key, values)
+            assert disabled
+            assert owner in note
+            active = {**values, "dynamics.selection_rule": owner}
+            assert helpers.greying(key, active) == (False, "")
+
+    def test_beta_greys_under_non_fermi_rules(self) -> None:
+        """β is fermi's parameter; other rules never read it (#63)."""
+        values = {"run.mode": "evolution", "dynamics.selection_rule": "proportional"}
+        disabled, note = helpers.greying("dynamics.selection_beta", values)
+        assert disabled
+        assert "fermi" in note
+        fermi = {**values, "dynamics.selection_rule": "fermi"}
+        assert helpers.greying("dynamics.selection_beta", fermi) == (False, "")
+
+    def test_accounting_parameters_grey_unless_their_choice_is_selected(self) -> None:
+        """W and λ key off the score-accounting widget (#64)."""
+        values = {"run.mode": "evolution", "dynamics.score_accounting": "per_generation"}
+        for key, owner in [
+            ("dynamics.accounting_window", "sliding_window"),
+            ("dynamics.accounting_discount", "exponential_discount"),
+        ]:
+            disabled, note = helpers.greying(key, values)
+            assert disabled
+            assert owner in note
+            active = {**values, "dynamics.score_accounting": owner}
+            assert helpers.greying(key, active) == (False, "")
+
+    def test_tournament_mode_greys_all_new_dynamics_parameters(self) -> None:
+        """The whole dynamics section — accounting included — is inert (#34)."""
+        values = {
+            "run.mode": "tournament",
+            "dynamics.selection_rule": "tournament_k",
+            "dynamics.score_accounting": "sliding_window",
+        }
+        for key in [
+            "dynamics.selection_tournament_k",
+            "dynamics.score_accounting",
+            "dynamics.accounting_window",
+        ]:
+            disabled, note = helpers.greying(key, values)
+            assert disabled
+            assert "tournament mode" in note
+
 
 class TestValidationMessages:
     """pydantic errors become plain sentences for st.error."""
