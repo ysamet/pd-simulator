@@ -39,27 +39,57 @@ Milestone order (each lands with tests + docs):
 
 Out of scope for v1 (but nothing may block them): everything below.
 
-## v2 — Growth, group games, reciprocity machinery
+## v2 — Economy-first: growth, sweeps, tags, group games
 
-- **Score-as-energy population growth:** reproduction cost T, offspring stake,
-  per-round living cost, death at score ≤ 0, carrying capacity K; asynchronous
-  (Moran-style) event mode.
-- **Additional selection rules:** fitness-proportional, tournament(k),
-  truncation/elitist, threshold cloning.
-- **Score accounting options:** cumulative, sliding window, exponential discounting.
-- **Parameter-perturbation mutation** (Gaussian noise on continuous strategy
-  parameters → genuine strategy evolution).
-- **Public Goods Game + variants:** threshold/step-level, volunteer's dilemma,
-  n-player snowdrift; group-size parameter.
-- **Reciprocity machinery for group games:** public reputation, targeted peer
-  punishment (costly fines), exclusion.
-- **Agent attributes + attribute-conditional strategies:** generic attributes
-  mapping with visibility and inheritance policies; strategies conditioning on
-  an opponent's visible tags (Riolo tags; Hammond & Axelrod ethnocentrism —
-  richer with the v3 spatial layer). See DESIGN §6.5, DECISIONS #46.
-- **Vectorized NumPy engine backend** for populations in the thousands —
-  paired with sampling matchers (RandomK shipped in v1/M8, SpatialKernel in
-  v3) to reach thousands of agents at interactive speed (see DESIGN §3.1).
+Milestone spine (DECISIONS #58): **M9 → M9.5 → M10 → M12 → M11 → M13 → M14**.
+M12 deliberately runs *before* M11: the owner's research program targets
+tag-based/ethnocentrism dynamics, and tags come after M10 so they are built
+variable-N-aware from birth.
+
+- **M9 — Selection rules, score accounting, cooperation recording.**
+  Fitness-proportional, tournament(k), truncation/elitist, and
+  threshold-cloning selection rules; sliding-window and exponentially
+  discounted score accounting — all plug-ins to the existing ABCs. Plus
+  pairwise cooperation-rate recording at strategy-pair resolution
+  (schema_version bump; DECISIONS #60) and a benchmark rider capturing
+  wall-clock per generation across N × matcher, so the vectorization
+  trigger becomes data.
+- **M9.5 — Sweep/search layer** (DECISIONS #59). SweepSpec YAML config
+  families (base config + parameter/composition/seed axes), a parallel
+  batch runner (`python -m pdsim.sweep`, multiprocessing across runs), the
+  **Outcome Metrics Registry** (fourth registry-idiom instance: final
+  share, fixation with censoring semantics, quasi-fixation variants,
+  cooperation-collapse metrics — pure post-processing over recorded runs),
+  and `sweeps/<name>/` persistence with a per-run summary parquet and a
+  metric-vs-axis chart. First research program: invasion thresholds.
+- **M10 — Score-as-energy growth economy.** Reproduction cost T, offspring
+  stake, per-round living cost, death at score ≤ 0, carrying capacity K;
+  asynchronous (Moran-style) event mode. Possible split: synchronous
+  growth first, async/Moran second. Chat-designed first: offspring score
+  policy, death semantics, birth/death RNG order (seeded-history contract
+  extending #32), selection under energy-driven reproduction, matchers
+  under variable N, event/schema changes (DECISIONS #58).
+- **M12 (before M11) — Agent attributes + attribute-conditional
+  strategies.** Generic attributes mapping with visibility and inheritance
+  policies; strategies conditioning on an opponent's visible tags (Riolo
+  tags; Hammond & Axelrod ethnocentrism — richer with the v3 spatial
+  layer). See DESIGN §6.5, DECISIONS #46/#58.
+- **M11 — Parameter-perturbation mutation** (Gaussian noise on continuous
+  strategy parameters → genuine strategy evolution), plus the
+  variant-identity machinery it requires (resolves the #30 deferral).
+- **M13 — Public Goods Game + variants:** threshold/step-level, volunteer's
+  dilemma, n-player snowdrift; group-size parameter; group matching.
+- **M14 — Reciprocity machinery for group games:** public reputation,
+  targeted peer punishment (costly fines), exclusion — designed against
+  M12's visible-attributes surface (reputation is nearly a dynamic public
+  attribute).
+
+**Unscheduled, empirically triggered:** the **vectorized NumPy engine
+backend** for populations in the thousands — paired with sampling matchers
+(RandomK shipped in v1/M8, SpatialKernel in v3) to reach thousands of agents
+at interactive speed (see DESIGN §3.1). It is deliberately NOT on the spine:
+it lands when actual experiments/sweeps show the sampling matchers cannot
+buy the needed scale (M9's benchmark rider supplies the data; DECISIONS #58).
 
 ## v3+ — Geography and real-world scenario modeling
 
@@ -74,4 +104,7 @@ Out of scope for v1 (but nothing may block them): everything below.
 - Scenario modeling toolkit for societal/geopolitical conflicts (asymmetric payoffs,
   alliances/sanctions as mechanics, heterogeneous endowments).
 - Richer dashboard (Dash or FastAPI+React) replacing Streamlit if needed.
-- Batch experiment sweeps operated via Claude Cowork (YAML-driven).
+- Sweep operation story. The sweep *capability* itself is v2/M9.5
+  (DECISIONS #59); what remains for v3+ is only how it is operated at
+  scale: scheduled, Cowork-driven experiment campaigns, plus the deferred
+  search increments (adaptive threshold bisection, sweep browsing in the UI).

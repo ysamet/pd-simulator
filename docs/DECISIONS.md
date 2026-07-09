@@ -758,3 +758,100 @@ keyed off another widget rather than run.mode — via a new
 Streamlit-free and unit-tested. Recorder and persistence needed no changes
 (verified by a random_k round-trip test, not assumed); scenario configs are
 untouched (all use the round_robin default).
+
+**#58 — 2026-07-08 — v2 sequencing: ECONOMY-FIRST, milestone spine
+M9 → M9.5 → M10 → M12 → M11 → M13 → M14 (deliberate M12/M11 swap).**
+Contents per milestone:
+- **M9** — additional selection rules (fitness-proportional, tournament(k),
+  truncation/elitist, threshold cloning) and score-accounting options
+  (sliding window, exponential discounting), all as plug-ins to the
+  existing `SelectionRule` / `ScoreAccounting` ABCs; PLUS pairwise
+  cooperation-rate recording (#60) and a **benchmark rider**: a small
+  script capturing wall-clock per generation across N × matcher
+  combinations, so the vectorization trigger becomes data.
+- **M9.5** — the sweep/search layer (#59).
+- **M10** — the score-as-energy growth economy (possible split:
+  synchronous growth first, async/Moran second). Design-in-chat-first
+  items before implementation: offspring initial-score policy, death
+  semantics and timing, birth/death RNG draw order (a seeded-history
+  contract extending #32), selection semantics under energy-driven
+  reproduction, matcher behavior under variable N, and event/schema
+  changes (a schema_version bump is expected).
+- **M12 (before M11)** — agent attributes/tags + attribute-conditional
+  strategies (DESIGN §6.5). Pulled ahead of perturbation mutation because
+  the owner's research program targets tag-based/ethnocentrism dynamics
+  (the Hammond–Axelrod "in-group cooperator / out-group defector"
+  species); tags run deliberately AFTER M10 so they are built
+  variable-N-aware from birth.
+- **M11** — parameter-perturbation mutation plus the variant-identity
+  machinery it requires (resolves the deferral noted in #30).
+- **M13** — Public Goods Game + group matching. **M14** —
+  reputation/punishment/exclusion; design M14 with M12's
+  visible-attributes surface in mind — reputation is nearly a dynamic
+  public attribute.
+- **Vectorized backend: NOT scheduled.** It is empirically triggered:
+  it lands when actual experiments/sweeps show the sampling matchers
+  cannot buy the needed scale (M9's benchmark rider supplies the data).
+Rationale: variable population size is the most infectious invariant
+change in the v2 plan — every mechanism built after it is variable-N-aware
+from birth and nothing needs retrofitting; the growth economy is
+scientifically self-contained on pairwise PD, so it delivers a working new
+capability early; and reputation/punishment queue behind group games
+either way. Alternative rejected: games-first (PGG before growth) — it
+puts the bigger blast radius first (Match, the Matcher contract, history
+views, and event payloads all change at once) and then retrofits variable
+N into freshly written group-game code.
+
+**#59 — 2026-07-08 — Sweep/search layer at M9.5.** A batch experiment
+layer answering search/optimization questions; the motivating example is
+invasion thresholds — "what starting share does species X need to
+dominate, or to reach staying power?". Four parts:
+(a) **SweepSpec** — a YAML config-family specification: one base config
+plus axes of variation (parameter grids, including composition shares,
+and seed lists), expanded into fully validated `ExperimentConfig`s.
+(b) **Parallel batch runner** (`python -m pdsim.sweep`) using
+multiprocessing across runs. Noted consequence: per-run parallelism is a
+THIRD performance dimension alongside the two in #46 (faster execution of
+a given interaction count; fewer interactions per period) — it makes mass
+experiments affordable before any vectorization exists.
+(c) An **Outcome Metrics Registry** — the fourth instance of the registry
+idiom: named, documented metric functions computed from recorded
+timeseries. Metrics are pure post-processing over the #47 raw parquet, so
+they work retroactively on old recordings. Initial set: final share;
+fixation flag (reached 100%); time to fixation WITH censoring semantics
+(run ended first = censored, not "never"); mean share over the last k
+generations; quasi-fixation variants (ever exceeded x%; held above x% for
+k consecutive generations — the meaningful measures when mutation makes
+strict fixation unstable); and cooperation-collapse event metrics
+(enabled by #60's cooperation-rate series).
+(d) **Sweep persistence**: a `sweeps/<name>/` folder holding the member
+runs, a `sweep_summary.parquet` (one row per run: varied parameters,
+seed, metrics), and one built-in analysis artifact (a metric-vs-axis
+curve with per-point replicate spread).
+Placement rationale: the layer sits entirely on the M7 substrate
+(headless CLI, config layer, run folders), touches no engine semantics,
+and the owner's first research program (Always Defect as a degenerate
+adversarial species) runs on v1 mechanics the moment the layer lands.
+Later increments, explicitly deferred: adaptive threshold search
+(bisection), sweep browsing in the UI, and Cowork-scheduled campaigns.
+
+**#60 — 2026-07-08 — Pairwise cooperation-rate recording (lands in M9).**
+The platform currently records composition, scores, and rounds but NOT
+cooperation itself, so collapse questions could only be proxied — and the
+proxies mislead: composition misclassifies (a 100%-TitForTat population
+mid-noise-spiral plays D constantly while looking fully cooperative), and
+scores are confounded. Decision: record executed-action cooperation rates
+at STRATEGY-PAIR resolution — per period: (actor strategy, opponent
+strategy, cooperation rate, actions counted). Per-strategy rates remain
+derivable by aggregation (weighted by actions counted), and the
+diagonal-vs-off-diagonal contrast of the pair matrix is exactly the M12
+ethnocentrism diagnostic (in-group vs out-group cooperation). Known
+consequences: new bookkeeping in the match phase, extended period-event
+payloads, a new persisted table/columns, and a schema_version bump — the
+intended use of the #47 schema guard. Cooperation-rate-over-time also
+becomes a headline chart in its own right, independent of the sweep
+layer. Alternative rejected: a per-strategy scalar cooperation rate —
+insufficient both for the owner's foreseen pairwise questions and for
+M12. Deliberate non-decision: how the actor "strategy" row key
+generalizes when M11 introduces parameter variants and M12 introduces
+tags is owned by those milestones, not pre-built in M9.

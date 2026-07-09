@@ -225,7 +225,8 @@ Key contracts:
 - v1 engine is object-per-agent, optimized for readability and debuggability.
   Practical envelope (order of magnitude, 50 rounds/match, round-robin):
   N=100 → several generations/sec; N=300 → seconds/generation; N≥1000 → too slow.
-- The performance strategy has **two independent dimensions** (DECISIONS #46):
+- The performance strategy has **three independent dimensions** (DECISIONS
+  #46, #59):
   1. **Faster execution/rendering of a given interaction count.** Engine side:
      the **vectorized NumPy backend** (strategies as batch state machines over
      arrays; v2, ~10–100×). UI side: headroom exists in incremental trace
@@ -235,10 +236,15 @@ Key contracts:
      existing `Matcher` ABC: **RandomK** (O(N·k) instead of round-robin's
      O(N²); shipped in M8 — this dimension's first implementation, DECISIONS
      #57) and later **SpatialKernel**.
+  3. **Parallelism across runs** (DECISIONS #59). Whole runs are independent,
+     so batch experiments parallelize across processes — the v2/M9.5 sweep
+     layer's runner does exactly this. It speeds up *mass experiments*, not
+     any single run, which makes sweep campaigns affordable before (and
+     independently of) any vectorization.
 - For large N the binding constraint is **match-phase compute, not chart
   rendering** — round-robin's O(N²) matches dominate long before plotting
-  does; the two dimensions pair to reach thousands of agents at interactive
-  speed.
+  does; the first two dimensions pair to reach thousands of agents at
+  interactive speed.
 - Rule: nothing in configs, UI, or persistence may assume the object backend.
 
 ## 4. Event stream and live visualization
@@ -442,6 +448,22 @@ Design guards effective **now** (DECISIONS #46):
    attributes*, and future charts may partition by either.
 3. The M7 persistence schema reserves room for **per-agent attribute
    snapshots**, exactly as §6.3 already reserves spatial room (see §8).
+
+### 6.6 Sweep/search layer and Outcome Metrics Registry (v2, M9.5)
+
+A batch experiment layer over the M7 substrate, scoped in DECISIONS #59:
+**SweepSpec** YAML config families (a base config plus axes of variation —
+parameter grids, composition shares, seed lists — expanded into validated
+`ExperimentConfig`s), a **parallel batch runner** (`python -m pdsim.sweep`,
+multiprocessing across whole runs — performance dimension 3 of §3.1), an
+**Outcome Metrics Registry** (fourth instance of the registry idiom: named,
+documented metric functions computed from recorded run folders — pure
+post-processing over the §8 raw parquet, so metrics apply retroactively to
+old recordings), and `sweeps/<name>/` persistence (member runs + a
+one-row-per-run summary parquet + a built-in metric-vs-axis chart). The
+layer consumes only configs and run folders — no engine semantics — so
+nothing in v1 blocks it. The full design spec will be written when M9.5 is
+drafted.
 
 ## 7. Validation
 
