@@ -855,3 +855,33 @@ insufficient both for the owner's foreseen pairwise questions and for
 M12. Deliberate non-decision: how the actor "strategy" row key
 generalizes when M11 introduces parameter variants and M12 introduces
 tags is owned by those milestones, not pre-built in M9.
+
+**#61 — 2026-07-08 — Governance: app-first manual validation, and
+spec-time Validation sections (extends #42; forward-extends the docs/specs
+convention).** Two workflow conventions, both codified in `CLAUDE.md` this
+session:
+(a) **Manual validation is app-first.** The #42 end-of-implementation
+validation instructions must prefer exercising the feature THROUGH the
+Streamlit app — naming a specific scenario to load, the widgets to touch,
+and the observable outcome that confirms success — over CLI commands or
+test-suite runs. CLI-based validation is acceptable only for inherently
+headless features (e.g. `python -m pdsim.bench`, the headless runner
+itself). Automated tests complement, never substitute for, seeing the
+feature work in the app. Rationale: the app is the owner's actual
+acceptance path, and app-level walkthroughs catch integration issues —
+widget wiring, greying, chart rendering, session-state behavior — that
+unit tests and CLI runs miss.
+(b) **Every spec carries a `## Validation` section, written at SPEC
+time**, describing how the owner will confirm the milestone's features in
+the app — scenario, widget interactions, expected observable behavior —
+with CLI steps only for headless features. Standing division of labor,
+recorded with it: the design chat (Claude.ai) delivers milestone-scale
+work as a single Claude Code prompt that FIRST creates the spec file
+under `docs/specs/` and THEN implements it; the spec file, not the chat
+prompt, is the durable statement of intent. Rationale: writing validation
+at spec time forces "how will this be visible?" to be answered during
+scoping, not discovered after implementation.
+Note: (b) extends a docs/specs convention whose founding DECISIONS entry
+is expected from the M9a session, which has NOT yet run — this is a
+deliberate forward reference; when that session lands its convention
+entry, it should reference this one and reconcile.

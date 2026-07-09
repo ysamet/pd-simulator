@@ -20,9 +20,14 @@ OWNER'S act, never Claude Code's: never run git commit. At every milestone
 completion (and whenever a commit is warranted), present: (a) a summary of what
 was done, (b) the list of files to stage, and (c) a suggested commit message —
 the owner performs the commit himself. Additionally, after EVERY implementation,
-show the owner how to run manual validation: the exact commands to launch or
-exercise what was built (with the venv-activation reminder), plus a short
-checklist of what to look at to confirm it works.
+show the owner how to run manual validation (with the venv-activation
+reminder) — and validation is APP-FIRST (DECISIONS #42/#61): prefer
+exercising the feature through the Streamlit app, naming a specific scenario
+to load, the widgets to touch, and the observable outcome that confirms it
+works. CLI-based validation is acceptable only for inherently headless
+features (e.g. `python -m pdsim.bench`, the headless runner itself).
+Automated tests complement — never substitute for — the owner seeing the
+feature work in the app.
 
 ## Hard rules
 
@@ -107,6 +112,17 @@ convenient" — same session, before finishing):
 **`docs/DECISIONS.md` is append-only**: number, date, decision, rationale,
 alternatives considered. Reversals get a new entry referencing the old one.
 
+**Milestone specs (`docs/specs/`) and the division of labor.** The design
+chat (Claude.ai) delivers milestone-scale work as a single Claude Code
+prompt that FIRST creates the milestone's spec file under `docs/specs/` and
+THEN implements it. The spec file — not the chat prompt — is the durable
+statement of intent; specs are part of the knowledge-preservation contract
+(the advisor standard above already includes `docs/specs/*`). Every spec
+must contain a `## Validation` section, WRITTEN AT SPEC TIME, describing how
+the owner will confirm the milestone's features in the app: the scenario to
+load, the widget interactions, and the expected observable behavior — CLI
+steps only for inherently headless features (DECISIONS #61).
+
 **Mandatory end-of-session ritual.** Every session that changed code or made
 decisions ends with these steps, in order:
 
@@ -152,6 +168,10 @@ never appear in a suggested commit file list.
 
 ## Current phase
 
-v1 per `docs/ROADMAP.md`: pairwise repeated PD, object-per-agent engine, Fermi selection,
-strategy-switch mutation, Streamlit UI with live charts and registry-driven tooltips.
-Design everything to not block the v2/v3 extensions listed in `docs/DESIGN.md` §6.
+v2 per `docs/ROADMAP.md`, on the economy-first milestone spine
+M9 → M9.5 → M10 → M12 → M11 → M13 → M14 (DECISIONS #58). v1 — pairwise
+repeated PD, object-per-agent engine, Fermi selection, strategy-switch
+mutation, Streamlit UI, persistence + headless CLI — is complete (M8,
+2026-07-07). Next up: M9 (selection rules, score accounting, pairwise
+cooperation recording). Design everything to not block the v2/v3 extensions
+listed in `docs/DESIGN.md` §6.
