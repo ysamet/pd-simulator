@@ -182,6 +182,92 @@ def mean_score_chart(
     return _line_chart(timeseries, timeseries.mean_scores, "Mean scores", y_title)
 
 
+def cooperation_chart(timeseries: RunTimeseries) -> go.Figure:
+    """Cooperation rate over time: population overall + per-strategy lines.
+
+    The M9b observability chart (DECISIONS #60/#65): executed-action
+    cooperation, which composition alone cannot show — a 100%-TitForTat
+    population mid-noise-spiral plays D constantly while its composition
+    looks fully cooperative. Per-strategy lines are the actions-weighted
+    aggregates over each actor's opponents; the thicker dotted line is the
+    whole population. Rates are per-generation in evolution mode and
+    run-cumulative in tournament mode (the #65 asymmetry). The y-axis is
+    pinned to 0-1 so runs compare at a glance.
+
+    Args:
+        timeseries: The run's accumulated series (must carry cooperation
+            data — callers skip this chart for pre-schema-2 recordings).
+
+    Returns:
+        One line per actor strategy plus the population line.
+    """
+    colors = strategy_colors()
+    figure = go.Figure()
+    for name, values in timeseries.cooperation_by_strategy.items():
+        figure.add_trace(
+            go.Scatter(
+                x=timeseries.periods,
+                y=values,
+                mode="lines",
+                name=_display_name(name),
+                line={"color": colors.get(name, _FALLBACK_COLOR)},
+            )
+        )
+    figure.add_trace(
+        go.Scatter(
+            x=timeseries.periods,
+            y=timeseries.cooperation_overall,
+            mode="lines",
+            name="Population",
+            line={"color": "#444444", "width": 3, "dash": "dot"},
+        )
+    )
+    cumulative = " (cumulative)" if timeseries.mode == "tournament" else ""
+    figure.update_layout(
+        title=f"Cooperation rate{cumulative}",
+        xaxis_title=_period_label(timeseries.mode),
+        yaxis_title="Cooperation rate",
+        yaxis={"range": [0, 1]},
+        margin={"t": 40, "b": 40},
+    )
+    return figure
+
+
+def cooperation_pair_rows(timeseries: RunTimeseries) -> list[dict[str, object]]:
+    """Build the final cooperation pair matrix as plain table rows.
+
+    Plain rows rather than a figure, per the #37 convention — a pair-matrix
+    heatmap is deferred to M12, where the diagonal-vs-off-diagonal contrast
+    becomes the in-group/out-group diagnostic (DECISIONS #60/#65).
+
+    Args:
+        timeseries: The run's accumulated series.
+
+    Returns:
+        One row per ordered pair that played in the final period: actor,
+        opponent, cooperation rate, actions counted — sorted by machine
+        names for a stable, scannable matrix. Empty when the run carries no
+        cooperation data (pre-schema-2 recordings).
+    """
+    if not timeseries.cooperation_overall:
+        return []
+    rows: list[dict[str, object]] = []
+    for actor, opponent in sorted(timeseries.cooperation_pairs):
+        count = timeseries.cooperation_pair_actions[(actor, opponent)][-1]
+        rate = timeseries.cooperation_pairs[(actor, opponent)][-1]
+        if not count or rate is None:
+            continue  # the pair did not play in the final period
+        rows.append(
+            {
+                "Actor": _display_name(actor),
+                "Opponent": _display_name(opponent),
+                "Cooperation rate": round(rate, 3),
+                "Actions counted": count,
+            }
+        )
+    return rows
+
+
 def total_score_chart(timeseries: RunTimeseries) -> go.Figure:
     """Cumulative total score per strategy over cycles (tournament only).
 
@@ -222,6 +308,8 @@ def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
     else:
         figures = {"composition": composition_chart(timeseries)}
     figures["mean_scores"] = mean_score_chart(timeseries)
+    if timeseries.cooperation_overall:  # absent for pre-schema-2 recordings
+        figures["cooperation"] = cooperation_chart(timeseries)
     written = []
     for name, figure in figures.items():
         path = folder / f"{name}.html"

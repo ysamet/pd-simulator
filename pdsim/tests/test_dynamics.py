@@ -114,7 +114,10 @@ class TestSingleGeneration:
     """One fully hand-computed generation (TFT vs AllD, 3 rounds)."""
 
     def test_report_matches_hand_computed_scores(self) -> None:
-        """TFT: S+P+P = 2; AllD: T+P+P = 7 (default payoffs)."""
+        """TFT: S+P+P = 2; AllD: T+P+P = 7 (default payoffs).
+
+        Cooperation (M9b, #65): TFT plays C,D,D → 1/3; AllD plays D,D,D → 0.
+        """
         dynamics = PopulationDynamics(
             _config({"tit_for_tat": 1, "always_defect": 1}), np.random.default_rng(0)
         )
@@ -124,6 +127,10 @@ class TestSingleGeneration:
             composition={"tit_for_tat": 1, "always_defect": 1},
             mean_scores={"tit_for_tat": 2.0, "always_defect": 7.0},
             rounds_played={"tit_for_tat": 3, "always_defect": 3},
+            cooperation={
+                ("tit_for_tat", "always_defect"): (1 / 3, 3),
+                ("always_defect", "tit_for_tat"): (0.0, 3),
+            },
         )
 
     def test_generation_boundary_resets_scores_and_histories(self) -> None:

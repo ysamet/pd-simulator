@@ -277,13 +277,17 @@ unfolds. Five event types (DECISIONS #35):
 - `RoundPlayed` — pair identity, round index, executed actions, payoffs.
 - `MatchFinished` — pair identity, per-agent match totals, match length.
 - `GenerationFinished` (evolution mode) — generation index, population
-  composition (strategy → count), per-strategy mean scores, and per-strategy
-  rounds played (agent-rounds; the exact per-round denominator — DECISIONS #44).
+  composition (strategy → count), per-strategy mean scores, per-strategy
+  rounds played (agent-rounds; the exact per-round denominator — DECISIONS
+  #44), and THIS generation's executed-action cooperation table per ordered
+  (actor strategy, opponent strategy) pair as (rate, actions counted)
+  (M9b, DECISIONS #65).
 - `CycleFinished` (tournament mode) — cycle index, composition (constant), and
-  per-strategy **cumulative** totals + per-agent mean scores + rounds played.
-  A distinct type from `GenerationFinished` because the payloads differ: a
-  generation reports that generation's scores; a cycle reports run-long
-  cumulative standings.
+  per-strategy **cumulative** totals + per-agent mean scores + rounds played
+  + the run-cumulative cooperation table (#65 — cumulative like everything
+  else in this event). A distinct type from `GenerationFinished` because the
+  payloads differ: a generation reports that generation's figures; a cycle
+  reports run-long cumulative standings.
 - `RunFinished` — always emitted, exactly once, last: mode, periods completed,
   final composition, and final scores/standings.
 
@@ -310,9 +314,13 @@ Consumers:
 
 All charting consumers share one intermediate shape: `RunTimeseries`
 (`pdsim/core/timeseries.py`) folds period events into aligned per-strategy
-series (newcomers backfilled, the extinct gap out). It lives in `core` — pure
-data processing, no plotting imports — so M7's recorder can reuse it without
-touching the viz layer (DECISIONS #37). `pdsim/viz/charts.py` holds pure
+series (newcomers backfilled, the extinct gap out) — including, since M9b,
+the raw per-pair cooperation series plus two derived views: actions-weighted
+per-actor-strategy aggregates and an overall population cooperation rate
+(#65; events without cooperation data — schema-1 recordings — leave those
+series empty, and charts skip the cooperation figure). It lives in `core` —
+pure data processing, no plotting imports — so M7's recorder can reuse it
+without touching the viz layer (DECISIONS #37). `pdsim/viz/charts.py` holds pure
 builders (`RunTimeseries` in → plotly Figure out; final summaries as plain
 table rows) with a per-strategy color map derived from Strategy Registry
 order, stable across charts, modes, and reruns.
@@ -353,7 +361,10 @@ top, parameters, live plots below):
    generation's own figure, "Whole game" plots running averages over the run
    so far (gradual movement; greyed out in tournament mode, whose scores are
    already whole-game cumulative). The last run's results persist in session
-   state, so flipping any view re-renders without re-running.
+   state, so flipping any view re-renders without re-running. Below the
+   chart pair, a full-width **cooperation-rate chart** (M9b, #65): overall
+   population plus per-strategy actions-weighted lines, y pinned 0–1; the
+   final-summary area adds the cooperation pair matrix as table rows.
 
 Config assembly and scenario↔widget mapping live in the Streamlit-free
 `pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences
@@ -518,11 +529,17 @@ Each recorded run is a folder `runs/<timestamp>_<slug>/` (name collisions get
   persisting them would duplicate truth (DECISIONS #47). Loading rebuilds the
   period events and refeeds a fresh `RunTimeseries`, so every derived view is
   recomputed by the same code the live run used.
-- **`summary.json`** — `schema_version` (currently 1), run id, timestamps,
+- **`cooperation.parquet`** (schema 2 — M9b, DECISIONS #65) — RAW per-period,
+  per-strategy-PAIR rows: period, actor_strategy, opponent_strategy,
+  cooperation_rate, actions_counted. Same raw-vs-derived rule: per-strategy
+  and population cooperation aggregates are recomputed on load. Rates are
+  per-generation in evolution and run-cumulative in tournament (the #65
+  asymmetry, mirroring the period events).
+- **`summary.json`** — `schema_version` (currently 2), run id, timestamps,
   code version, mode, seed, N, periods completed, scenario name (if any),
-  wall-clock duration, headline outcome, and the final
-  composition/means/totals — everything a run card renders without opening
-  the parquet.
+  wall-clock duration, headline outcome, `final_cooperation_rate` (schema 2),
+  and the final composition/means/totals — everything a run card renders
+  without opening the parquet.
 - **Chart HTML exports** — written by the CLI/UI layers via
   `viz.charts.export_run_charts` (never by `pdsim/io`, hard rule 4); a run
   folder is complete without them.
@@ -538,11 +555,13 @@ deleted (confirmation step, `delete_run`) and renamed (`rename_run`:
 validated names, collision-safe, keeps `summary.json` and the index
 coherent) from the browser.
 
-**Schema guard** (§6.3/§6.5, DECISIONS #46/#47): `summary.json`'s
-`schema_version` plus the file-naming convention — the per-strategy table is
-`timeseries.parquet` so a future per-agent table (`agents.parquet`, for
-spatial and attribute snapshots) can sit alongside without a breaking
-migration. Loaders reject folders written by a newer schema version.
+**Schema guard** (§6.3/§6.5, DECISIONS #46/#47/#65): `summary.json`'s
+`schema_version` plus the file-naming convention — sibling tables arrive
+without breaking migrations, exactly as `cooperation.parquet` did in schema 2
+and as a future per-agent table (`agents.parquet`, for spatial and attribute
+snapshots) still can. Loaders reject folders written by a NEWER schema
+version and accept older ones: a schema-1 folder simply has no cooperation
+data and renders without the cooperation chart (#65).
 
 Consumers: the headless CLI (`python -m pdsim.run <config.yaml>` or
 `--scenario NAME`) records every run; the UI's "Record this run" control

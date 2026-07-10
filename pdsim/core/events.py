@@ -75,12 +75,19 @@ class GenerationFinished:
         rounds_played: Rounds played per strategy this generation, summed
             over its agents — the denominator for the per-round score view
             (DECISIONS #44).
+        cooperation: Executed-action cooperation per ordered
+            (actor strategy, opponent strategy) pair, as
+            (cooperation rate, actions counted) — THIS generation's counts
+            only, matching the event's per-generation character
+            (DECISIONS #60/#65). Rate + count together make every aggregate
+            exactly recomputable by actions-weighted averaging.
     """
 
     index: int
     composition: dict[str, int]
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
+    cooperation: dict[tuple[str, str], tuple[float, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +105,11 @@ class CycleFinished:
         mean_scores: Cumulative mean score per agent, per strategy.
         rounds_played: Cumulative rounds played per strategy, summed over
             its agents (cumulative like the scores — DECISIONS #44).
+        cooperation: Executed-action cooperation per ordered
+            (actor strategy, opponent strategy) pair, as
+            (cooperation rate, actions counted) — CUMULATIVE over all
+            cycles so far, matching the event's cumulative character
+            (DECISIONS #60/#65).
     """
 
     index: int
@@ -105,6 +117,7 @@ class CycleFinished:
     total_scores: dict[str, float]
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
+    cooperation: dict[tuple[str, str], tuple[float, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

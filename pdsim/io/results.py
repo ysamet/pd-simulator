@@ -12,6 +12,10 @@ code — chart HTML export is driven by the CLI/UI layers through
         timeseries.parquet  RAW per-period, per-strategy rows (DECISIONS
                             #47: derived views like running averages are
                             cheap recomputations and are NOT persisted)
+        cooperation.parquet RAW per-period, per-strategy-PAIR cooperation
+                            rows (schema 2 — M9b, DECISIONS #65); the
+                            sibling-file future that #47(c)'s naming
+                            convention reserved
         summary.json        schema_version, mode, final standings, and
                             everything a run card needs without opening
                             the parquet
@@ -19,11 +23,13 @@ code — chart HTML export is driven by the CLI/UI layers through
 
 plus one appended row in ``runs/index.csv`` cataloguing every run.
 
-Schema guard (DESIGN §8, DECISIONS #46/#47): ``summary.json`` carries
-``schema_version`` (currently 1), and the per-strategy table is named
-``timeseries.parquet`` so a future per-agent table (``agents.parquet``, for
+Schema guard (DESIGN §8, DECISIONS #46/#47/#65): ``summary.json`` carries
+``schema_version`` (currently 2). Loaders accept BOTH 1 and 2 — a schema-1
+folder simply has no cooperation data and renders without the cooperation
+chart; versions above 2 are rejected. The per-strategy table is named
+``timeseries.parquet`` so further sibling tables (``agents.parquet``, for
 the §6.3 spatial and §6.5 attribute snapshots) can sit alongside without a
-breaking migration.
+breaking migration — exactly how ``cooperation.parquet`` arrived.
 
 Concurrency note: appending to ``runs/index.csv`` is not guarded against
 concurrent writers; simultaneous recording from multiple processes may
@@ -51,8 +57,21 @@ from pdsim.config.experiment import ExperimentConfig, load_config, save_config
 from pdsim.core.events import CycleFinished, Event, GenerationFinished, RunFinished
 from pdsim.core.timeseries import RunTimeseries
 
-SCHEMA_VERSION = 1
-"""Bump on any breaking change to the folder layout or file schemas."""
+SCHEMA_VERSION = 2
+"""Bump on any breaking change to the folder layout or file schemas.
+
+History: 1 = M7 original; 2 = M9b adds ``cooperation.parquet`` and the
+``final_cooperation_rate`` summary field (DECISIONS #65).
+"""
+
+COOPERATION_COLUMNS = (
+    "period",
+    "actor_strategy",
+    "opponent_strategy",
+    "cooperation_rate",
+    "actions_counted",
+)
+"""Columns of ``cooperation.parquet``, one row per (period, ordered pair)."""
 
 INDEX_COLUMNS = (
     "run_id",
@@ -219,6 +238,7 @@ class RunRecorder:
         if self.timeseries.final is None:
             raise ValueError("Cannot finalize a recording without a RunFinished event.")
         self._write_parquet()
+        self._write_cooperation_parquet()
         summary = self._write_summary()
         self._append_index(summary)
         return self.folder
@@ -251,6 +271,33 @@ class RunRecorder:
                 )
         pd.DataFrame(rows).to_parquet(self.folder / "timeseries.parquet", index=False)
 
+    def _write_cooperation_parquet(self) -> None:
+        """Write the raw per-period, per-pair cooperation table (schema 2).
+
+        One row per (period, ordered strategy pair that played); columns per
+        ``COOPERATION_COLUMNS``. Raw rows only — per-strategy and population
+        aggregates are recomputed on load by the same ``RunTimeseries`` code
+        the live run used (#47's raw-vs-derived rule; DECISIONS #65).
+        """
+        series = self.timeseries
+        rows = []
+        for i, period in enumerate(series.periods):
+            for (actor, opponent), rates in series.cooperation_pairs.items():
+                count = series.cooperation_pair_actions[(actor, opponent)][i]
+                if not count:
+                    continue  # the pair played no actions this period: no raw row
+                rows.append(
+                    {
+                        "period": period,
+                        "actor_strategy": actor,
+                        "opponent_strategy": opponent,
+                        "cooperation_rate": rates[i],
+                        "actions_counted": count,
+                    }
+                )
+        frame = pd.DataFrame(rows, columns=list(COOPERATION_COLUMNS))
+        frame.to_parquet(self.folder / "cooperation.parquet", index=False)
+
     def _write_summary(self) -> dict[str, object]:
         """Write summary.json — everything a run card needs.
 
@@ -271,6 +318,14 @@ class RunRecorder:
             "scenario": self._scenario,
             "duration_seconds": round(time.monotonic() - self._started, 3),
             "headline": _headline(final),
+            # The run card's cooperation figure (schema 2, #65): the last
+            # period's overall rate — per-generation in evolution,
+            # run-cumulative in tournament (the #65 asymmetry).
+            "final_cooperation_rate": (
+                self.timeseries.cooperation_overall[-1]
+                if self.timeseries.cooperation_overall
+                else None
+            ),
             "final_composition": final.composition,
             "final_mean_scores": final.mean_scores,
             "final_total_scores": final.total_scores,
@@ -338,7 +393,8 @@ def load_run(folder: Path | str) -> LoadedRun:
     Raises:
         FileNotFoundError: If the folder or a required file is missing.
         ValueError: If the summary's schema version is newer than this
-            code understands.
+            code understands (older versions load fine — a schema-1 folder
+            simply has no cooperation data, DECISIONS #65).
     """
     folder = Path(folder)
     summary: dict[str, object] = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
@@ -349,11 +405,13 @@ def load_run(folder: Path | str) -> LoadedRun:
         )
     config = load_config(folder / "config.yaml")
     frame = pd.read_parquet(folder / "timeseries.parquet")
+    cooperation_by_period = _read_cooperation(folder)
     timeseries = RunTimeseries(mode=str(summary["mode"]))
     for period, group in frame.groupby("period", sort=True):
         composition = dict(zip(group["strategy"], group["agents"].astype(int), strict=True))
         mean_scores = dict(zip(group["strategy"], group["mean_score"], strict=True))
         rounds = dict(zip(group["strategy"], group["rounds_played"].astype(int), strict=True))
+        cooperation = cooperation_by_period.get(int(period), {})
         if timeseries.mode == "tournament":
             totals = dict(zip(group["strategy"], group["total_score"], strict=True))
             timeseries.add(
@@ -363,6 +421,7 @@ def load_run(folder: Path | str) -> LoadedRun:
                     total_scores=totals,
                     mean_scores=mean_scores,
                     rounds_played=rounds,
+                    cooperation=cooperation,
                 )
             )
         else:
@@ -372,6 +431,7 @@ def load_run(folder: Path | str) -> LoadedRun:
                     composition=composition,
                     mean_scores=mean_scores,
                     rounds_played=rounds,
+                    cooperation=cooperation,
                 )
             )
     timeseries.add(
@@ -388,6 +448,31 @@ def load_run(folder: Path | str) -> LoadedRun:
         )
     )
     return LoadedRun(config=config, timeseries=timeseries, summary=summary)
+
+
+def _read_cooperation(folder: Path) -> dict[int, dict[tuple[str, str], tuple[float, int]]]:
+    """Read a run folder's cooperation table, if it has one (schema 2).
+
+    Args:
+        folder: The run folder.
+
+    Returns:
+        Per period: ordered pair → (rate, actions counted). Empty for
+        schema-1 folders (recorded before cooperation existed) — the
+        loader's compatibility path, DECISIONS #65.
+    """
+    path = folder / "cooperation.parquet"
+    if not path.is_file():
+        return {}
+    frame = pd.read_parquet(path)
+    by_period: dict[int, dict[tuple[str, str], tuple[float, int]]] = {}
+    for row in frame.itertuples(index=False):
+        pair = (str(row.actor_strategy), str(row.opponent_strategy))
+        by_period.setdefault(int(row.period), {})[pair] = (
+            float(row.cooperation_rate),
+            int(row.actions_counted),
+        )
+    return by_period
 
 
 def list_runs(out_dir: Path | str = "runs") -> list[dict[str, object]]:

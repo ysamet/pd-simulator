@@ -50,6 +50,17 @@ class RunTimeseries:
         rounds_played: Per-strategy rounds played (agent-rounds), one value
             per period, exactly as the events reported them — raw data the
             recorder persists (DECISIONS #47).
+        cooperation_pairs: Cooperation rate per ordered
+            (actor strategy, opponent strategy) pair, one value per period —
+            raw data the recorder persists (M9b, DECISIONS #65). Empty for
+            runs recorded before cooperation existed (schema 1).
+        cooperation_pair_actions: Actions counted per ordered pair, one
+            value per period — the weights that make aggregates exact.
+        cooperation_by_strategy: Actions-weighted cooperation rate per ACTOR
+            strategy (aggregated over its opponents), one value per period —
+            a derived view, recomputed on load like every aggregate (#47).
+        cooperation_overall: The whole population's actions-weighted
+            cooperation rate, one value per period (derived view).
         final: The closing ``RunFinished`` event, once it has arrived.
     """
 
@@ -69,6 +80,10 @@ class RunTimeseries:
         self.running_mean_scores_per_round: dict[str, list[float | None]] = {}
         self.total_scores: dict[str, list[float | None]] = {}
         self.rounds_played: dict[str, list[int]] = {}
+        self.cooperation_pairs: dict[tuple[str, str], list[float | None]] = {}
+        self.cooperation_pair_actions: dict[tuple[str, str], list[int]] = {}
+        self.cooperation_by_strategy: dict[str, list[float | None]] = {}
+        self.cooperation_overall: list[float | None] = []
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -122,6 +137,7 @@ class RunTimeseries:
             }
             self._append(self.running_mean_scores, running, fill=None)
             self._append(self.running_mean_scores_per_round, running_per_round, fill=None)
+            self._fold_cooperation(event.cooperation)
         elif isinstance(event, CycleFinished):
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
@@ -133,8 +149,47 @@ class RunTimeseries:
                 for name, total in event.total_scores.items()
             }
             self._append(self.mean_scores_per_round, per_round, fill=None)
+            self._fold_cooperation(event.cooperation)
         elif isinstance(event, RunFinished):
             self.final = event
+
+    def _fold_cooperation(self, cooperation: dict[tuple[str, str], tuple[float, int]]) -> None:
+        """Fold one period's cooperation table into the series (M9b, #65).
+
+        Events without cooperation data (runs recorded before schema 2)
+        leave every cooperation series empty, which is how charts know to
+        skip the cooperation figure entirely — no error, no gap chart.
+
+        Args:
+            cooperation: Ordered pair → (rate, actions counted); may be
+                empty.
+        """
+        if not cooperation and not self.cooperation_overall:
+            return  # a pre-cooperation run: leave the series empty
+        rates = {pair: rate for pair, (rate, _actions) in cooperation.items()}
+        actions = {pair: count for pair, (_rate, count) in cooperation.items()}
+        self._append(self.cooperation_pairs, rates, fill=None)
+        self._append(self.cooperation_pair_actions, actions, fill=0)
+        # Aggregates are actions-weighted means (#60): rate x count restores
+        # the cooperation count exactly, so no precision is lost.
+        actor_cooperations: dict[str, float] = {}
+        actor_actions: dict[str, int] = {}
+        total_cooperations = 0.0
+        total_actions = 0
+        for (actor, _opponent), (rate, count) in cooperation.items():
+            actor_cooperations[actor] = actor_cooperations.get(actor, 0.0) + rate * count
+            actor_actions[actor] = actor_actions.get(actor, 0) + count
+            total_cooperations += rate * count
+            total_actions += count
+        by_actor = {
+            name: actor_cooperations[name] / actor_actions[name]
+            for name in actor_actions
+            if actor_actions[name]
+        }
+        self._append(self.cooperation_by_strategy, by_actor, fill=None)
+        self.cooperation_overall.append(
+            total_cooperations / total_actions if total_actions else None
+        )
 
     def strategy_names(self) -> tuple[str, ...]:
         """Return every strategy seen so far, in first-appearance order.
@@ -147,15 +202,17 @@ class RunTimeseries:
 
     def _append(
         self,
-        series: dict[str, list],
-        values: dict[str, int] | dict[str, float] | dict[str, float | None],
+        series: dict,
+        values: dict,
         fill: int | float | None,
     ) -> None:
         """Append one period's values, keeping all series aligned.
 
         Args:
-            series: The per-strategy series to extend.
-            values: This period's value per strategy machine name.
+            series: The keyed series to extend (keys are strategy machine
+                names, or ordered strategy-name pairs for the cooperation
+                series).
+            values: This period's value per key.
             fill: Backfill/absence value (0 for counts, None for scores).
         """
         n_previous = len(self.periods) - 1  # periods already includes this one

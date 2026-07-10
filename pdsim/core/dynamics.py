@@ -41,12 +41,69 @@ import numpy as np
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core.accounting import build_score_accounting
 from pdsim.core.agent import Agent
-from pdsim.core.game import PrisonersDilemma
+from pdsim.core.game import Action, AgentId, PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import build_matcher
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
 from pdsim.core.strategies import create_strategy, strategy_name_of
+
+CooperationTable = dict[tuple[str, str], tuple[float, int]]
+"""Per (actor strategy, opponent strategy): (cooperation rate, actions counted).
+
+The M9b observability payload (DECISIONS #60/#65): the rate is cooperations ÷
+actions over *executed* actions (#20), and carrying the action count alongside
+makes every aggregate (per-strategy, whole population) exactly recomputable by
+actions-weighted averaging.
+"""
+
+
+class _CooperationTally:
+    """Counts executed-action cooperation per ordered strategy pair (#65).
+
+    Fed one :class:`MatchResult` at a time during the match phase; each round
+    contributes TWO actor records — one per participant, each attributed to
+    the (its strategy, opponent's strategy) ordered pair. Pure bookkeeping:
+    consumes no RNG draws and never influences the simulation.
+    """
+
+    def __init__(self) -> None:
+        """Create an empty tally."""
+        self._actions: dict[tuple[str, str], int] = {}
+        self._cooperations: dict[tuple[str, str], int] = {}
+
+    def record(self, result: MatchResult, names: dict[AgentId, str]) -> None:
+        """Fold one finished match into the counts.
+
+        Args:
+            result: The match transcript (executed actions, #20).
+            names: Strategy machine name per agent id, fixed for the phase.
+        """
+        id_a, id_b = result.agent_ids
+        pair_a = (names[id_a], names[id_b])
+        pair_b = (names[id_b], names[id_a])
+        self._actions[pair_a] = self._actions.get(pair_a, 0) + result.n_rounds
+        self._actions[pair_b] = self._actions.get(pair_b, 0) + result.n_rounds
+        coop_a = coop_b = 0
+        for record in result.rounds:
+            if record.actions[id_a] is Action.COOPERATE:
+                coop_a += 1
+            if record.actions[id_b] is Action.COOPERATE:
+                coop_b += 1
+        self._cooperations[pair_a] = self._cooperations.get(pair_a, 0) + coop_a
+        self._cooperations[pair_b] = self._cooperations.get(pair_b, 0) + coop_b
+
+    def table(self) -> CooperationTable:
+        """Return the current rates-and-counts table.
+
+        Returns:
+            Ordered pair → (cooperation rate, actions counted); only pairs
+            that actually played appear.
+        """
+        return {
+            pair: (self._cooperations.get(pair, 0) / count, count)
+            for pair, count in self._actions.items()
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,12 +125,16 @@ class GenerationReport:
             over its agents ("agent-rounds") — the exact denominator for a
             per-round score view, whatever the match-length mode
             (DECISIONS #44).
+        cooperation: Executed-action cooperation per ordered strategy pair,
+            THIS generation only (per-generation counts, matching this
+            event's per-generation character — DECISIONS #65).
     """
 
     index: int
     composition: dict[str, int]
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
+    cooperation: CooperationTable = field(default_factory=dict)
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -171,11 +232,17 @@ class PopulationDynamics:
         """
         # 1. Match phase: every pairing the matcher produces plays once.
         #    Scores and per-opponent histories accumulate on the agents.
+        #    Cooperation bookkeeping (#65) tallies executed actions on the
+        #    side — a fresh tally per generation, so rates are
+        #    per-generation like everything else in the report.
+        names = {a.agent_id: strategy_name_of(a.strategy) for a in self._population}
+        tally = _CooperationTally()
         for agent_a, agent_b in self._matcher.pairings(self._population, self._rng):
             result = self._match.play(agent_a, agent_b)
+            tally.record(result, names)
             if on_match is not None:
                 on_match(result)
-        report = self._report()
+        report = self._report(tally.table())
 
         # 2. Selection phase: one parent index per slot, all chosen against
         #    the same scored population (synchronous — no feedback). What
@@ -205,8 +272,11 @@ class PopulationDynamics:
         self._generation += 1
         return report
 
-    def _report(self) -> GenerationReport:
+    def _report(self, cooperation: CooperationTable) -> GenerationReport:
         """Summarize the just-played generation by strategy.
+
+        Args:
+            cooperation: This generation's cooperation table (#65).
 
         Returns:
             Composition counts and mean scores keyed by machine name.
@@ -217,6 +287,7 @@ class PopulationDynamics:
             composition=counts,
             mean_scores={name: totals[name] / counts[name] for name in counts},
             rounds_played=rounds,
+            cooperation=cooperation,
         )
 
 
@@ -261,6 +332,9 @@ class CycleReport:
         rounds_played: Cumulative rounds played per strategy, summed over
             its agents — cumulative like the scores, since nothing resets
             in a tournament (DECISIONS #44).
+        cooperation: Executed-action cooperation per ordered strategy pair,
+            CUMULATIVE over all cycles so far — cumulative like everything
+            else in this event (DECISIONS #65).
     """
 
     index: int
@@ -268,6 +342,7 @@ class CycleReport:
     total_scores: dict[str, float]
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
+    cooperation: CooperationTable = field(default_factory=dict)
 
 
 class TournamentDynamics:
@@ -303,6 +378,11 @@ class TournamentDynamics:
         self._matcher = build_matcher(config.matching)
         self._population = build_initial_population(config)
         self._cycle = 0
+        # Cooperation counts accumulate across the WHOLE run (#65): a
+        # tournament is one long generation, so one tally lives here rather
+        # than one per cycle.
+        self._cooperation = _CooperationTally()
+        self._names = {a.agent_id: strategy_name_of(a.strategy) for a in self._population}
 
     @property
     def population(self) -> tuple[Agent, ...]:
@@ -335,6 +415,7 @@ class TournamentDynamics:
         """
         for agent_a, agent_b in self._matcher.pairings(self._population, self._rng):
             result = self._match.play(agent_a, agent_b)
+            self._cooperation.record(result, self._names)
             if on_match is not None:
                 on_match(result)
         counts, totals, rounds = _tally_by_strategy(self._population)
@@ -344,6 +425,7 @@ class TournamentDynamics:
             total_scores=totals,
             mean_scores={name: totals[name] / counts[name] for name in counts},
             rounds_played=rounds,
+            cooperation=self._cooperation.table(),
         )
         self._cycle += 1
         return report

@@ -299,17 +299,21 @@ def _draw_charts(
     timeseries: RunTimeseries,
     left: DeltaGenerator,
     right: DeltaGenerator,
+    cooperation: DeltaGenerator,
     draw_id: int,
     per_round: bool,
     whole_game: bool,
     key_prefix: str = "chart",
 ) -> None:
-    """Redraw both mode-appropriate charts into their placeholders.
+    """Redraw the mode-appropriate charts into their placeholders.
 
     Args:
         timeseries: The run's accumulated series.
         left: Placeholder for composition (evolution) / totals (tournament).
         right: Placeholder for the mean-score chart.
+        cooperation: Full-width placeholder for the cooperation-rate chart
+            (M9b); left untouched when the run carries no cooperation data
+            (recordings from before schema 2 — DECISIONS #65).
         draw_id: Monotonic counter — Streamlit requires a fresh element key
             for each redraw within one script run.
         per_round: Score view for the mean chart (DECISIONS #44).
@@ -329,6 +333,30 @@ def _draw_charts(
         use_container_width=True,
         key=f"{key_prefix}_right_{draw_id}",
     )
+    if timeseries.cooperation_overall:
+        cooperation.plotly_chart(
+            charts.cooperation_chart(timeseries),
+            use_container_width=True,
+            key=f"{key_prefix}_coop_{draw_id}",
+        )
+
+
+def _final_summary_area(timeseries: RunTimeseries) -> None:
+    """Render the final summary table plus the cooperation pair matrix.
+
+    Args:
+        timeseries: A finished run's series (``final`` must be set).
+    """
+    if timeseries.final is None:
+        return
+    st.dataframe(charts.final_summary_rows(timeseries.final), use_container_width=True)
+    pair_rows = charts.cooperation_pair_rows(timeseries)
+    if pair_rows:
+        st.caption(
+            "Cooperation by strategy pair (final period; actor's rate against "
+            "that opponent — the M12 in-group/out-group diagnostic in table form)."
+        )
+        st.dataframe(pair_rows, use_container_width=True)
 
 
 def _run_live(
@@ -378,6 +406,7 @@ def _run_live(
         progress = st.empty()
         col_left, col_right = st.columns(2)
         chart_left, chart_right = col_left.empty(), col_right.empty()
+        chart_coop = st.empty()  # full-width, below the pair (M9b)
         period_label = "cycle" if config.mode == "tournament" else "generation"
         fine_events = 0
         draws = 0
@@ -395,11 +424,15 @@ def _run_live(
                     progress.caption(f"... {fine_events} match/round events so far")
             elif isinstance(event, GenerationFinished | CycleFinished):
                 draws += 1
-                _draw_charts(timeseries, chart_left, chart_right, draws, per_round, whole_game)
+                _draw_charts(
+                    timeseries, chart_left, chart_right, chart_coop, draws, per_round, whole_game
+                )
                 progress.caption(f"{period_label} {event.index + 1} finished")
                 if delay > 0:
                     time.sleep(delay)
-        _draw_charts(timeseries, chart_left, chart_right, draws + 1, per_round, whole_game)
+        _draw_charts(
+            timeseries, chart_left, chart_right, chart_coop, draws + 1, per_round, whole_game
+        )
         note = f"Results of the last run (seed {config.seed})"
         if stopped:
             st.warning("Run stopped — the charts show progress up to the stop.")
@@ -414,7 +447,7 @@ def _run_live(
                 f"Run complete: {final.completed} {period_label}s, seed {config.seed} "
                 "(same seed + same settings = same charts)."
             )
-            st.dataframe(charts.final_summary_rows(final), use_container_width=True)
+            _final_summary_area(timeseries)
             if recorder is not None:
                 folder = recorder.finalize()
                 settled = True
@@ -526,10 +559,14 @@ def _results_browser() -> None:
         st.error(f"Could not load {run_id}: {error}")
         return
     summary = loaded.summary
+    cooperation_rate = summary.get("final_cooperation_rate")
+    cooperation_note = (
+        f" · cooperation {cooperation_rate:.2f}" if isinstance(cooperation_rate, float) else ""
+    )
     st.caption(
         f"{summary['mode']} · N={summary['population_size']} · "
         f"{summary['periods_completed']} periods · seed {summary['seed']} · "
-        f"{summary['headline']} · recorded by pdsim "
+        f"{summary['headline']}{cooperation_note} · recorded by pdsim "
         f"{summary.get('code_version', {}).get('package', '?')}"
     )
     tournament = loaded.timeseries.mode == "tournament"
@@ -618,13 +655,13 @@ def _results_browser() -> None:
         loaded.timeseries,
         col_left.empty(),
         col_right.empty(),
+        st.empty(),
         0,
         score_view == "per_round",
         scope == "whole_game" and not tournament,
         key_prefix="browser",
     )
-    if loaded.timeseries.final is not None:
-        st.dataframe(charts.final_summary_rows(loaded.timeseries.final), use_container_width=True)
+    _final_summary_area(loaded.timeseries)
 
 
 def _run_lab() -> None:
@@ -738,9 +775,16 @@ def _run_lab() -> None:
             timeseries = last["timeseries"]
             st.caption(f"{last['note']} — switch the score views to re-render, or press Run.")
             col_left, col_right = st.columns(2)
-            _draw_charts(timeseries, col_left.empty(), col_right.empty(), 0, per_round, whole_game)
-            if timeseries.final is not None:
-                st.dataframe(charts.final_summary_rows(timeseries.final), use_container_width=True)
+            _draw_charts(
+                timeseries,
+                col_left.empty(),
+                col_right.empty(),
+                st.empty(),
+                0,
+                per_round,
+                whole_game,
+            )
+            _final_summary_area(timeseries)
 
 
 def main() -> None:

@@ -59,7 +59,11 @@ variable-N-aware from birth.
   exponential-discount options (DECISIONS #64), and the benchmark rider
   (`python -m pdsim.bench`) — spec:
   `docs/specs/M09a-selection-accounting-bench.md`; 440 tests passing.
-  Remaining: M9b — pairwise cooperation-rate recording (#60).
+  ✅ M9b landed 2026-07-09 — **M9 complete**: pairwise cooperation-rate
+  recording at strategy-pair resolution, cooperation chart + pair-matrix
+  table, `cooperation.parquet`, schema_version 2 with loaders accepting
+  both schemas (DECISIONS #65; spec
+  `docs/specs/M09b-cooperation-recording.md`); 457 tests passing.
 - **M9.5 — Sweep/search layer** (DECISIONS #59). SweepSpec YAML config
   families (base config + parameter/composition/seed axes), a parallel
   batch runner (`python -m pdsim.sweep`, multiprocessing across runs), the

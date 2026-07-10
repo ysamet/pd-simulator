@@ -999,3 +999,53 @@ addition; noted, not built). Pinned semantics:
   every seeded v1 run is byte-identical to the pre-M9a engine — enforced
   by a regression test pinning a 10-generation composition trajectory
   captured by running the same config on the M8 code (commit b169cf7).
+
+**#65 — 2026-07-09 — Pairwise cooperation-rate recording, schema_version 2
+(implements #60; completes M9).** Spec:
+`docs/specs/M09b-cooperation-recording.md`.
+(a) **Bookkeeping location**: the dynamics loops tally executed-action
+(#20) cooperation per ordered (actor strategy, opponent strategy) pair
+during the match phase; each round contributes TWO actor records, one per
+participant. Pure observability: no RNG draw was added, removed, or
+reordered — guarded by regression tests pinning seeded trajectories in
+both modes (noise and continuation draws included), captured on pre-M9b
+code (commit 4ef17cd).
+(b) **Pinned asymmetry**: evolution counts RESET each generation
+(per-generation rates, matching GenerationFinished's per-generation
+character); tournament counts ACCUMULATE across cycles (cumulative rates,
+matching CycleFinished's cumulative character — one tally lives for the
+whole run, #34/#35).
+(c) **Event payloads**: `GenerationFinished`/`CycleFinished` gain
+`cooperation: {(actor, opponent): (cooperation_rate, actions_counted)}`.
+Rate plus count makes per-strategy and population aggregates exactly
+recomputable by actions-weighted averaging. `RunTimeseries` folds the raw
+per-pair series plus two derived views — per-actor-strategy aggregates
+and an overall population rate — recomputed on load like every derived
+view (#47).
+(d) **Persistence — schema 2**: new sibling `cooperation.parquet` (period,
+actor_strategy, opponent_strategy, cooperation_rate, actions_counted; raw
+rows only) — the sibling-file future that #47(c)'s naming convention
+reserved. `summary.json` schema_version becomes 2 and gains
+`final_cooperation_rate` (the last period's overall rate — per-generation
+in evolution, run-cumulative in tournament, per (b)). Loader
+compatibility: loaders accept BOTH 1 and 2 — a schema-1 folder simply has
+no cooperation data and renders without the cooperation chart, no error,
+no migration; versions above 2 are rejected as before.
+(e) **Chart**: `viz.charts.cooperation_chart` — overall population line
+plus per-actor-strategy aggregate lines, y-axis pinned 0-1, "(cumulative)"
+labeled in tournament mode — wired into the live UI (both modes), the
+results browser, and `export_run_charts` (skipped for schema-1 loads).
+The full pair matrix renders as final-summary TABLE ROWS (#37 convention);
+the pair-matrix heatmap is deferred to M12, where the
+diagonal-vs-off-diagonal contrast becomes the in-group/out-group
+diagnostic.
+(f) **Overhead (the spec's Task 5)**: pre-change bench capture (N=50/100
+x both matchers, 3 generations, same machine/command): 0.94 / 3.46 s/gen
+round_robin and 0.16 / 0.33 random_k. Post-change, three runs: 0.46-0.48 /
+1.91-1.95 and 0.10 / 0.19 — consistently FASTER than the capture, meaning
+the pre-change numbers were inflated by first-run machine noise (cold
+caches, OneDrive), not that bookkeeping sped anything up. Conclusion: no
+observable overhead — bounded by measurement noise, far below the ~10%
+materiality bar; no speculative optimization performed. Standing note:
+single before/after bench pairs on this machine are noisy — repeat runs
+before trusting a delta.
