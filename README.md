@@ -62,6 +62,103 @@ python -m pdsim.run --scenario classic_tournament
 python -m pdsim.run runs\<some-run>\config.yaml # reproduce a recorded run
 ```
 
+## Run parameter sweeps
+
+A **sweep** runs not one experiment but a whole family of them — one base
+configuration varied along one or more axes (how many invaders you seed, a
+parameter grid, a list of random seeds) — then summarises the family as a
+table and a chart. Its first use is *invasion-threshold* questions: how large a
+cluster of cooperators must you drop into a population of defectors before
+cooperation takes over? See
+[docs/explainers/M9.5-sweeps-and-invasion.md](docs/explainers/M9.5-sweeps-and-invasion.md)
+for the science and worked examples.
+
+A sweep is a **config generator**: every experiment it produces is a normal,
+fully-validated config that could have been written by hand, so any single
+member run reproduces on its own with `python -m pdsim.run`. The runner is
+headless (there is no Sweep tab in the app yet — that is a later milestone).
+
+### The command
+
+```powershell
+python -m pdsim.sweep <spec.yaml> [--out DIR] [--processes N] [--resume] [--quiet]
+```
+
+| Argument | Default | What it does |
+|---|---|---|
+| `spec` (positional) | — | Path to a sweep spec YAML file (required). |
+| `--out DIR` | `sweeps` | Parent directory for the sweep's result folder. For large campaigns, point this **outside** the OneDrive-synced tree — OneDrive holding freshly written files slows a sweep and can cause transient file locks. |
+| `--processes N` | CPU count − 1 (min 1) | Number of worker processes to run members in parallel. `1` runs them one at a time. |
+| `--resume` | off | Continue a partial sweep: members already finished are skipped, only missing or failed ones re-run. Resume is **also automatic** whenever the sweep's folder already exists; this flag just makes the intent explicit. |
+| `--quiet` | off | Suppress the per-member progress lines. |
+
+Exit codes: **0** on success, **1** if the spec is invalid (the problems print
+as plain sentences *before* any run starts — a bad sweep never half-runs),
+**130** on Ctrl+C (finished members are kept; re-run with `--resume`).
+
+Run the bundled example (finishes in a couple of minutes):
+
+```powershell
+python -m pdsim.sweep examples\sweeps\tft_invasion.yaml --out sweeps
+```
+
+### Writing a spec
+
+A spec is a small YAML file. The bundled
+[examples/sweeps/tft_invasion.yaml](examples/sweeps/tft_invasion.yaml) is fully
+commented; its shape:
+
+```yaml
+name: tft_invasion            # names the result folder: sweeps/<name>/
+base: path/to/base.yaml       # the base config every member starts from
+# base_scenario: reciprocity_takes_over   # ...or a registered scenario, instead of `base`
+
+composition:                  # the "three-bucket" population axis (optional)
+  vary: tit_for_tat           #   the invader whose count we march upward
+  counts: [2, 4, 6, 8, 10]    #   one member per count
+  fixed: {}                   #   strategies held at a constant count (optional)
+  fill: {always_defect: 100}  #   strategies dividing the remaining seats, by % (summing to 100)
+
+parameters:                   # parameter grids (optional); each key is a registry key
+  - key: dynamics.selection_beta
+    values: [0.01, 0.1, 1.0]
+
+seeds: [1, 2, 3, 4, 5]        # replicate each combination across these seeds (required)
+
+metrics:                      # the numbers to compute from each finished run (required)
+  - metric: final_share
+    strategy: tit_for_tat
+  - metric: time_to_fixation
+    strategy: tit_for_tat
+```
+
+The sweep runs the **cross product** of the axes — every composition count ×
+every parameter value × every seed. The full catalogue of `metrics` (final
+share, fixation flag, time-to-fixation with censoring, quasi-fixation and
+cooperation-collapse measures) is in the **Outcome metrics** section of
+[docs/PARAMETERS.md](docs/PARAMETERS.md).
+
+### What you get
+
+Results land in `sweeps/<name>/`:
+
+```
+sweeps/tft_invasion/
+  sweep_spec.yaml          the spec, copied verbatim (reproducibility)
+  runs/                    one ordinary run folder per member (each re-runnable)
+    000_tit_for_tat2_seed1/
+    001_tit_for_tat2_seed2/
+    ...
+  sweep_status.json        progress + resume state
+  sweep_summary.parquet    one row per member: its axis values and its metric values
+  sweep_summary.json       run counts + the axis/metric column names
+  <metric>_vs_<axis>.html  a chart of each metric against the primary axis,
+                           with a band showing the spread across replicate seeds
+```
+
+Load `sweep_summary.parquet` with pandas for your own analysis, or open a
+member run in the app's **Results browser** to inspect it in full detail.
+
 ## Requirements
 
 - Python 3.11 or newer
@@ -157,11 +254,13 @@ pdsim/
   config/     # Parameter Registry + ExperimentConfig + Scenario Registry
   io/         # run-folder persistence
   viz/        # pure plotly chart builders
+  sweep/      # sweep/search layer (python -m pdsim.sweep)
   ui/         # Streamlit app + testable helpers
   tests/      # pytest suite
   run.py      # headless CLI (python -m pdsim.run)
+  bench.py    # wall-clock benchmark rider (python -m pdsim.bench)
   gendocs.py  # regenerates docs/PARAMETERS.md (python -m pdsim.gendocs)
-examples/     # runnable demos (event-stream consumers)
+examples/     # runnable demos (event-stream consumers) + sweeps/ example specs
 docs/         # design spec, roadmap, decision log — the project's source of truth
-              # (+ PARAMETERS.md, the generated parameter reference)
+              # (+ PARAMETERS.md reference, specs/, explainers/)
 ```
