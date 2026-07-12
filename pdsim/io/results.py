@@ -166,6 +166,8 @@ class RunRecorder:
         out_dir: Path | str = "runs",
         slug: str | None = None,
         scenario: str | None = None,
+        append_index: bool = True,
+        folder_name: str | None = None,
     ) -> None:
         """Open a run folder and write the config immediately.
 
@@ -174,20 +176,35 @@ class RunRecorder:
                 written is what ran).
             out_dir: The runs directory (default ``runs/``).
             slug: Human-readable folder-name suffix; defaults to the
-                scenario name or the run mode.
+                scenario name or the run mode. Ignored if ``folder_name`` is
+                given.
             scenario: Scenario name if the run was launched from one
                 (recorded in the index and summary; ``None`` otherwise).
+            append_index: Append a row to ``runs/index.csv`` on finalize.
+                Sweep members set this False — parallel workers must not
+                contend on one shared index file (DECISIONS #47e/#66); their
+                catalog is the sweep summary, not ``index.csv``.
+            folder_name: Exact folder name to use (still collision-suffixed),
+                bypassing the ``<timestamp>_<slug>`` convention. Sweep members
+                pass ``<NNN>_<axis-slug>`` so the sweep's ``runs/`` sorts by
+                run index (DECISIONS #66).
         """
         self._config = config
         self._out_dir = Path(out_dir)
         self._scenario = scenario
+        self._append_index = append_index
         self._started = time.monotonic()
         self.timeseries = RunTimeseries(mode=config.mode)
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        safe_slug = "".join(
-            ch if ch.isalnum() or ch in "-_" else "-" for ch in (slug or scenario or config.mode)
-        )
-        self.folder = _unique_folder(self._out_dir, f"{stamp}_{safe_slug}")
+        if folder_name is not None:
+            name = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in folder_name)
+        else:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            safe_slug = "".join(
+                ch if ch.isalnum() or ch in "-_" else "-"
+                for ch in (slug or scenario or config.mode)
+            )
+            name = f"{stamp}_{safe_slug}"
+        self.folder = _unique_folder(self._out_dir, name)
         version = _code_version()
         config_path = save_config(config, self.folder / "config.yaml")
         # YAML comments carry the code version without breaking load_config
@@ -240,7 +257,8 @@ class RunRecorder:
         self._write_parquet()
         self._write_cooperation_parquet()
         summary = self._write_summary()
-        self._append_index(summary)
+        if self._append_index:
+            self._append_index_row(summary)
         return self.folder
 
     def _write_parquet(self) -> None:
@@ -333,7 +351,7 @@ class RunRecorder:
         (self.folder / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
 
-    def _append_index(self, summary: dict[str, object]) -> None:
+    def _append_index_row(self, summary: dict[str, object]) -> None:
         """Append this run's row to ``runs/index.csv`` (header on first use).
 
         Args:

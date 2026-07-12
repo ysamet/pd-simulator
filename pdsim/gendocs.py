@@ -31,6 +31,7 @@ from pathlib import Path
 from pdsim.config.registry import ParameterSpec, all_specs
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core.strategies import all_strategies
+from pdsim.sweep.metrics import all_metrics
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "docs" / "PARAMETERS.md"
 """Where the generated document lives: ``docs/PARAMETERS.md`` in the repo."""
@@ -223,6 +224,29 @@ def generate_parameters_markdown() -> str:
             f"**Things to try:** {scenario.things_to_try}",
             "",
         ]
+
+    # --- Outcome metrics -----------------------------------------------------
+    # The fourth registry (DECISIONS #69): the numbers a sweep computes from a
+    # finished run. Rendered from all_metrics() in registration order, so this
+    # section is deterministic and the drift test covers it (DECISIONS #56).
+    lines += [
+        "## Outcome metrics",
+        "",
+        "Named measures the sweep layer (`python -m pdsim.sweep`) computes from a",
+        "finished run — the fourth registry, after the Parameter, Strategy, and",
+        "Scenario registries. Reference these by machine name in a sweep spec's",
+        "`metrics` list.",
+        "",
+    ]
+    for metric in all_metrics():
+        lines += [f"### {metric.display_name} (`{metric.name}`)", "", metric.description, ""]
+        if metric.params:
+            for param in metric.params:
+                default = "" if param.default is None else f" (default: `{param.default}`)"
+                lines.append(f"- **`{param.name}`** ({param.kind}){default} — {param.description}")
+            lines.append("")
+        else:
+            lines += ["This metric takes no parameters.", ""]
 
     # Join with single newlines; blocks already end in "" so blank lines
     # separate them. Strip any run of trailing blanks down to one newline.

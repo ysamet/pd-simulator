@@ -211,11 +211,16 @@ pdsim/
     results.py       # RunRecorder + load_run/read_index: run folders (§8)
   viz/
     charts.py        # pure builders: RunTimeseries -> plotly figures; summary rows;
-                     #   HTML export seam (§4, §8)
+                     #   HTML export seam; sweep metric-vs-axis charts (§4, §6.6, §8)
+  sweep/             # sweep/search layer (M9.5a, §6.6, DECISIONS #66-#71)
+    spec.py          #   SweepSpec + validation + three-bucket expansion
+    metrics.py       #   Outcome Metrics Registry (4th registry idiom)
+    runner.py        #   parallel runner + sweeps/<name>/ persistence
+    __main__.py      #   python -m pdsim.sweep <spec.yaml>
   ui/
     app.py           # Streamlit app: Run lab + Results browser tabs (§4.1, §8)
     helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
-  run.py             # headless CLI: python -m pdsim.run (orchestrates engine+io+viz)
+  run.py             # headless CLI: python -m pdsim.run (+ execute_run seam, §6.6)
   gendocs.py         # generates docs/PARAMETERS.md from the registries (§5)
   bench.py           # benchmark rider: python -m pdsim.bench (§3.1 trigger data)
   tests/             # pytest; includes validation against known results (see §7)
@@ -253,11 +258,12 @@ Key contracts:
      existing `Matcher` ABC: **RandomK** (O(N·k) instead of round-robin's
      O(N²); shipped in M8 — this dimension's first implementation, DECISIONS
      #57) and later **SpatialKernel**.
-  3. **Parallelism across runs** (DECISIONS #59). Whole runs are independent,
-     so batch experiments parallelize across processes — the v2/M9.5 sweep
-     layer's runner does exactly this. It speeds up *mass experiments*, not
-     any single run, which makes sweep campaigns affordable before (and
-     independently of) any vectorization.
+  3. **Parallelism across runs** (DECISIONS #59; shipped in M9.5a, #70).
+     Whole runs are independent, so batch experiments parallelize across
+     processes — the sweep layer's `multiprocessing.Pool` runner
+     (`python -m pdsim.sweep`) does exactly this. It speeds up *mass
+     experiments*, not any single run, which makes sweep campaigns affordable
+     before (and independently of) any vectorization.
 - For large N the binding constraint is **match-phase compute, not chart
   rendering** — round-robin's O(N²) matches dominate long before plotting
   does; the first two dimensions pair to reach thousands of agents at
@@ -481,21 +487,60 @@ Design guards effective **now** (DECISIONS #46):
 3. The M7 persistence schema reserves room for **per-agent attribute
    snapshots**, exactly as §6.3 already reserves spatial room (see §8).
 
-### 6.6 Sweep/search layer and Outcome Metrics Registry (v2, M9.5)
+### 6.6 Sweep/search layer and Outcome Metrics Registry (v2 — M9.5a shipped)
 
-A batch experiment layer over the M7 substrate, scoped in DECISIONS #59:
-**SweepSpec** YAML config families (a base config plus axes of variation —
-parameter grids, composition shares, seed lists — expanded into validated
-`ExperimentConfig`s), a **parallel batch runner** (`python -m pdsim.sweep`,
-multiprocessing across whole runs — performance dimension 3 of §3.1), an
-**Outcome Metrics Registry** (fourth instance of the registry idiom: named,
-documented metric functions computed from recorded run folders — pure
-post-processing over the §8 raw parquet, so metrics apply retroactively to
-old recordings), and `sweeps/<name>/` persistence (member runs + a
-one-row-per-run summary parquet + a built-in metric-vs-axis chart). The
-layer consumes only configs and run folders — no engine semantics — so
-nothing in v1 blocks it. The full design spec will be written when M9.5 is
-drafted.
+A batch experiment layer over the M7 substrate (scoped in DECISIONS #59;
+built in #66–#71; spec `docs/specs/M09c-sweep-layer.md`, companion explainer
+`docs/explainers/M9.5-sweeps-and-invasion.md`). It runs a controlled *family*
+of experiments and summarises the family as a table and a metric-vs-axis
+curve; its founding purpose is invasion-threshold questions. **M9.5a (the
+headless core) shipped**; a Streamlit **Sweep tab** for authoring, tweaking,
+and launching a sweep from the app is **M9.5b**, a separate later spec —
+the execution stays headless either way.
+
+**Defining principle (#59):** the layer consumes only configs and recorded
+run folders. It touches no engine semantics (no `pdsim/core/` change, no RNG
+change); it is a config *generator* plus post-processing over runs. Every
+member config is a fully-validated `ExperimentConfig` reproducible from its
+own `config.yaml` (hard rule 8).
+
+As-built shape:
+
+- **Subpackage `pdsim/sweep/`** (`spec.py`, `metrics.py`, `runner.py`,
+  `__main__.py`) — orchestration tier (may import config/core/io/viz),
+  **Streamlit-free** so M9.5b reuses it. `python -m pdsim.sweep <spec.yaml>`.
+- **`SweepSpec`** (pydantic, frozen, `extra="forbid"`): a base config
+  (`base` path or `base_scenario`), an optional three-bucket `composition`
+  axis, `parameters` (registry-key grids), `seeds`, and `metrics`.
+  `sweep_validation_messages(spec)` is the single Streamlit-free validation
+  path the CLI and the future tab share (the #38/#48 reuse pattern).
+  `expand(spec)` builds the cross product in a pinned order (composition
+  outermost, parameter axes in listed order, seeds innermost), fully
+  validating every member before any run executes (#66).
+- **Three-bucket composition** (#67): a varying invader, fixed counts, and
+  percentage fills of the remainder, resolved to whole agents by the
+  **largest-remainder rule** (ties broken by ascending machine name). Only
+  the resolved integer composition reaches a member's `config.yaml`.
+- **`execute_run` seam** (#68): the shared run→record→finalize orchestration
+  (extracted from `run.py`), with `RunRecorder.append_index=False` (sweep
+  members skip the shared `runs/index.csv`) and index-sorted member folder
+  names. `pdsim.viz.charts` is imported lazily so sweep workers never load
+  plotly.
+- **Outcome Metrics Registry** (#69) — the fourth registry idiom: named,
+  documented `compute(run) -> float | None` functions over the loaded
+  time series (never raw parquet), so metrics apply retroactively and
+  inherit schema compatibility (schema-1 runs yield `None` for cooperation
+  metrics). Seed set includes fixation/censoring (a two-column survival
+  encoding), quasi-fixation measures, and cooperation-collapse metrics.
+  Rendered into `docs/PARAMETERS.md` and covered by the #56 drift test.
+- **`sweeps/<name>/` persistence** (#70): the spec copy, one recorded run
+  folder per member, a single-writer `sweep_status.json` (progress + resume;
+  the parent owns all writes), a wide `sweep_summary.parquet`, a
+  `sweep_summary.json` with `schema_version` (the #47 guard's fourth
+  application), and metric-vs-axis chart HTML. A parallel
+  `multiprocessing.Pool` runner with failure isolation (a bad member never
+  kills the sweep) and resume (skip finalized members) — resume matters
+  because the working copy lives under OneDrive (#51).
 
 ## 7. Validation
 

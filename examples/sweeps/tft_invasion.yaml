@@ -1,0 +1,44 @@
+# tft_invasion.yaml — the canonical sweep example (M9.5a).
+#
+# Question: how large a cluster of Tit for Tat reciprocators must you drop into
+# a population of Always Defect before cooperation stops dying out and instead
+# takes over? This traces the invasion-threshold curve of
+# docs/explainers/M9.5-sweeps-and-invasion.md §1.4.
+#
+# Run it (with the venv active):
+#     python -m pdsim.sweep examples/sweeps/tft_invasion.yaml --out sweeps
+# Results land in sweeps/tft_invasion/ (spec copy, member runs, summary table,
+# and a metric-vs-axis chart). The whole sweep is small enough to finish in a
+# couple of minutes.
+
+name: tft_invasion
+
+# The base configuration every member starts from. Here a compact inline base
+# (you could instead point `base_scenario: reciprocity_takes_over`). The
+# composition below is REPLACED per member by the three-bucket resolution, so
+# the base composition just needs to be a valid placeholder.
+base: examples/sweeps/tft_invasion_base.yaml
+
+# The composition axis: march the invader count upward against an all-defector
+# background. As the invader count grows, the remainder (and thus the number of
+# Always Defect agents) shrinks — the classic invasion setup.
+composition:
+  vary: tit_for_tat            # the varying invader
+  counts: [2, 4, 6, 8, 10, 12, 14, 16, 20]
+  # fixed: {}                  # no strategies held at a constant count here
+  fill:
+    always_defect: 100         # defectors fill 100% of the remaining seats
+
+# Replicate each combination across ten seeds — invasion is a probability, not
+# a certainty, so a single run at each count does not estimate the threshold.
+seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# The numbers to compute from each finished run (see the Outcome metrics
+# section of docs/PARAMETERS.md for the full catalogue).
+metrics:
+  - metric: final_share        # fraction of the population Tit for Tat ends with
+    strategy: tit_for_tat
+  - metric: fixation_flag      # did Tit for Tat reach 100%?
+    strategy: tit_for_tat
+  - metric: time_to_fixation   # when did it first reach 100% (censored if never)?
+    strategy: tit_for_tat

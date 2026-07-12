@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from pdsim.run import main
+from pdsim.config.experiment import ExperimentConfig
+from pdsim.run import execute_run, main
 
 TINY_YAML = """
 seed: 7
@@ -70,6 +71,51 @@ class TestSuccessfulRuns:
         output = capsys.readouterr().out
         assert "generation 1:" not in output
         assert "Run complete" in output
+
+
+class TestExecuteRun:
+    """The shared orchestration seam behind the CLI and the sweep runner (#66)."""
+
+    def _config(self) -> ExperimentConfig:
+        """Build a tiny evolution config.
+
+        Returns:
+            A 4-agent, 2-generation config.
+        """
+        return ExperimentConfig.model_validate(
+            {
+                "population": {"size": 4, "composition": {"tit_for_tat": 2, "always_defect": 2}},
+                "match": {"rounds_per_match": 3},
+                "dynamics": {"generations": 2},
+            }
+        )
+
+    def test_export_charts_false_writes_no_html(self, tmp_path: Path) -> None:
+        """Sweep members skip chart HTML (waste, #48)."""
+        folder = execute_run(self._config(), out_dir=tmp_path / "runs", export_charts=False)
+        names = {p.name for p in folder.iterdir()}
+        assert {"config.yaml", "timeseries.parquet", "summary.json"} <= names
+        assert not any(name.endswith(".html") for name in names)
+
+    def test_append_index_false_writes_no_index(self, tmp_path: Path) -> None:
+        """Sweep members must not touch the shared runs/index.csv (#47e)."""
+        out = tmp_path / "runs"
+        execute_run(self._config(), out_dir=out, export_charts=False, append_index=False)
+        assert not (out / "index.csv").exists()
+
+    def test_defaults_write_charts_and_index(self, tmp_path: Path) -> None:
+        """The CLI defaults keep the pre-refactor behaviour."""
+        out = tmp_path / "runs"
+        folder = execute_run(self._config(), out_dir=out)
+        assert any(p.name.endswith(".html") for p in folder.iterdir())
+        assert (out / "index.csv").exists()
+
+    def test_folder_name_is_used(self, tmp_path: Path) -> None:
+        """An explicit folder name bypasses the timestamp convention (#66)."""
+        folder = execute_run(
+            self._config(), out_dir=tmp_path / "runs", export_charts=False, folder_name="007_custom"
+        )
+        assert folder.name == "007_custom"
 
 
 class TestFailures:

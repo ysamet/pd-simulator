@@ -78,6 +78,10 @@ not have `pdsim` or its dependencies installed.
 - Benchmark: `python -m pdsim.bench` (median wall-clock seconds/generation
   across an N x matcher grid — the vectorization-trigger data, DECISIONS #58;
   `--out PATH` writes CSV; output is environment-specific, never committed)
+- Run a sweep: `python -m pdsim.sweep path/to/spec.yaml` (a family of runs
+  varied along composition/parameter/seed axes; results land in `sweeps/`;
+  DECISIONS #66-#71). `--resume` continues a partial sweep; for large
+  campaigns point `--out` outside the OneDrive-synced tree.
 - Terminal demos: `python examples/quickstart.py`, `python examples/tournament_demo.py`
 
 (Keep this section updated as tooling lands.)

@@ -15,6 +15,11 @@ build/
 # Simulation output (each run folder holds config + results; see DESIGN.md §8)
 runs/
 
+# Sweep output (member runs + summary; see DESIGN.md §6.6). Anchored to the
+# repo root with a leading slash so the committed example under
+# examples/sweeps/ is NOT ignored — only the top-level results tree is.
+/sweeps/
+
 # Ephemeral session-handoff notes (CLAUDE.md session-continuity protocol) —
 # never committed, never uploaded to the design chat.
 docs/WIP.md

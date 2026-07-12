@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.colors import qualitative
 
@@ -33,7 +34,7 @@ def strategy_colors() -> dict[str, str]:
     happen to appear in a particular run.
 
     Returns:
-        Machine name → CSS color string.
+        Machine name -> CSS color string.
     """
     palette = qualitative.Plotly
     return {info.name: palette[i % len(palette)] for i, info in enumerate(all_strategies())}
@@ -316,6 +317,122 @@ def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
         # include_plotlyjs="cdn" keeps each file ~10 kB instead of ~3 MB.
         figure.write_html(path, include_plotlyjs="cdn")
         written.append(path)
+    return written
+
+
+def sweep_metric_chart(
+    summary_frame: pd.DataFrame,
+    axis_column: str,
+    metric_column: str,
+    *,
+    replicate_column: str = "seed",
+    metric_label: str | None = None,
+) -> go.Figure:
+    """Plot one sweep metric against one axis, with replicate spread (M9.5).
+
+    At each axis value the metric is aggregated across the replicate seeds
+    into a mean line plus a shaded min-max band, so the band shows how much
+    the outcome varied between repeats (companion §4) — the honest picture,
+    since invasion is a probability, not a certainty. Pure (frame in, Figure
+    out; no Streamlit), so the future Sweep tab reuses it (DECISIONS #71).
+
+    Args:
+        summary_frame: The sweep summary table (one row per member run).
+        axis_column: The column to put on the x-axis (an axis value).
+        metric_column: The metric column to put on the y-axis.
+        replicate_column: The column distinguishing repeats (default
+            ``"seed"``); rows are grouped by ``axis_column`` across it.
+        metric_label: Y-axis label; defaults to ``metric_column``.
+
+    Returns:
+        A figure with a mean line and a min-max band over the axis values.
+    """
+    frame = summary_frame[[axis_column, metric_column]].dropna()
+    grouped = frame.groupby(axis_column)[metric_column]
+    x = sorted(grouped.groups)
+    means = [grouped.get_group(value).mean() for value in x]
+    lows = [grouped.get_group(value).min() for value in x]
+    highs = [grouped.get_group(value).max() for value in x]
+
+    figure = go.Figure()
+    # Band: an upper trace, then a lower trace filled back up to it. Plotly
+    # draws the fill between the two by giving the lower trace fill="tonexty".
+    figure.add_trace(
+        go.Scatter(
+            x=x, y=highs, mode="lines", line={"width": 0}, showlegend=False, hoverinfo="skip"
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=x,
+            y=lows,
+            mode="lines",
+            line={"width": 0},
+            fill="tonexty",
+            fillcolor="rgba(68,68,68,0.15)",
+            name="replicate spread (min-max)",
+            hoverinfo="skip",
+        )
+    )
+    figure.add_trace(
+        go.Scatter(x=x, y=means, mode="lines+markers", name="mean", line={"color": "#444444"})
+    )
+    figure.update_layout(
+        title=f"{metric_label or metric_column} vs {axis_column}",
+        xaxis_title=axis_column,
+        yaxis_title=metric_label or metric_column,
+        margin={"t": 40, "b": 40},
+    )
+    return figure
+
+
+def _slugify_column(name: str) -> str:
+    """Turn a summary column name into a filesystem-safe fragment.
+
+    Args:
+        name: A column name, possibly containing ``[`` / ``]`` / ``.``.
+
+    Returns:
+        The name with non-alphanumeric runs collapsed to single underscores.
+    """
+    return "".join(ch if ch.isalnum() else "_" for ch in name).strip("_")
+
+
+def export_sweep_charts(
+    summary_frame: pd.DataFrame,
+    folder: Path,
+    axes: list[str],
+    metrics: list[str],
+    *,
+    metric_labels: dict[str, str] | None = None,
+) -> list[Path]:
+    """Write one metric-vs-axis chart HTML per (metric x axis) pair.
+
+    The sweep analog of :func:`export_run_charts` (DECISIONS #71): called by
+    the runner after a sweep finishes. Plotting stays in ``viz`` and is
+    invoked from the orchestration tier — ``pdsim/io`` and ``pdsim/sweep``
+    persistence code never import it (hard rule 4).
+
+    Args:
+        summary_frame: The sweep summary table.
+        folder: The sweep folder to write into.
+        axes: Axis column names (the x-candidates).
+        metrics: Metric column names (the y-candidates).
+        metric_labels: Optional metric column -> display label map.
+
+    Returns:
+        The written file paths.
+    """
+    labels = metric_labels or {}
+    written: list[Path] = []
+    for metric in metrics:
+        for axis in axes:
+            figure = sweep_metric_chart(
+                summary_frame, axis, metric, metric_label=labels.get(metric)
+            )
+            path = folder / f"{_slugify_column(metric)}_vs_{_slugify_column(axis)}.html"
+            figure.write_html(path, include_plotlyjs="cdn")
+            written.append(path)
     return written
 
 

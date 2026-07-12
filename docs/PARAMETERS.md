@@ -373,3 +373,68 @@ What does selection intensity actually do? With β = 0.001, scores barely matter
 Can a small band of reciprocators invade a world of defectors? Twenty Always Defect agents and just four Tit for Tats, but the matches are long (high continuation probability — a long 'shadow of the future') and selection is strong. Cooperation among the few can out-earn universal betrayal.
 
 **Things to try:** Lower the continuation probability to 0.5 (short matches) and the invasion fails — the shadow of the future is the whole story. Try 2 Tit for Tats instead of 4: is there a critical cluster size?
+
+## Outcome metrics
+
+Named measures the sweep layer (`python -m pdsim.sweep`) computes from a
+finished run — the fourth registry, after the Parameter, Strategy, and
+Scenario registries. Reference these by machine name in a sweep spec's
+`metrics` list.
+
+### Final share (`final_share`)
+
+The fraction of the population the strategy holds at the end of the run (its final count divided by the population size). 0 means it died out; 1 means it took over completely.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+
+### Reached fixation (`fixation_flag`)
+
+1 if the strategy ever grew to the entire population at any point in the run, otherwise 0. 'Fixation' is reaching 100% — the classic take-over event.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+
+### Time to fixation (`time_to_fixation`)
+
+The generation (or cycle) at which the strategy first reached the whole population. If it never did, this reports the number of periods the run lasted — pair it with 'fixation_censored' to tell the two cases apart (the run simply ended first; fixation might still have happened later).
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+
+### Fixation censored (`fixation_censored`)
+
+1 if the strategy never reached fixation during the run (so its 'time_to_fixation' is a lower bound, not the true time), otherwise 0. This is the survival-analysis 'censored' flag — it keeps runs that ended early honest instead of pretending fixation never happens.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+
+### Mean share (last k periods) (`mean_share_last_k`)
+
+The strategy's average population share over the final k generations (or cycles). A smoother 'where did it end up' measure than the single final share — useful when the population wobbles near the end.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+- **`k`** (int) (default: `10`) — How many trailing periods to average.
+
+### Ever exceeded threshold (`ever_exceeded`)
+
+1 if the strategy's share ever reached the given threshold (a fraction between 0 and 1) at any point, otherwise 0. A 'quasi-fixation' measure: when mutation keeps a population from ever being perfectly pure, 'reached 90%' is often the honest question rather than 'reached 100%'.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+- **`threshold`** (float) (default: `0.9`) — Share (0-1) the strategy must reach.
+
+### Held above threshold for k periods (`held_above_for`)
+
+1 if the strategy's share stayed at or above the threshold for at least k consecutive generations (or cycles) somewhere in the run, otherwise 0. A staying-power measure: it rewards durable dominance, not a one-period spike.
+
+- **`strategy`** (strategy) — The strategy machine name to measure.
+- **`threshold`** (float) (default: `0.9`) — Share (0-1) to stay at or above.
+- **`k`** (int) (default: `5`) — Required run of consecutive periods.
+
+### Minimum cooperation rate (`min_cooperation`)
+
+The lowest overall cooperation rate the population reached at any point (0 = everyone defecting, 1 = everyone cooperating). Catches a cooperation collapse even if the population recovers afterwards. Not available for runs recorded before cooperation tracking existed.
+
+This metric takes no parameters.
+
+### Final cooperation rate (`final_cooperation`)
+
+The overall cooperation rate at the end of the run (0 = everyone defecting, 1 = everyone cooperating). Not available for runs recorded before cooperation tracking existed.
+
+This metric takes no parameters.

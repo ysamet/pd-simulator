@@ -72,6 +72,15 @@ variable-N-aware from birth.
   cooperation-collapse metrics — pure post-processing over recorded runs),
   and `sweeps/<name>/` persistence with a per-run summary parquet and a
   metric-vs-axis chart. First research program: invasion thresholds.
+  ✅ M9.5a (headless core) landed 2026-07-11: the `pdsim/sweep/` subpackage
+  (SweepSpec + three-bucket composition + Outcome Metrics Registry +
+  parallel runner with resume and failure isolation), `python -m
+  pdsim.sweep`, and the metric-vs-axis chart builder — spec
+  `docs/specs/M09c-sweep-layer.md`, companion explainer
+  `docs/explainers/M9.5-sweeps-and-invasion.md` (DECISIONS #66-#71); 509
+  tests passing. Remaining: **M9.5b** — a Streamlit **Sweep tab** for
+  authoring, tweaking, and launching a sweep from the app (it writes the
+  same spec and launches the same runner; execution stays headless).
 - **M10 — Score-as-energy growth economy.** Reproduction cost T, offspring
   stake, per-round living cost, death at score ≤ 0, carrying capacity K;
   asynchronous (Moran-style) event mode. Possible split: synchronous

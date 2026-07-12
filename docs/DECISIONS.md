@@ -1049,3 +1049,137 @@ observable overhead — bounded by measurement noise, far below the ~10%
 materiality bar; no speculative optimization performed. Standing note:
 single before/after bench pairs on this machine are noisy — repeat runs
 before trusting a delta.
+
+**#66 — 2026-07-11 — Sweep layer (M9.5a): as-built design and SweepSpec
+shape (implements #59).** Spec: `docs/specs/M09c-sweep-layer.md`; companion
+explainer `docs/explainers/M9.5-sweeps-and-invasion.md`. New
+orchestration-tier subpackage `pdsim/sweep/` (`spec.py`, `metrics.py`,
+`runner.py`, `__main__.py`) — may import config/core/io/viz but stays
+Streamlit-free, so the future Sweep tab (M9.5b) reuses it. Run with
+`python -m pdsim.sweep <spec.yaml>`. **Defining principle held (#59):** no
+`pdsim/core/` change, no RNG change — the layer is a config *generator* plus
+post-processing over recorded runs; every member is a fully-validated
+`ExperimentConfig` reproducible from its own `config.yaml`.
+- **SweepSpec** (pydantic, frozen, `extra="forbid"`): `name`; exactly one of
+  `base` (config path) / `base_scenario`; an optional `composition`
+  (three-bucket, #67); `parameters` (list of {registry `key`, `values`});
+  `seeds`; `metrics` (list of {`metric` name + flat params}). `MetricRef`
+  uses `extra="allow"` so params author flat.
+- **Shared validation**: `sweep_validation_messages(spec)` — the
+  Streamlit-free analog of `ui.helpers.validation_messages`, the ONE path
+  the CLI and the M9.5b tab both call (the #38/#48 reuse pattern). Checks:
+  exactly-one base source; composition buckets disjoint; roster membership;
+  fill percentages sum to 100; `vary_max + Σfixed ≤ base N`; fill required
+  when seats remain; each parameter key + value valid; non-empty
+  seeds/metrics; each metric registered with valid params.
+- **Expansion**: `expand(spec) -> [MemberPlan]` is the cross product in a
+  PINNED order — **composition counts outermost, parameter axes in listed
+  order, seeds innermost** (via `itertools.product` with seeds last) — which
+  fixes `run_index`, a reproducibility contract. Every member is fully
+  validated *before any run executes* (fail fast; a failure names the
+  `run_index`). Parameter overrides use the config layer's section→field
+  mapping (`run.*` → top level, else `section.field`).
+Alternative rejected: a bespoke non-cross-product combinator (zip-style
+paired axes) — deferred; the cross product covers the invasion program and
+keeps `run_index` trivially deterministic.
+
+**#67 — 2026-07-11 — Three-bucket composition model + largest-remainder
+rounding (M9.5a).** A swept population splits into the **varying invader**
+(V, one strategy in M9.5a — modelled as a set-of-one so a future
+multi-invader is a small change, companion §3.2), **fixed** counts, and
+**fill** percentages that divide the remainder `R = N − V − Σfixed`.
+`resolve_composition(...)` allocates R across the fill bucket by the
+**largest-remainder rule**: floor each fill strategy's ideal share, then
+hand leftover seats one at a time to the largest fractional parts, **ties
+broken by ascending machine name** (deterministic — the reproducibility
+contract). Zero-count entries are dropped; the result sums to N. Worked
+example pinned in tests: N=100, invader `tit_for_tat`=2, fill 30/30/40
+`always_defect`/`always_cooperate`/`generous_tit_for_tat` → 29/30/39 (the
+.4/.4 tie goes to `always_cooperate` by name). Only the *resolved integer
+composition* is written into each member's `config.yaml`, so a member is
+reproducible with no knowledge of the sweep, percentages, or rounding rule
+(the generator-never-a-weakener principle, companion §2.3). Alternative
+rejected: rounding by simple truncation or by `round()` — both can miss or
+overshoot N; largest-remainder always sums exactly and is the standard
+apportionment method.
+
+**#68 — 2026-07-11 — `execute_run` orchestration seam + `RunRecorder`
+flags + lazy viz import (M9.5a).** The run→record→finalize orchestration
+inside `run.py`'s `main()` is extracted into public `execute_run(config,
+*, out_dir, slug, scenario, export_charts, on_period, append_index,
+folder_name)`, shared by the CLI and the sweep runner. `main()` is now a
+thin wrapper (an `on_period` printer + `export_charts=True`), preserving
+CLI output and exit codes 0/1/130. `RunRecorder` gains `append_index`
+(False for sweep members — parallel workers must not contend on one shared
+`runs/index.csv`, #47e) and `folder_name` (sweep members pass
+`<NNN>_<axis-slug>` so `runs/` sorts by run index). The
+`from pdsim.viz import charts` import is now **lazy** (inside the
+export-charts branch and the CLI's standings print) so importing `run.py`
+— and thus `execute_run` into spawn-re-imported sweep workers — does not
+pull plotly into every worker process. Existing `run.py`/`io` tests stay
+green; new tests cover the two flags. Alternative rejected: a top-level
+plotly import guarded by a flag — the import cost is paid at import time
+regardless, so laziness must be structural.
+
+**#69 — 2026-07-11 — Outcome Metrics Registry: the fourth registry idiom
+(M9.5a).** `pdsim/sweep/metrics.py` mirrors the Scenario Registry:
+`OutcomeMetricInfo` (frozen: `name`, `display_name`, mandatory
+plain-language `description`, `params` as lightweight `MetricParam`
+declarations — NOT full `ParameterSpec`, since the sweep UI is M9.5b —
+and a `compute` callable) with `register_metric`/`get_metric`/
+`all_metrics`. `compute(run: LoadedRun, **params) -> float | None` reads
+the reconstructed `timeseries`/`config`, **never raw parquet** — so metrics
+are pure post-processing that apply retroactively to any recording and
+inherit schema compatibility for free (schema-1 runs lack cooperation, so
+the cooperation metrics return `None`, #65). `None` means
+not-applicable/undefined. Strategy-param names are checked against the
+roster at compute time with a plain error. Seed set: `final_share`,
+`fixation_flag`, `time_to_fixation` + `fixation_censored` (a two-column
+**survival-analysis encoding** — a never-fixed run reports
+`time = periods_completed`, `censored = 1`; no sentinels, companion §3.4),
+`mean_share_last_k`, `ever_exceeded`, `held_above_for` (quasi-fixation
+measures for the μ>0 regime, companion §3.3), `min_cooperation`,
+`final_cooperation`. gendocs renders a new `## Outcome metrics` section
+from `all_metrics()`, covered by the existing drift test (#56). Alternative
+rejected: metrics computed live during simulation — would tie metric
+authorship to engine changes and lose retroactivity.
+
+**#70 — 2026-07-11 — Parallel runner, single-writer status, resume,
+failure isolation (M9.5a).** `run_sweep` writes `sweeps/<name>/`:
+`sweep_spec.yaml` (copied verbatim up front — the #47(d) write-ahead
+analog), `runs/<NNN>_<axis-slug>/` member folders (recorded with
+`append_index=False`, `export_charts=False`), `sweep_status.json`,
+`sweep_summary.parquet` (WIDE: `run_index`, `run_id`, `status`, `seed`,
+one column per axis, one per metric label like `time_to_fixation[tit_for_tat]`;
+rows sorted by `run_index`, never completion order), `sweep_summary.json`
+(`schema_version` 1 — the #47 guard's fourth application), and one
+metric-vs-primary-axis chart HTML per metric. Members run via a top-level,
+picklable worker over `multiprocessing.Pool.imap_unordered`; **the parent
+is the sole writer of `sweep_status.json`**, so there is no concurrency on
+it. **Failure isolation (#59):** a worker catches every exception and
+returns a `"failed"` result — a bad member never kills the sweep; its
+summary row keeps its axis columns with null metrics. **Resume:** if
+`sweeps/<name>/` exists, members whose finalized folder is present are
+skipped and only missing/failed indices re-run (automatic on folder
+existence; `--resume` makes it explicit) — in scope for M9.5a because
+OneDrive makes mid-sweep interruption likelier (#51). Two deliberate
+refinements of the spec's letter: (a) the sweep folder uses the **stable
+path** `sweeps/<name>/` (no `_unique` suffix) precisely so resume works —
+unique-suffixing would spawn a new folder every run and defeat resume;
+(b) `processes=1` runs members **serially in-process** (same worker, no
+Pool) — fast and deterministic for tests and small sweeps; the Pool path
+shares the identical worker and is exercised by the owner's CLI run. The
+Windows-spawn constraint (no closures/lambdas as workers; config crosses
+as a re-validated dict) follows #51's environment note.
+
+**#71 — 2026-07-11 — `sweep_metric_chart` + `export_sweep_charts` (M9.5a).**
+New PURE builders in `viz/charts.py`: `sweep_metric_chart(summary_frame,
+axis_column, metric_column, *, replicate_column="seed", metric_label=None)`
+plots the metric against an axis, aggregating across replicate seeds into a
+mean line plus a shaded min-max band (replicate spread — the honest picture,
+since invasion is a probability, companion §4). `export_sweep_charts` writes
+one HTML per (metric × axis), called by the runner. Kept in `viz` (frame in,
+Figure out; no Streamlit) so the M9.5b tab reuses it, and imported *lazily*
+from the runner so `pdsim/sweep` persistence code stays plotting-free
+(hard rule 4). The metric's display label is passed in by the runner rather
+than looked up, so `viz` never imports `sweep.metrics` (no cycle).

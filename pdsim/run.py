@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -29,10 +30,80 @@ from pydantic import ValidationError
 from pdsim.config.experiment import ExperimentConfig, load_config
 from pdsim.config.scenarios import all_scenario_names, get_scenario_info
 from pdsim.core import engine
-from pdsim.core.events import CycleFinished, GenerationFinished, RunFinished
+from pdsim.core.events import CycleFinished, Event, GenerationFinished, RunFinished
 from pdsim.io.results import RunRecorder
 from pdsim.ui.helpers import validation_messages  # Streamlit-free by design (#38)
-from pdsim.viz import charts
+
+# NOTE: `pdsim.viz.charts` is imported *lazily* inside execute_run's export
+# branch (not at module top) — importing this module must not pull plotly into
+# every process. The sweep runner imports execute_run into worker processes
+# (DECISIONS #66), and a top-level plotly import would load it in each worker
+# even though members never export charts.
+
+
+def execute_run(
+    config: ExperimentConfig,
+    *,
+    out_dir: Path | str = "runs",
+    slug: str | None = None,
+    scenario: str | None = None,
+    export_charts: bool = True,
+    on_period: Callable[[Event], None] | None = None,
+    append_index: bool = True,
+    folder_name: str | None = None,
+) -> Path:
+    """Run one experiment through the recorder and finalize its folder.
+
+    The shared run→record→finalize orchestration behind both the CLI
+    (:func:`main`) and the sweep runner (DECISIONS #66): the CLI passes a
+    per-period printer and exports charts; sweep workers pass ``on_period=None``,
+    ``export_charts=False`` (member chart HTML is waste, #48), and
+    ``append_index=False`` (parallel members must not contend on the shared
+    ``runs/index.csv``, #47e).
+
+    Args:
+        config: The validated experiment to run and record.
+        out_dir: Directory for the run folder.
+        slug: Folder-name suffix (defaults to scenario or run mode).
+        scenario: Scenario name for the index/summary, if any.
+        export_charts: Write chart HTML into the folder after finalizing.
+        on_period: Optional callback invoked on each ``GenerationFinished`` /
+            ``CycleFinished`` event (the CLI's progress printer).
+        append_index: Append a row to ``runs/index.csv`` on finalize.
+        folder_name: Exact run-folder name (collision-suffixed), passed by
+            sweep members for index-sorted folders (DECISIONS #66).
+
+    Returns:
+        The completed run folder.
+
+    Raises:
+        KeyboardInterrupt: Re-raised after discarding the partial recording,
+            so the caller chooses the exit code (the CLI returns 130 — #53).
+    """
+    recorder = RunRecorder(
+        config,
+        out_dir=out_dir,
+        slug=slug,
+        scenario=scenario,
+        append_index=append_index,
+        folder_name=folder_name,
+    )
+    try:
+        for event in engine.run(config):
+            recorder.add(event)
+            if on_period is not None and isinstance(event, GenerationFinished | CycleFinished):
+                on_period(event)
+    except KeyboardInterrupt:
+        recorder.discard()
+        raise
+    folder = recorder.finalize()
+    if export_charts:
+        # Lazy import (see the module-level note): keeps plotly out of
+        # plotting-free consumers such as the sweep workers.
+        from pdsim.viz import charts
+
+        charts.export_run_charts(recorder.timeseries, folder)
+    return folder
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -107,27 +178,53 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {str(error).strip(chr(39))}", file=sys.stderr)
         return 1
 
-    recorder = RunRecorder(config, out_dir=Path(args.out), slug=args.slug, scenario=scenario)
     period_label = "cycle" if config.mode == "tournament" else "generation"
+    # Capture the final period event so the standings table can be printed
+    # without re-reading the folder — execute_run consumes the stream, but the
+    # last GenerationFinished/CycleFinished carries the final figures the
+    # RunFinished mirrors (engine.py builds RunFinished from exactly this).
+    last: list[GenerationFinished | CycleFinished] = []
+
+    def on_period(event: Event) -> None:
+        """Record and (unless quiet) print each finished generation/cycle."""
+        assert isinstance(event, GenerationFinished | CycleFinished)
+        last[:] = [event]
+        if not args.quiet:
+            counts = ", ".join(f"{name}:{n}" for name, n in sorted(event.composition.items()))
+            print(f"{period_label} {event.index + 1}: {counts}")
+
     try:
-        for event in engine.run(config):
-            recorder.add(event)
-            if isinstance(event, GenerationFinished | CycleFinished) and not args.quiet:
-                counts = ", ".join(f"{name}:{n}" for name, n in sorted(event.composition.items()))
-                print(f"{period_label} {event.index + 1}: {counts}")
-            elif isinstance(event, RunFinished):
-                print(f"\nRun complete: {event.completed} {period_label}s, seed {config.seed}.")
-                for row in charts.final_summary_rows(event):
-                    print("  " + "  ".join(f"{key}={value}" for key, value in row.items()))
+        folder = execute_run(
+            config,
+            out_dir=Path(args.out),
+            slug=args.slug,
+            scenario=scenario,
+            export_charts=True,
+            on_period=on_period,
+        )
     except KeyboardInterrupt:
         # Ctrl+C is a deliberate abandonment, like the UI's Stop button:
-        # no ghost folders for partial runs (DECISIONS #53).
-        recorder.discard()
+        # execute_run already discarded the partial folder (DECISIONS #53).
         print("\nInterrupted — partial run discarded.", file=sys.stderr)
         return 130  # conventional exit code for SIGINT
-    folder = recorder.finalize()
-    charts.export_run_charts(recorder.timeseries, folder)
-    print(f"\nRecorded to {folder} (re-run exactly: python -m pdsim.run {folder / 'config.yaml'})")
+    completed = (
+        config.tournament_cycles if config.mode == "tournament" else config.dynamics.generations
+    )
+    print(f"\nRun complete: {completed} {period_label}s, seed {config.seed}.")
+    if last:
+        from pdsim.viz import charts  # lazy: keep plotting out of importers
+
+        final = last[0]
+        run_finished = RunFinished(
+            mode=config.mode,
+            completed=completed,
+            composition=final.composition,
+            mean_scores=final.mean_scores,
+            total_scores=getattr(final, "total_scores", None),
+        )
+        for row in charts.final_summary_rows(run_finished):
+            print("  " + "  ".join(f"{key}={value}" for key, value in row.items()))
+    print(f"Recorded to {folder} (re-run exactly: python -m pdsim.run {folder / 'config.yaml'})")
     return 0
 
 
