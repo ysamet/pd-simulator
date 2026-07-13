@@ -41,10 +41,14 @@ Out of scope for v1 (but nothing may block them): everything below.
 
 ## v2 — Economy-first: growth, sweeps, tags, group games
 
-Milestone spine (DECISIONS #58): **M9 → M9.5 → M10 → M12 → M11 → M13 → M14**.
+Milestone spine (DECISIONS #58; sweep-browser placement #75):
+**M9 → M9.5 → M10 → sweep browser → M12 → M11 → M13 → M14**.
 M12 deliberately runs *before* M11: the owner's research program targets
 tag-based/ethnocentrism dynamics, and tags come after M10 so they are built
-variable-N-aware from birth.
+variable-N-aware from birth. The sweep browser (kept descriptively named —
+no M-number until scoped) runs right after M10, not before it: M10's
+variable-N invariant is the spine's load-bearing change and must not wait
+behind a read-only convenience (#75).
 
 - **M9 — Selection rules, score accounting, cooperation recording.**
   Fitness-proportional, tournament(k), truncation/elitist, and
@@ -87,7 +91,8 @@ variable-N-aware from birth.
   metric-vs-axis chart) — spec `docs/specs/M09d-sweep-tab.md` (DECISIONS
   #72-#74); 555 tests passing. The comprehensive **sweep browser**
   (member-run drilldown, multi-sweep browsing, overlays, filtering) remains
-  a deliberately deferred, named follow-on increment (#74).
+  a deliberately deferred follow-on — scheduled as the FIRST increment
+  AFTER M10, not immediately next (#74, #75; see the bullet below).
 - **M10 — Score-as-energy growth economy.** Reproduction cost T, offspring
   stake, per-round living cost, death at score ≤ 0, carrying capacity K;
   asynchronous (Moran-style) event mode. Possible split: synchronous
@@ -95,6 +100,14 @@ variable-N-aware from birth.
   policy, death semantics, birth/death RNG order (seeded-history contract
   extending #32), selection under energy-driven reproduction, matchers
   under variable N, event/schema changes (DECISIONS #58).
+- **Sweep browser (deferred follow-on — first increment after M10; no
+  M-number until scoped).** Member-run drilldown from a sweep's summary,
+  multi-sweep interactive browsing, multi-curve overlays, summary-table
+  filtering, side-by-side member comparison — the affordances deferred out
+  of M9.5b. Sequenced here so it is designed from real invasion-campaign
+  evidence (which sweeps get re-opened, what actually gets compared)
+  rather than guessed up front, and so M10's variable-N invariant is not
+  held behind a read-only convenience (DECISIONS #74, #75).
 - **M12 (before M11) — Agent attributes + attribute-conditional
   strategies.** Generic attributes mapping with visibility and inheritance
   policies; strategies conditioning on an opponent's visible tags (Riolo
@@ -133,4 +146,6 @@ buy the needed scale (M9's benchmark rider supplies the data; DECISIONS #58).
 - Sweep operation story. The sweep *capability* itself is v2/M9.5
   (DECISIONS #59); what remains for v3+ is only how it is operated at
   scale: scheduled, Cowork-driven experiment campaigns, plus the deferred
-  search increments (adaptive threshold bisection, sweep browsing in the UI).
+  adaptive threshold-bisection search increment. (In-UI sweep browsing is
+  no longer v3+ — it is scheduled in v2 as the first increment after M10,
+  DECISIONS #75.)

@@ -1249,3 +1249,30 @@ exclude `run.seed` (seeds are a first-class axis; a `run.seed` parameter
 axis would be silently overwritten by the seed loop), and a name matching
 an existing `sweeps/<name>/` folder shows a resume notice — the true #70
 runner behaviour, surfaced rather than hidden.
+
+**#75 — 2026-07-13 — The sweep-browser increment is sequenced AFTER M10
+(v2 spine update).** The deferred comprehensive sweep browser named in #74
+(member-run drilldown, multi-curve overlays, summary-table filtering,
+side-by-side member comparison) is deliberately scheduled after M10, not
+immediately next. The updated v2 spine is
+**M9.5 → M10 → sweep browser → M12 → M11 → M13 → M14** (amending the #58
+spine, which predates the browser increment). Rationale: (a) M10 — the
+score-as-energy growth economy — is the load-bearing invariant change of
+the v2 spine: variable population size is the most *infectious* invariant,
+and every downstream milestone (tags/M12, parameter-perturbation
+mutation/M11, group games/M13–M14) must be built variable-N-aware from
+birth rather than retrofitted around a fixed-population assumption; that
+change cannot wait behind a convenience layer. (b) The sweep browser is a
+read-only convenience over persistence that already lands correctly
+(#70: `sweep_status.json`, `sweep_summary.parquet`/`.json`, ordinary
+reproducible member run folders) — nothing breaks and no debt accumulates
+by waiting on it. (c) It is nonetheless slated as the FIRST increment
+after M10, preserving #74's rationale that the browser's affordances
+should be designed from real campaign evidence rather than guessed up
+front — running actual invasion campaigns during and after M10 is exactly
+what surfaces which affordances matter (which sweeps get re-opened, what
+actually gets compared). Alternative rejected: building the browser
+immediately after M9.5b while the sweep layer is fresh — that would hold
+the spine's invariant change behind a convenience and would guess the
+browser's shape without campaign evidence. The browser increment keeps a
+descriptive name (no M-number) until it is scoped.
