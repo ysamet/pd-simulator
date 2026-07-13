@@ -78,9 +78,16 @@ variable-N-aware from birth.
   pdsim.sweep`, and the metric-vs-axis chart builder — spec
   `docs/specs/M09c-sweep-layer.md`, companion explainer
   `docs/explainers/M9.5-sweeps-and-invasion.md` (DECISIONS #66-#71); 509
-  tests passing. Remaining: **M9.5b** — a Streamlit **Sweep tab** for
-  authoring, tweaking, and launching a sweep from the app (it writes the
-  same spec and launches the same runner; execution stays headless).
+  tests passing.
+  ✅ M9.5b (Sweep tab) landed 2026-07-13 — **M9.5 complete**: a third
+  Streamlit tab authors the full SweepSpec surface (structural three-bucket
+  composition UI, parameter axes, seeds, metrics), validates through the
+  one shared path, launches the unchanged headless runner as a detached
+  subprocess, and monitors it (manual status refresh + the headline
+  metric-vs-axis chart) — spec `docs/specs/M09d-sweep-tab.md` (DECISIONS
+  #72-#74); 555 tests passing. The comprehensive **sweep browser**
+  (member-run drilldown, multi-sweep browsing, overlays, filtering) remains
+  a deliberately deferred, named follow-on increment (#74).
 - **M10 — Score-as-energy growth economy.** Reproduction cost T, offspring
   stake, per-round living cost, death at score ≤ 0, carrying capacity K;
   asynchronous (Moran-style) event mode. Possible split: synchronous

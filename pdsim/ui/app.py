@@ -5,11 +5,13 @@ Launch from the repo root (with the venv active):
     streamlit run pdsim/ui/app.py
 
 This module is deliberately thin (DECISIONS #38): presentation and Streamlit
-calls only. It does exactly two things with the platform — builds an
-``ExperimentConfig`` from widget state, and consumes the
-``engine.run(config, granularity)`` event stream — via the testable logic in
-:mod:`pdsim.ui.helpers`, :mod:`pdsim.core.timeseries`, and
-:mod:`pdsim.viz.charts`. The parameter panel is *generated* from the
+calls only. It does exactly three things with the platform — builds an
+``ExperimentConfig`` from widget state, consumes the
+``engine.run(config, granularity)`` event stream, and (the Sweep tab, M9.5b)
+authors a ``SweepSpec`` and spawns the headless sweep CLI — via the testable
+logic in :mod:`pdsim.ui.helpers`, :mod:`pdsim.ui.sweep_helpers`,
+:mod:`pdsim.core.timeseries`, and :mod:`pdsim.viz.charts`.
+The parameter panel is *generated* from the
 Parameter Registry, so every widget's tooltip is the registry's
 novice-friendly description (hard rule 3): a parameter added to the registry
 appears here with zero UI edits.
@@ -18,9 +20,11 @@ appears here with zero UI edits.
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 from pydantic import ValidationError
 from streamlit.delta_generator import DeltaGenerator
@@ -33,7 +37,15 @@ from pdsim.core.events import CycleFinished, GenerationFinished, MatchFinished, 
 from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, delete_run, load_run, rename_run, sync_index
-from pdsim.ui import helpers
+from pdsim.sweep.metrics import all_metrics
+from pdsim.sweep.spec import (
+    SweepSpec,
+    expand,
+    resolve_composition,
+    sweep_spec_yaml,
+    sweep_validation_messages,
+)
+from pdsim.ui import helpers, sweep_helpers
 from pdsim.viz import charts
 
 CUSTOM = "Custom"
@@ -44,6 +56,9 @@ PROGRESS_EVERY = 200
 
 RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
 """Where recordings go; the env override exists for tests (DECISIONS #49)."""
+
+SWEEPS_DIR = Path(os.environ.get("PDSIM_SWEEPS_DIR", "sweeps"))
+"""Where the Sweep tab launches sweeps into (mirrors RUNS_DIR, DECISIONS #72)."""
 
 st.set_page_config(page_title="pdsim — Evolutionary Prisoner's Dilemma", layout="wide")
 
@@ -787,15 +802,636 @@ def _run_lab() -> None:
             _final_summary_area(timeseries)
 
 
+def _fill_range_field(target_key: str, start: int, stop: int, step: int) -> None:
+    """Write a built integer range into a text field (range-builder callback).
+
+    Button callbacks run before the next script render, so writing another
+    widget's session-state value here is legal; a bad range stages a plain
+    error the next render shows instead.
+
+    Args:
+        target_key: Session-state key of the text field to fill.
+        start: First value of the range.
+        stop: Last candidate value (inclusive when the step lands on it).
+        step: Increment between values.
+    """
+    try:
+        values = sweep_helpers.build_range(start, stop, step)
+    except ValueError as error:
+        st.session_state["_sweep_range_error"] = str(error)
+    else:
+        st.session_state[target_key] = ", ".join(str(value) for value in values)
+
+
+def _add_param_axis() -> None:
+    """Append a new parameter-axis row (button callback)."""
+    next_id = st.session_state.get("_sweep_axis_seq", 0)
+    st.session_state["_sweep_axis_seq"] = next_id + 1
+    st.session_state["sweep_param_axes"] = [*st.session_state.get("sweep_param_axes", []), next_id]
+
+
+def _remove_param_axis(axis_id: int) -> None:
+    """Remove one parameter-axis row (button callback).
+
+    Args:
+        axis_id: The row's stable identity in the session-state list.
+    """
+    st.session_state["sweep_param_axes"] = [
+        existing for existing in st.session_state.get("sweep_param_axes", []) if existing != axis_id
+    ]
+
+
+def _sweep_composition_area(fields: dict[str, object]) -> dict[str, object] | None:
+    """Render the composition-axis section; return the authored axis dict.
+
+    The three-bucket model is STRUCTURAL here (DECISIONS #73): the varying
+    invader is excluded from the bucket rows, and each remaining strategy
+    has ONE bucket radio — so the "buckets disjoint" rule is impossible to
+    violate from the UI. A live preview shows the resolved integer
+    composition at the largest count, using the real engine arithmetic
+    (:func:`~pdsim.sweep.spec.resolve_composition`).
+
+    Args:
+        fields: The authored values so far (the base fields drive the
+            preview's population size).
+
+    Returns:
+        ``{vary, counts, fixed, fill}``, or ``None`` when the axis is off.
+    """
+    include = st.checkbox(
+        "Include a composition axis",
+        key="sweep_comp_on",
+        help=(
+            "March one strategy's starting count across a range while the rest of "
+            "the population keeps a constant character — the classic invasion "
+            "experiment. Off = every member run keeps the base config's mix."
+        ),
+    )
+    if not include:
+        return None
+    names = [info.name for info in all_strategies()]
+    with st.expander("Composition axis", expanded=True):
+        vary = st.selectbox(
+            "Varying invader",
+            options=names,
+            key="sweep_vary",
+            help=(
+                "The strategy whose starting count the sweep marches upward. "
+                "Machine names are shown because they are what the sweep YAML uses."
+            ),
+        )
+        counts_text = st.text_input(
+            "Invader counts",
+            key="sweep_counts",
+            help=(
+                "The invader counts to try, e.g. '2, 4, 6, 8'. One member run is "
+                "made per count (times every seed and parameter combination)."
+            ),
+        )
+        col_start, col_stop, col_step, col_fill = st.columns([1, 1, 1, 1])
+        start = int(
+            col_start.number_input(
+                "Range start", min_value=0, value=2, step=1, key="sweep_counts_start"
+            )
+        )
+        stop = int(
+            col_stop.number_input(
+                "Range stop", min_value=0, value=20, step=1, key="sweep_counts_stop"
+            )
+        )
+        step = int(
+            col_step.number_input(
+                "Range step", min_value=1, value=2, step=1, key="sweep_counts_step"
+            )
+        )
+        col_fill.button(
+            "Fill counts",
+            key="sweep_counts_fill",
+            on_click=_fill_range_field,
+            args=("sweep_counts", start, stop, step),
+            help="Write start..stop (step apart) into the counts field; edit freely after.",
+        )
+        counts: list[int] = []
+        try:
+            counts = sweep_helpers.parse_int_list(counts_text)
+        except ValueError as error:
+            st.error(str(error))
+        st.markdown(
+            "**Background buckets** — every other strategy is either absent "
+            "(*none*), held at a constant count (*fixed*), or takes a percentage "
+            "of the leftover seats (*fill*). Fill percentages must sum to 100."
+        )
+        fixed: dict[str, int] = {}
+        fill: dict[str, float] = {}
+        for info in all_strategies():
+            if info.name == vary:
+                continue
+            col_name, col_bucket, col_value = st.columns([2, 3, 2])
+            col_name.markdown(f"{info.display_name}")
+            bucket = col_bucket.radio(
+                f"Bucket for {info.name}",
+                options=["none", "fixed", "fill"],
+                key=f"sweep_bucket#{info.name}",
+                horizontal=True,
+                label_visibility="collapsed",
+                help=info.description,
+            )
+            if bucket == "fixed":
+                fixed[info.name] = int(
+                    col_value.number_input(
+                        f"Fixed count for {info.name}",
+                        min_value=1,
+                        value=1,
+                        step=1,
+                        key=f"sweep_fixed#{info.name}",
+                        label_visibility="collapsed",
+                        help="This many agents of the strategy, in every member run.",
+                    )
+                )
+            elif bucket == "fill":
+                fill[info.name] = float(
+                    col_value.number_input(
+                        f"Fill percentage for {info.name}",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=100.0,
+                        step=5.0,
+                        key=f"sweep_fill#{info.name}",
+                        label_visibility="collapsed",
+                        help=(
+                            "This strategy's share of the seats left after the "
+                            "invader and the fixed counts are placed."
+                        ),
+                    )
+                )
+        if fill:
+            fill_total = sum(fill.values())
+            if abs(fill_total - 100) > 1e-6:
+                st.warning(f"Fill percentages sum to {fill_total:g} — they must sum to 100.")
+            else:
+                st.caption(f"Fill percentages sum to {fill_total:g}.")
+        # Live preview: the real three-bucket arithmetic at the largest count
+        # (largest-remainder rounding included), so what you see is exactly
+        # what the member configs get (explainer §2.2/§4).
+        size = sweep_helpers.base_population_size(fields)
+        if counts and size is not None:
+            try:
+                resolved = resolve_composition(size, vary, max(counts), fixed, fill)
+            except ValueError as error:
+                st.warning(str(error))
+            else:
+                resolved_text = ", ".join(f"{name} {count}" for name, count in resolved.items())
+                st.caption(
+                    f"Preview at the largest invader count ({max(counts)}): "
+                    f"{resolved_text} — total {size}."
+                )
+    return {"vary": vary, "counts": counts, "fixed": fixed, "fill": fill}
+
+
+def _sweep_parameter_axes_area() -> list[dict[str, object]]:
+    """Render the add/remove parameter-axis rows; return the authored axes.
+
+    Each axis pairs a Parameter Registry key with a list of values to try;
+    the sweep runs the cross product of all axes. Values are parsed and
+    checked per axis (``sweep_helpers.parse_value_list`` /
+    ``validate_parameter_values``) so errors appear next to their widget.
+
+    Returns:
+        One ``{key, values}`` dict per authored axis.
+    """
+    st.markdown("**Parameter axes** — sweep any registry parameter over a list of values.")
+    st.button(
+        "Add parameter axis",
+        key="sweep_add_axis",
+        on_click=_add_param_axis,
+        help=(
+            "Each axis multiplies the sweep: 3 values on one axis and 4 on another "
+            "make 12 combinations (times counts and seeds)."
+        ),
+    )
+    # run.seed is excluded: seeds are their own first-class axis below, and a
+    # run.seed parameter axis would be silently overwritten by the seed loop.
+    keys = [spec.key for spec in helpers.panel_specs() if spec.key != "run.seed"]
+    axes: list[dict[str, object]] = []
+    for axis_id in st.session_state.get("sweep_param_axes", []):
+        col_key, col_values, col_remove = st.columns([2, 3, 1])
+        key = col_key.selectbox(
+            "Parameter",
+            options=keys,
+            key=f"sweep_axis_key#{axis_id}",
+            help="Any Parameter Registry key; its registry rules validate each value.",
+        )
+        text = col_values.text_input(
+            "Values",
+            key=f"sweep_axis_values#{axis_id}",
+            help="Comma/space-separated values to try, e.g. '0.01, 0.1, 1.0'.",
+        )
+        col_remove.button(
+            "Remove",
+            key=f"sweep_axis_remove#{axis_id}",
+            on_click=_remove_param_axis,
+            args=(axis_id,),
+        )
+        values: list[ParamValue] = []
+        try:
+            values = sweep_helpers.parse_value_list(key, text)
+        except ValueError as error:
+            st.error(str(error))
+        for message in sweep_helpers.validate_parameter_values(key, values):
+            st.error(message)
+        axes.append({"key": key, "values": values})
+    return axes
+
+
+def _sweep_metrics_area() -> list[dict[str, object]]:
+    """Render the metric multiselect + per-metric params; return MetricRefs.
+
+    Metrics come from the Outcome Metrics Registry (the fourth registry,
+    DECISIONS #69), so a newly registered metric appears here with zero UI
+    edits — each declared ``MetricParam`` renders by its kind (a strategy
+    selectbox, or a number input).
+
+    Returns:
+        One ``{metric, **params}`` dict per selected metric.
+    """
+    infos = {info.display_name: info for info in all_metrics()}
+    chosen = st.multiselect(
+        "Metrics",
+        options=list(infos),
+        key="sweep_metrics",
+        help=(
+            "The numbers to compute from each finished member run (one summary "
+            "column each). Docs: the 'Outcome metrics' section of docs/PARAMETERS.md."
+        ),
+    )
+    strategy_names = [info.name for info in all_strategies()]
+    refs: list[dict[str, object]] = []
+    for display_name in chosen:
+        info = infos[display_name]
+        ref: dict[str, object] = {"metric": info.name}
+        if info.params:
+            columns = st.columns(max(3, len(info.params)))
+            for i, param in enumerate(info.params):
+                widget_key = f"sweep_metric#{info.name}#{param.name}"
+                label = f"{param.name} — {info.display_name}"
+                with columns[i % len(columns)]:
+                    if param.kind == "strategy":
+                        ref[param.name] = st.selectbox(
+                            label, options=strategy_names, key=widget_key, help=param.description
+                        )
+                    elif param.kind == "int":
+                        ref[param.name] = int(
+                            st.number_input(
+                                label,
+                                min_value=1,
+                                value=int(param.default or 1),
+                                step=1,
+                                key=widget_key,
+                                help=param.description,
+                            )
+                        )
+                    else:  # float params are shares in [0, 1] (threshold)
+                        ref[param.name] = float(
+                            st.number_input(
+                                label,
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=float(param.default or 0.0),
+                                step=0.05,
+                                key=widget_key,
+                                help=param.description,
+                            )
+                        )
+        refs.append(ref)
+    return refs
+
+
+def _sweep_validation_area(fields: dict[str, object]) -> SweepSpec | None:
+    """Validate the authored fields; render errors or the expansion size.
+
+    ONE validation path (DECISIONS #72): structural errors surface through
+    the same :func:`helpers.validation_messages` extraction the Run lab
+    uses, semantic errors through the same
+    :func:`~pdsim.sweep.spec.sweep_validation_messages` the CLI prints.
+
+    Args:
+        fields: The complete authored-values dict.
+
+    Returns:
+        The clean, launchable spec — or ``None`` while anything is wrong.
+    """
+    try:
+        spec = sweep_helpers.build_sweep_spec(fields)
+    except ValidationError as error:
+        for message in helpers.validation_messages(error):
+            st.error(message)
+        return None
+    messages = sweep_validation_messages(spec)
+    for message in messages:
+        st.error(message)
+    if messages:
+        return None
+    try:
+        member_count = len(expand(spec))
+    except ValueError as error:
+        st.error(str(error))
+        return None
+    st.success(
+        f"This sweep expands to {member_count} member runs."
+        + (" That is a lot — consider fewer values per axis." if member_count > 1000 else "")
+    )
+    yaml_text = sweep_spec_yaml(spec)
+    with st.expander("Authored sweep spec (YAML)"):
+        st.caption(
+            "Exactly what Launch writes and the CLI reads — you could save this "
+            "and run `python -m pdsim.sweep <file> --out sweeps` yourself."
+        )
+        st.code(yaml_text, language="yaml")
+        st.download_button(
+            "Download spec YAML",
+            data=yaml_text,
+            file_name=f"{spec.name}.yaml",
+            mime="text/yaml",
+            key="sweep_download",
+        )
+    return spec
+
+
+def _sweep_launch_area(spec: SweepSpec | None) -> None:
+    """Render the resume notice and the Launch button; spawn the runner.
+
+    Launch is a DETACHED subprocess of the unchanged headless CLI
+    (DECISIONS #72): the authored spec is written to a named file, then
+    ``python -m pdsim.sweep <spec> --out <dir>`` is spawned with its output
+    captured to a launch log. The Streamlit script thread never blocks, and
+    the running sweep is inspectable/killable exactly like a terminal one.
+
+    Args:
+        spec: The validated spec, or ``None`` (button disabled).
+    """
+    name = str(st.session_state.get("sweep_name", "")).strip()
+    if name and sweep_helpers.sweep_folder_exists(SWEEPS_DIR, name):
+        st.info(
+            f"A sweep named '{name}' already exists under {SWEEPS_DIR}/ — launching "
+            "will RESUME it: members already finished are skipped and only missing "
+            "or failed ones run. Pick a new name (or delete the folder) for a "
+            "fresh sweep."
+        )
+    if st.button("Launch sweep", type="primary", key="sweep_launch", disabled=spec is None):
+        assert spec is not None  # the button is disabled otherwise
+        SWEEPS_DIR.mkdir(parents=True, exist_ok=True)
+        spec_path = sweep_helpers.write_authored_spec(
+            spec, sweep_helpers.authored_spec_path(SWEEPS_DIR, spec.name)
+        )
+        command = sweep_helpers.build_launch_command(spec_path, SWEEPS_DIR)
+        log_path = sweep_helpers.launch_log_path(SWEEPS_DIR, spec.name)
+        # The child inherits the log handle; closing the parent's copy right
+        # after Popen is safe and keeps this script run non-blocking.
+        with open(log_path, "w", encoding="utf-8") as log_handle:
+            subprocess.Popen(command, stdout=log_handle, stderr=subprocess.STDOUT)
+        st.session_state["_launched_sweep"] = spec.name
+        st.success(
+            f"Launched `{' '.join(command)}` — the app stays responsive while it "
+            f"runs. Follow progress with 'Refresh status' below; output goes to "
+            f"{log_path}."
+        )
+
+
+def _sweep_monitor_area() -> None:
+    """Render the monitor: sweep picker, manual refresh, status, headline chart.
+
+    Deliberately NOT a browser (DECISIONS #74): status plus ONE
+    metric-vs-axis chart, read from the sweep's own files. The status file
+    is read-only here — the runner subprocess is its sole writer (#70) —
+    and refresh is a manual click (a sweep is a minutes-scale job; no
+    auto-poll timer, no add-on dependency).
+    """
+    st.subheader("Monitor")
+    names = sweep_helpers.list_sweep_names(SWEEPS_DIR)
+    if not names:
+        st.info(
+            "No sweeps yet. Author and launch one above, or run one headlessly: "
+            "`python -m pdsim.sweep examples/sweeps/tft_invasion.yaml`."
+        )
+        return
+    # A widget's own key may only be written before it exists in a script
+    # run (the #52 pattern): a just-launched sweep stages its name here.
+    staged = st.session_state.pop("_launched_sweep", None)
+    if staged in names:
+        st.session_state["monitor_sweep"] = staged
+    elif st.session_state.get("monitor_sweep") not in names:
+        st.session_state["monitor_sweep"] = names[0]
+    col_pick, col_refresh = st.columns([4, 1])
+    name = col_pick.selectbox(
+        "Sweep",
+        options=names,
+        key="monitor_sweep",
+        help="Every sweep folder currently under sweeps/ (most recently active first).",
+    )
+    col_refresh.button(
+        "Refresh status",
+        key="monitor_refresh",
+        help=(
+            "Re-read this sweep's status file (the runner rewrites it after every "
+            "member run). The click is the refresh — there is no auto-polling."
+        ),
+    )
+    status = sweep_helpers.read_sweep_status(SWEEPS_DIR, name)
+    if status is None:
+        st.info(
+            "No status file yet — the runner writes sweep_status.json once it "
+            "starts. Press 'Refresh status' in a moment."
+        )
+    else:
+        col_total, col_done, col_failed, col_left = st.columns(4)
+        col_total.metric("Total members", int(status.get("total", 0)))
+        col_done.metric("Completed", int(status.get("completed", 0)))
+        col_failed.metric("Failed", int(status.get("failed", 0)))
+        col_left.metric("Remaining", int(status.get("running", 0)))
+        st.caption(
+            f"Started {status.get('started_at', '?')} · last update {status.get('updated_at', '?')}"
+        )
+        rows = sweep_helpers.status_rows(status)
+        if rows:
+            st.dataframe(rows, use_container_width=True)
+    log_path = sweep_helpers.launch_log_path(SWEEPS_DIR, name)
+    if log_path.is_file():
+        with st.expander("Launch log"):
+            try:
+                st.code(log_path.read_text(encoding="utf-8")[-4000:] or "(empty so far)")
+            except OSError as error:
+                st.caption(f"Could not read the launch log right now: {error}")
+    parquet_path = SWEEPS_DIR / name / "sweep_summary.parquet"
+    if parquet_path.is_file():
+        meta = None
+        try:
+            meta = sweep_helpers.read_sweep_summary_meta(SWEEPS_DIR, name)
+        except ValueError as error:
+            st.error(str(error))
+        if meta is not None:
+            frame = pd.read_parquet(parquet_path)
+            axis_options = [
+                column for column in meta.get("axis_columns", []) if column in frame.columns
+            ] or ["seed"]
+            metric_options = [
+                column for column in meta.get("metric_columns", []) if column in frame.columns
+            ]
+            if metric_options:
+                col_axis, col_metric = st.columns(2)
+                axis = col_axis.selectbox(
+                    "Axis (x)",
+                    options=axis_options,
+                    key=f"monitor_axis#{name}",  # per-sweep key: switching resets cleanly
+                    help="The swept quantity to put on the x-axis.",
+                )
+                metric = col_metric.selectbox(
+                    "Metric (y)",
+                    options=metric_options,
+                    key=f"monitor_metric#{name}",
+                    help="The outcome metric to plot (mean line + replicate-spread band).",
+                )
+                labels = sweep_helpers.metric_display_labels(meta)
+                st.plotly_chart(
+                    charts.sweep_metric_chart(frame, axis, metric, metric_label=labels.get(metric)),
+                    use_container_width=True,
+                    key=f"monitor_chart#{name}",
+                )
+    else:
+        st.caption("The headline chart appears here once the sweep finishes.")
+    st.caption(
+        f"Member run folders live under {SWEEPS_DIR / name / 'runs'} — each is an "
+        "ordinary, independently reproducible run folder. Rich per-member and "
+        "cross-sweep browsing arrives in the follow-on sweep-browser increment."
+    )
+
+
+def _sweep_tab() -> None:
+    """Lay out the Sweep tab: author a SweepSpec, launch it, monitor it.
+
+    A thin rendering shell (DECISIONS #38 applied again): every branch worth
+    testing lives in :mod:`pdsim.ui.sweep_helpers`. The tab authors the SAME
+    ``sweep_spec.yaml`` the CLI consumes and spawns the SAME runner —
+    execution stays headless (DECISIONS #72; explainer §4).
+    """
+    st.markdown(
+        "Author a **sweep** — a whole family of runs varied along composition, "
+        "parameter, and seed axes — then launch it headlessly and watch its "
+        "progress. Execution is the unchanged `python -m pdsim.sweep` CLI, so a "
+        "launched sweep can equally be resumed, inspected, or stopped from a "
+        "terminal."
+    )
+    range_error = st.session_state.pop("_sweep_range_error", None)
+    if range_error:
+        st.error(range_error)
+
+    fields: dict[str, object] = {}
+    fields["name"] = st.text_input(
+        "Sweep name",
+        key="sweep_name",
+        help=(
+            "A safe lowercase token like 'tft_invasion_app' — it becomes the "
+            "sweeps/<name>/ folder name."
+        ),
+    ).strip()
+    base_kind = st.radio(
+        "Base configuration",
+        options=["From a scenario", "From a config file"],
+        key="sweep_base_kind",
+        horizontal=True,
+        help=(
+            "Every member run starts from this configuration; the axes below "
+            "override its composition, parameters, and seed per member."
+        ),
+    )
+    if base_kind == "From a scenario":
+        scenarios = {info.display_name: info for info in all_scenarios()}
+        choice = st.selectbox(
+            "Base scenario",
+            options=list(scenarios),
+            key="sweep_base_scenario",
+            help="A curated scenario to use as the base configuration.",
+        )
+        fields["base_kind"] = "scenario"
+        fields["base_scenario"] = scenarios[choice].name
+    else:
+        fields["base_kind"] = "path"
+        fields["base_path"] = st.text_input(
+            "Config file path",
+            key="sweep_base_path",
+            help=(
+                "Path to a run config YAML — e.g. the config.yaml inside any recorded run folder."
+            ),
+        )
+    fields["composition"] = _sweep_composition_area(fields)
+    fields["parameters"] = _sweep_parameter_axes_area()
+
+    seeds_text = st.text_input(
+        "Seeds",
+        key="sweep_seeds",
+        help=(
+            "The random seeds to replicate every combination over. Invasion is a "
+            "probability, not a certainty — several seeds per point estimate it "
+            "(explainer §3.5)."
+        ),
+    )
+    col_seed_start, col_seed_count, col_seed_fill = st.columns([1, 1, 1])
+    seed_start = int(
+        col_seed_start.number_input(
+            "First seed", min_value=0, value=1, step=1, key="sweep_seed_start"
+        )
+    )
+    seed_count = int(
+        col_seed_count.number_input(
+            "How many seeds", min_value=1, value=10, step=1, key="sweep_seed_count"
+        )
+    )
+    col_seed_fill.button(
+        "Fill seeds",
+        key="sweep_seeds_fill",
+        on_click=_fill_range_field,
+        args=("sweep_seeds", seed_start, seed_start + seed_count - 1, 1),
+        help="Write a consecutive seed list into the seeds field; edit freely after.",
+    )
+    try:
+        fields["seeds"] = sweep_helpers.parse_int_list(seeds_text)
+    except ValueError as error:
+        st.error(str(error))
+        fields["seeds"] = []
+
+    fields["metrics"] = _sweep_metrics_area()
+
+    st.divider()
+    # A completely untouched tab shows a pointer instead of validation errors.
+    authored_anything = any(
+        (
+            fields["name"],
+            fields["composition"],
+            fields["parameters"],
+            fields["seeds"],
+            fields["metrics"],
+        )
+    )
+    if authored_anything:
+        spec = _sweep_validation_area(fields)
+    else:
+        st.caption("Fill in the sections above — validation runs as you author.")
+        spec = None
+    _sweep_launch_area(spec)
+    st.divider()
+    _sweep_monitor_area()
+
+
 def main() -> None:
-    """Lay out the app: the live Run lab and the Results browser tabs."""
+    """Lay out the app: the Run lab, Results browser, and Sweep tabs."""
     st.title("Evolutionary Prisoner's Dilemma Simulator")
     _apply_pending_load()
-    tab_lab, tab_browser = st.tabs(["Run lab", "Results browser"])
+    tab_lab, tab_browser, tab_sweep = st.tabs(["Run lab", "Results browser", "Sweep"])
     with tab_lab:
         _run_lab()
     with tab_browser:
         _results_browser()
+    with tab_sweep:
+        _sweep_tab()
 
 
 main()

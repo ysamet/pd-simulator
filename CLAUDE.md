@@ -81,7 +81,11 @@ not have `pdsim` or its dependencies installed.
 - Run a sweep: `python -m pdsim.sweep path/to/spec.yaml` (a family of runs
   varied along composition/parameter/seed axes; results land in `sweeps/`;
   DECISIONS #66-#71). `--resume` continues a partial sweep; for large
-  campaigns point `--out` outside the OneDrive-synced tree.
+  campaigns point `--out` outside the OneDrive-synced tree. The app's
+  **Sweep tab** authors and launches the same sweeps from the UI — it
+  writes the spec YAML and spawns this exact command as a detached
+  subprocess, so execution stays headless and a tab-launched sweep is
+  resumable/killable from the terminal like any other (DECISIONS #72-#74).
 - Terminal demos: `python examples/quickstart.py`, `python examples/tournament_demo.py`
 
 (Keep this section updated as tooling lands.)

@@ -1183,3 +1183,69 @@ Figure out; no Streamlit) so the M9.5b tab reuses it, and imported *lazily*
 from the runner so `pdsim/sweep` persistence code stays plotting-free
 (hard rule 4). The metric's display label is passed in by the runner rather
 than looked up, so `viz` never imports `sweep.metrics` (no cycle).
+
+**#72 — 2026-07-13 — Sweep tab launches a detached subprocess of the
+unchanged CLI (M9.5b).** The Streamlit **Sweep tab** (third tab; spec
+`docs/specs/M09d-sweep-tab.md`) authors the COMPLETE SweepSpec surface,
+validates it through the ONE shared path (`sweep_validation_messages`, with
+structural pydantic errors extracted by the same
+`helpers.validation_messages` the Run lab uses — the #38/#48 reuse rule),
+writes the authored spec to a NAMED, re-launchable file
+(`sweeps/<name>.authored.yaml`, via `save_sweep_spec`), and launches
+`subprocess.Popen([sys.executable, "-m", "pdsim.sweep", <spec>, "--out",
+<dir>])` with output captured to `sweeps/<name>.launch.log`. **Execution
+changes nothing** (#59: the sweep layer is a config generator; the tab is a
+config *author* on top of it): a tab-launched sweep is resumable,
+inspectable, and killable by the identical means as a terminal one, and its
+`sweep_spec.yaml` is accepted verbatim by the CLI. Monitoring is a manual
+"Refresh status" click reading `sweep_status.json` (the tab only READS it;
+the runner subprocess remains its sole writer, #70) plus the existing pure
+`sweep_metric_chart` over `sweep_summary.parquet`. All tab logic worth
+testing lives in the new Streamlit-free `pdsim/ui/sweep_helpers.py` (the
+#38 helpers split, applied again; tested in `test_sweep_ui.py`), and
+`SWEEPS_DIR` mirrors `RUNS_DIR` including a `PDSIM_SWEEPS_DIR` test
+override (#49). Alternatives rejected: running `run_sweep` **in-process**
+(blocks Streamlit's single script thread for the sweep's whole duration,
+and any rerun/Stop kills it mid-flight, #53); a **background thread**
+(spawning a `multiprocessing.Pool` from a daemon thread across the Windows
+spawn boundary is fragile (#51), and the sweep would die with the app
+session — a detached process survives it); an **auto-refresh timer** (an
+add-on dependency to poll a minutes-scale job; the manual click is honest
+and dependency-free). Two small shared-path additions ride along:
+`sweep_spec_yaml(spec)` in `pdsim/sweep/spec.py` (`save_sweep_spec` now
+writes exactly this string, so the tab's YAML preview/download can never
+diverge from the persisted file), and the sweep **name rule** wired into
+`sweep_validation_messages` (`_NAME_PATTERN` was declared in M9.5a but
+never checked — dormant until free-typed tab names made it live).
+
+**#73 — 2026-07-13 — Structural three-bucket composition UI (M9.5b).** The
+tab renders bucket membership as ONE radio per non-vary strategy
+({none, fixed, fill} plus a count/percentage field), and the varying
+invader is excluded from the bucket rows by construction — so the
+"buckets disjoint" rule (#66) is impossible to violate from the UI (the
+shared validator still enforces it for the CLI path). The live preview
+calls the real `resolve_composition` at the largest authored count — the
+explainer §4 preview arithmetic, exercised through the engine's own
+largest-remainder code rather than a UI reimplementation — and the running
+fill-percentage sum warns when ≠ 100. Alternative rejected: free-form
+fixed/fill dict editors mirroring the YAML — every overlap error becomes
+reachable and needs error messaging; the structural form makes those
+states unrepresentable.
+
+**#74 — 2026-07-13 — Full authoring surface in v1; the sweep BROWSER is a
+named, deferred follow-on (M9.5b).** The tab authors the complete
+SweepSpec surface (name, base scenario/config, composition axis, N
+parameter axes, seeds, N metrics), but monitoring deliberately stops at
+status + ONE headline metric-vs-axis chart. Member-run drilldown,
+multi-sweep interactive browsing, multi-curve overlays, summary-table
+filtering, and side-by-side member comparison are deferred to a dedicated
+**sweep-browser** increment on the ROADMAP, and the Results browser is
+deliberately NOT wired to scan `sweeps/<name>/runs/`. Rationale: the
+authoring surface is fully specified by the SweepSpec model that already
+exists, while the browser's affordances should be designed from real
+campaign evidence (which sweeps get re-opened, what actually gets
+compared) rather than guessed up front. Two scope details: parameter axes
+exclude `run.seed` (seeds are a first-class axis; a `run.seed` parameter
+axis would be silently overwritten by the seed loop), and a name matching
+an existing `sweeps/<name>/` folder shows a resume notice — the true #70
+runner behaviour, surfaced rather than hidden.

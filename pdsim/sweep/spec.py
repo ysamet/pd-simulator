@@ -190,6 +190,22 @@ def load_sweep_spec(path: str | Path) -> SweepSpec:
     return SweepSpec.model_validate(data)
 
 
+def sweep_spec_yaml(spec: SweepSpec) -> str:
+    """Return a spec's YAML text (the one serialization path, M9.5b).
+
+    :func:`save_sweep_spec` writes exactly this string, so the Sweep tab's
+    YAML preview/download and the persisted file can never diverge.
+
+    Args:
+        spec: The spec to serialize.
+
+    Returns:
+        YAML text that round-trips through :func:`load_sweep_spec`.
+    """
+    data = spec.model_dump(mode="json", exclude_none=True)
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
 def save_sweep_spec(spec: SweepSpec, path: str | Path) -> Path:
     """Write a sweep spec to a YAML file (round-trips through load_sweep_spec).
 
@@ -202,8 +218,7 @@ def save_sweep_spec(spec: SweepSpec, path: str | Path) -> Path:
     """
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    data = spec.model_dump(mode="json", exclude_none=True)
-    out.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    out.write_text(sweep_spec_yaml(spec), encoding="utf-8")
     return out
 
 
@@ -437,6 +452,16 @@ def sweep_validation_messages(spec: SweepSpec) -> list[str]:
 
     messages: list[str] = []
     roster = set(all_strategy_names())
+
+    # --- Name --------------------------------------------------------------
+    # The name becomes the sweeps/<name>/ folder, so it must be a safe token.
+    # (_NAME_PATTERN was declared in M9.5a but wired to a check only in
+    # M9.5b, when the Sweep tab made free-typed names likely.)
+    if not _NAME_PATTERN.match(spec.name):
+        messages.append(
+            f"sweep name {spec.name!r} must be a lowercase token like 'tft_invasion' "
+            "(letters, digits, and underscores, starting with a letter)."
+        )
 
     # --- Base source -------------------------------------------------------
     base: ExperimentConfig | None = None
