@@ -106,28 +106,39 @@ class RandomK(Matcher):
         pairing sequence to be drawn before the first match plays, so
         pairing draws never interleave with in-match draws (DECISIONS #57).
 
+        **The variable-N contract (M10a):** the draw size is clamped to
+        ``min(k, N − 1)``, so a population the energy economy has shrunk
+        below k + 1 agents keeps playing — everyone simply meets everyone.
+        At every N ≥ k + 1 (the only regime the fixed-N engine could ever
+        occupy) the clamp is a literal no-op, so every pre-M10a seeded
+        ``random_k`` history is byte-identical (#57 preserved). Corners: at
+        N = 2 each agent plays the one other; at N = 1 the lone survivor
+        draws ``size=0`` — an empty draw that consumes NO RNG — plays 0
+        matches, earns 0, and still pays its living cost (the intended
+        thermodynamics of a population of one under a metabolic bill); at
+        N = 0 there are no initiators and the run has already ended.
+        Rejected alternatives: *raising* (a valid config must not crash
+        because the population got small mid-run — a metabolic filter is
+        supposed to be able to shrink a population, that is the science) and
+        *skipping* (0 matches when N − 1 < k — a discontinuous cliff: one
+        death away from k matches you would play none, with no mechanism
+        motivating the jump). Config validation still enforces k ≤ N − 1
+        for generation 0.
+
         Args:
             agents: The current population, in agent-id order.
             rng: The run's seeded random generator; consumes exactly one
-                k-sized without-replacement draw per agent, in agent order.
+                without-replacement draw of ``min(k, N − 1)`` opponents per
+                agent, in agent order (no draw at all when N ≤ 1).
 
         Returns:
-            An iterator over N·k (initiator, opponent) pairs, in draw order.
-
-        Raises:
-            ValueError: If k exceeds N - 1 (defensive — config validation
-                enforces this for engine runs; the message is for direct
-                callers).
+            An iterator over N·min(k, N−1) (initiator, opponent) pairs, in
+            draw order.
         """
-        if self._k > len(agents) - 1:
-            raise ValueError(
-                f"random_k needs {self._k} distinct opponents per agent, but a "
-                f"population of {len(agents)} offers only {len(agents) - 1}."
-            )
         pairs: list[tuple[Agent, Agent]] = []
         for initiator in agents:
             others = [agent for agent in agents if agent is not initiator]
-            drawn = rng.choice(len(others), size=self._k, replace=False)
+            drawn = rng.choice(len(others), size=min(self._k, len(others)), replace=False)
             pairs.extend((initiator, others[index]) for index in drawn)
         return iter(pairs)
 

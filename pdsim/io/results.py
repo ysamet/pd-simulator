@@ -16,6 +16,12 @@ code — chart HTML export is driven by the CLI/UI layers through
                             rows (schema 2 — M9b, DECISIONS #65); the
                             sibling-file future that #47(c)'s naming
                             convention reserved
+        agents.parquet      RAW per-period, per-AGENT snapshot rows
+                            (schema 3 — M10a): passport id, parent id,
+                            age, energy, strategy. Written only when the
+                            run produced snapshots (energy-economy runs);
+                            births/deaths are reconstructed by diff, so no
+                            born/died flags (raw-not-derived, #47)
         summary.json        schema_version, mode, final standings, and
                             everything a run card needs without opening
                             the parquet
@@ -24,12 +30,16 @@ code — chart HTML export is driven by the CLI/UI layers through
 plus one appended row in ``runs/index.csv`` cataloguing every run.
 
 Schema guard (DESIGN §8, DECISIONS #46/#47/#65): ``summary.json`` carries
-``schema_version`` (currently 2). Loaders accept BOTH 1 and 2 — a schema-1
-folder simply has no cooperation data and renders without the cooperation
-chart; versions above 2 are rejected. The per-strategy table is named
-``timeseries.parquet`` so further sibling tables (``agents.parquet``, for
-the §6.3 spatial and §6.5 attribute snapshots) can sit alongside without a
-breaking migration — exactly how ``cooperation.parquet`` arrived.
+``schema_version``. Loaders accept 1, 2, AND 3 — a schema-1 folder simply
+has no cooperation data and renders without the cooperation chart, a
+schema-1/2 folder has no per-agent data and renders without the economy
+charts; versions above 3 are rejected. The version tracks the presence of
+per-agent data: an imitation run under M10a code still writes schema 2 (and
+no ``agents.parquet``), so pre-M10a recordings and new imitation recordings
+are indistinguishable — which is exactly the byte-identity promise. The
+per-strategy table is named ``timeseries.parquet`` so sibling tables can sit
+alongside without a breaking migration — exactly how ``cooperation.parquet``
+arrived in schema 2 and ``agents.parquet`` in schema 3.
 
 Concurrency note: appending to ``runs/index.csv`` is not guarded against
 concurrent writers; simultaneous recording from multiple processes may
@@ -54,14 +64,24 @@ import pandas as pd
 
 import pdsim
 from pdsim.config.experiment import ExperimentConfig, load_config, save_config
-from pdsim.core.events import CycleFinished, Event, GenerationFinished, RunFinished
+from pdsim.core.events import AgentSnapshot, CycleFinished, Event, GenerationFinished, RunFinished
 from pdsim.core.timeseries import RunTimeseries
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 """Bump on any breaking change to the folder layout or file schemas.
 
 History: 1 = M7 original; 2 = M9b adds ``cooperation.parquet`` and the
-``final_cooperation_rate`` summary field (DECISIONS #65).
+``final_cooperation_rate`` summary field (DECISIONS #65); 3 = M10a adds
+``agents.parquet``, ``total_agents_born``, and ``population_final``.
+"""
+
+PER_STRATEGY_SCHEMA_VERSION = 2
+"""What a run WITHOUT per-agent data writes (imitation runs under M10a code).
+
+The schema version tracks the presence of per-agent data: only runs that
+produced snapshots (energy-economy runs) write ``agents.parquet`` and
+declare schema 3; everything else keeps writing 2, byte-identical to
+pre-M10a recordings.
 """
 
 COOPERATION_COLUMNS = (
@@ -72,6 +92,22 @@ COOPERATION_COLUMNS = (
     "actions_counted",
 )
 """Columns of ``cooperation.parquet``, one row per (period, ordered pair)."""
+
+AGENTS_COLUMNS = (
+    "period",
+    "agent_id",
+    "parent_id",
+    "age",
+    "energy",
+    "strategy",
+)
+"""Columns of ``agents.parquet``, one row per (period, post-boundary agent).
+
+``parent_id`` is a nullable integer (pandas ``Int64``): founders are
+``<NA>``. There is deliberately no born/died flag — any id present at G but
+not G−1 was born at G, any id present at G−1 but not G died during G, so
+the birth/death record is derivable by diff (raw-not-derived, #47).
+"""
 
 INDEX_COLUMNS = (
     "run_id",
@@ -136,12 +172,16 @@ def _headline(final: RunFinished) -> str:
         final: The run's closing event.
 
     Returns:
-        Evolution: the most numerous final strategy and its count.
+        Evolution: the most numerous final strategy and its count — or the
+        extinction notice for an economy run whose population emptied
+        (M10a: a legitimate outcome, reported rather than raised).
         Tournament: the winner by mean score per agent.
     """
     if final.mode == "tournament":
         winner = max(final.mean_scores, key=lambda name: final.mean_scores[name])
         return f"winner: {winner} ({final.mean_scores[winner]:.1f}/agent)"
+    if not final.composition:
+        return f"population extinct at generation {final.completed}"
     top = max(final.composition, key=lambda name: final.composition[name])
     return f"top strategy: {top} ({final.composition[top]}/{sum(final.composition.values())})"
 
@@ -207,6 +247,17 @@ class RunRecorder:
         self.folder = _unique_folder(self._out_dir, name)
         version = _code_version()
         config_path = save_config(config, self.folder / "config.yaml")
+        # The header comment anticipates the schema from the config (the
+        # comment is written up front, before any event arrives): only an
+        # energy-economy evolution run produces per-agent data and schema 3;
+        # everything else keeps writing 2, so imitation configs stay
+        # byte-identical to pre-M10a recordings. summary.json's version is
+        # decided at finalize time from the data actually recorded.
+        anticipated = (
+            SCHEMA_VERSION
+            if config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy"
+            else PER_STRATEGY_SCHEMA_VERSION
+        )
         # YAML comments carry the code version without breaking load_config
         # (extra *keys* would be rejected by the strict schema — comments
         # are invisible to the parser; DECISIONS #47).
@@ -214,7 +265,7 @@ class RunRecorder:
         config_path.write_text(
             f"# recorded by pdsim {version['package']}"
             f" (git {version['git'] or 'unknown'})\n"
-            f"# schema_version: {SCHEMA_VERSION}\n" + original,
+            f"# schema_version: {anticipated}\n" + original,
             encoding="utf-8",
         )
         self._version = version
@@ -256,10 +307,21 @@ class RunRecorder:
             raise ValueError("Cannot finalize a recording without a RunFinished event.")
         self._write_parquet()
         self._write_cooperation_parquet()
+        self._write_agents_parquet()
         summary = self._write_summary()
         if self._append_index:
             self._append_index_row(summary)
         return self.folder
+
+    def _has_agent_data(self) -> bool:
+        """Whether this run produced per-agent snapshots (M10a, schema 3).
+
+        Returns:
+            True if any period recorded a non-empty snapshot — the single
+            predicate behind ``agents.parquet``, the summary's schema
+            version, and the economy summary fields.
+        """
+        return any(self.timeseries.agent_snapshots)
 
     def _write_parquet(self) -> None:
         """Write the raw per-period, per-strategy table (DECISIONS #47).
@@ -316,16 +378,59 @@ class RunRecorder:
         frame = pd.DataFrame(rows, columns=list(COOPERATION_COLUMNS))
         frame.to_parquet(self.folder / "cooperation.parquet", index=False)
 
+    def _write_agents_parquet(self) -> None:
+        """Write the raw per-period, per-agent snapshot table (schema 3).
+
+        One row per (period, post-boundary agent); columns per
+        ``AGENTS_COLUMNS``. Written ONLY when the run produced snapshots —
+        imitation runs get no file (and stay schema 2). A period with no
+        rows is meaningful: the population was extinct after that boundary.
+        Raw rows only — the per-strategy energy/age means are recomputed on
+        load by the same ``RunTimeseries`` code the live run used (#47).
+        """
+        if not self._has_agent_data():
+            return
+        series = self.timeseries
+        rows = []
+        for i, period in enumerate(series.periods):
+            for snapshot in series.agent_snapshots[i]:
+                rows.append(
+                    {
+                        "period": period,
+                        "agent_id": snapshot.agent_id,
+                        "parent_id": snapshot.parent_id,
+                        "age": snapshot.age,
+                        "energy": snapshot.energy,
+                        "strategy": snapshot.strategy,
+                    }
+                )
+        frame = pd.DataFrame(rows, columns=list(AGENTS_COLUMNS))
+        # Nullable integer dtype: founders' parent_id is a real <NA>, not a
+        # float NaN that would corrupt the ids of everyone else.
+        frame["parent_id"] = frame["parent_id"].astype("Int64")
+        frame.to_parquet(self.folder / "agents.parquet", index=False)
+
     def _write_summary(self) -> dict[str, object]:
         """Write summary.json — everything a run card needs.
+
+        Note the two population fields: ``population_size`` is config-derived
+        and therefore means the INITIAL size (left alone on purpose — every
+        existing consumer reads it); ``population_final`` (schema 3) is the
+        size of the last post-boundary snapshot, which is what a growth
+        economy ends with (0 for an extinct run, ``None`` for runs without
+        per-agent data).
 
         Returns:
             The summary mapping (also used for the index row).
         """
         final = self.timeseries.final
         assert final is not None  # guarded by finalize()
+        has_agents = self._has_agent_data()
+        snapshots = self.timeseries.agent_snapshots
         summary: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
+            # The version tracks the presence of per-agent data (M10a):
+            # imitation runs keep writing 2, byte-identical to pre-M10a.
+            "schema_version": SCHEMA_VERSION if has_agents else PER_STRATEGY_SCHEMA_VERSION,
             "run_id": self.folder.name,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "code_version": self._version,
@@ -348,6 +453,18 @@ class RunRecorder:
             "final_mean_scores": final.mean_scores,
             "final_total_scores": final.total_scores,
         }
+        if has_agents:
+            # total_agents_born drops out of the id contract for free: ids
+            # are issued 0..max and never reused, so the largest passport id
+            # ever seen (+1 for 0-based ids) counts every agent ever created,
+            # founders included.
+            summary["total_agents_born"] = (
+                max(s.agent_id for snapshot in snapshots for s in snapshot) + 1
+            )
+            summary["population_final"] = len(snapshots[-1])
+        else:
+            summary["total_agents_born"] = None
+            summary["population_final"] = None
         (self.folder / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
 
@@ -424,6 +541,7 @@ def load_run(folder: Path | str) -> LoadedRun:
     config = load_config(folder / "config.yaml")
     frame = pd.read_parquet(folder / "timeseries.parquet")
     cooperation_by_period = _read_cooperation(folder)
+    agents_by_period = _read_agents(folder)
     timeseries = RunTimeseries(mode=str(summary["mode"]))
     for period, group in frame.groupby("period", sort=True):
         composition = dict(zip(group["strategy"], group["agents"].astype(int), strict=True))
@@ -450,6 +568,7 @@ def load_run(folder: Path | str) -> LoadedRun:
                     mean_scores=mean_scores,
                     rounds_played=rounds,
                     cooperation=cooperation,
+                    agents=agents_by_period.get(int(period), ()),
                 )
             )
     timeseries.add(
@@ -491,6 +610,36 @@ def _read_cooperation(folder: Path) -> dict[int, dict[tuple[str, str], tuple[flo
             int(row.actions_counted),
         )
     return by_period
+
+
+def _read_agents(folder: Path) -> dict[int, tuple[AgentSnapshot, ...]]:
+    """Read a run folder's per-agent snapshot table, if it has one (schema 3).
+
+    Args:
+        folder: The run folder.
+
+    Returns:
+        Per period: the post-boundary snapshots, in stored (ascending id)
+        order. Empty for schema-1/2 folders — the loader's compatibility
+        path (#65): those runs simply render without the economy views.
+    """
+    path = folder / "agents.parquet"
+    if not path.is_file():
+        return {}
+    frame = pd.read_parquet(path)
+    by_period: dict[int, list[AgentSnapshot]] = {}
+    for row in frame.itertuples(index=False):
+        by_period.setdefault(int(row.period), []).append(
+            AgentSnapshot(
+                agent_id=int(row.agent_id),
+                # Founders are stored as pandas <NA>; back to Python None.
+                parent_id=None if pd.isna(row.parent_id) else int(row.parent_id),
+                age=int(row.age),
+                energy=float(row.energy),
+                strategy=str(row.strategy),
+            )
+        )
+    return {period: tuple(snapshots) for period, snapshots in by_period.items()}
 
 
 def list_runs(out_dir: Path | str = "runs") -> list[dict[str, object]]:

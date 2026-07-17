@@ -190,12 +190,15 @@ never appear in a suggested commit file list.
 
 ## Current phase
 
-v2 per `docs/ROADMAP.md`, on the economy-first milestone spine
-M9 → M9.5 → M10 → sweep browser → M12 → M11 → M13 → M14 (DECISIONS #58,
-#75). v1 — pairwise repeated PD, object-per-agent engine, Fermi selection,
-strategy-switch mutation, Streamlit UI, persistence + headless CLI — is
-complete (M8, 2026-07-07). M9 (selection rules, score accounting,
-cooperation recording) and M9.5 (sweep layer + Sweep tab) are complete.
-Next up: M10 (score-as-energy growth economy — chat-designed first); the
-deferred sweep browser follows M10 (DECISIONS #75). Design everything to
-not block the v2/v3 extensions listed in `docs/DESIGN.md` §6.
+v2 per `docs/ROADMAP.md`, on the renumbered economy-first spine
+**M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18** (DECISIONS #76;
+execution order = numeric order, no gaps). v1 — pairwise repeated PD,
+object-per-agent engine, Fermi selection, strategy-switch mutation,
+Streamlit UI, persistence + headless CLI — is complete (M8, 2026-07-07).
+M9 (selection rules, accounting, cooperation recording), M9.5 (sweep layer
++ Sweep tab), and **M10a (the score-as-energy growth economy, synchronous
+generational — variable N, energy ledger, births/deaths, extinction,
+schema 3)** are complete (DECISIONS #76-#84). Next up: M11 (population
+structure — adjacency + local birth; chat-designed first), with M10b
+(async/Moran event time) a separate later spec. Design everything to not
+block the v2/v3 extensions listed in `docs/DESIGN.md` §6.

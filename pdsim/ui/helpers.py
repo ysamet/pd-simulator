@@ -18,7 +18,11 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import ValidationError
 
-from pdsim.config.experiment import ExperimentConfig
+from pdsim.config.experiment import (
+    ExperimentConfig,
+    resolve_initial_energy,
+    resolve_senescence_factor,
+)
 from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
@@ -27,6 +31,7 @@ _SECTIONS = ("game", "matching", "match", "population", "dynamics")
 
 IGNORED_IN_TOURNAMENT = (
     "dynamics.generations",
+    "dynamics.reproduction_mode",
     "dynamics.selection_rule",
     "dynamics.selection_beta",
     "dynamics.selection_tournament_k",
@@ -36,8 +41,50 @@ IGNORED_IN_TOURNAMENT = (
     "dynamics.score_accounting",
     "dynamics.accounting_window",
     "dynamics.accounting_discount",
+    "dynamics.reproduction_threshold",
+    "dynamics.offspring_stake",
+    "dynamics.initial_energy",
+    "dynamics.basic_living_cost",
+    "dynamics.engagement_cost",
+    "dynamics.reproduction_overhead",
+    "dynamics.capital_return_rate",
+    "dynamics.carrying_capacity",
+    "dynamics.base_hazard",
+    "dynamics.senescence_factor",
+    "dynamics.max_age",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
+
+_ECONOMY_PARAMS = (
+    "dynamics.reproduction_threshold",
+    "dynamics.offspring_stake",
+    "dynamics.initial_energy",
+    "dynamics.basic_living_cost",
+    "dynamics.engagement_cost",
+    "dynamics.reproduction_overhead",
+    "dynamics.capital_return_rate",
+    "dynamics.carrying_capacity",
+    "dynamics.base_hazard",
+    "dynamics.senescence_factor",
+    "dynamics.max_age",
+)
+"""The eleven economy knobs — read only under 'energy_economy' (M10a)."""
+
+_IMITATION_PARAMS = (
+    "dynamics.selection_rule",
+    "dynamics.selection_beta",
+    "dynamics.selection_tournament_k",
+    "dynamics.selection_elite_fraction",
+    "dynamics.selection_threshold_multiplier",
+    "dynamics.score_accounting",
+    "dynamics.accounting_window",
+    "dynamics.accounting_discount",
+)
+"""The selection + accounting families — inert under 'energy_economy' (M10a).
+
+``dynamics.mutation_rate`` is deliberately NOT here: both reproduction modes
+consume μ (imitation slots and economy newborns alike).
+"""
 
 _RULE_PARAMS = {
     "dynamics.selection_beta": "fermi",
@@ -65,6 +112,11 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
     * ``run.tournament_cycles``, ignored in evolution mode;
     * ``matching.opponents_per_agent``, ignored under round-robin matching
       (keyed off the matcher widget's current value, not the run mode, #57);
+    * the COARSE reproduction-mode split (M10a): under ``energy_economy``
+      the whole selection + accounting families are inert (differential
+      survival IS the selection); under ``imitation`` the eleven economy
+      knobs are. This check runs BEFORE the per-rule/per-accounting checks
+      below, so the paradigm-level note wins over the rule-level one;
     * each selection rule's parameters, ignored unless that rule is
       selected (keyed off the selection-rule widget, #63);
     * each accounting rule's parameter, ignored unless that accounting is
@@ -95,6 +147,17 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
             "NOTE: this parameter exists but is IGNORED under round-robin "
             "matching — every pair plays once anyway. Switch the matching "
             "scheme to 'random_k' to use it."
+        )
+    reproduction = values.get("dynamics.reproduction_mode")
+    if key in _IMITATION_PARAMS and reproduction == "energy_economy":
+        return True, (
+            "NOTE: this parameter exists but is IGNORED in the energy economy "
+            "— nobody copies anyone; differential survival IS the selection."
+        )
+    if key in _ECONOMY_PARAMS and reproduction == "imitation":
+        return True, (
+            "NOTE: this parameter is only read in the energy economy — "
+            "IGNORED under imitation dynamics."
         )
     rule = values.get("dynamics.selection_rule")
     if key in _RULE_PARAMS and rule is not None and rule != _RULE_PARAMS[key]:
@@ -151,6 +214,23 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
     for model in models:
         for field, key in type(model)._registry_keys.items():
             values[key] = getattr(model, field)
+    # The two derived defaults (M10a): a validated config always holds the
+    # RESOLVED plain numbers (hard rule 8), so "auto" is not stored. The
+    # loss-free inverse: a stored value that equals what the auto rule
+    # would produce is presented as auto (None) — re-assembling the widget
+    # values resolves it straight back to the same number, so the round
+    # trip is exact, and the auto widgets load unchecked as expected.
+    if values["dynamics.initial_energy"] == resolve_initial_energy(
+        None,
+        values["dynamics.offspring_stake"],  # type: ignore[arg-type]
+    ):
+        values["dynamics.initial_energy"] = None
+    if values["dynamics.senescence_factor"] == resolve_senescence_factor(
+        None,
+        values["dynamics.base_hazard"],  # type: ignore[arg-type]
+        values["dynamics.max_age"],  # type: ignore[arg-type]
+    ):
+        values["dynamics.senescence_factor"] = None
     return values
 
 

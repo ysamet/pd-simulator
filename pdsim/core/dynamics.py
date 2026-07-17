@@ -1,34 +1,55 @@
-"""The run loops: evolution generations and fixed-cast tournaments.
+"""The run loops: evolution generations, the energy economy, and tournaments.
 
-Two loop classes, one per run mode (DESIGN §2.7/§2.9):
+Three loop classes (DESIGN §2.7/§2.9/§2.10):
 
-* :class:`PopulationDynamics` — evolution mode. One :meth:`~PopulationDynamics.step`
-  is one synchronous generation: every pairing plays its matches,
-  end-of-generation scores feed the selection rule, every next-generation
-  slot is decided at once (no mid-selection feedback), mutation is applied,
-  and the population is reset for the next generation.
+* :class:`PopulationDynamics` — evolution mode, ``"imitation"`` reproduction.
+  One :meth:`~PopulationDynamics.step` is one synchronous generation: every
+  pairing plays its matches, end-of-generation scores feed the selection
+  rule, every next-generation slot is decided at once (no mid-selection
+  feedback), mutation is applied, and the population is reset for the next
+  generation.
+* :class:`EconomyDynamics` — evolution mode, ``"energy_economy"``
+  reproduction (M10a). A distinct paradigm, not a branch inside
+  ``PopulationDynamics``: birth-death dynamics, where differential survival
+  IS the selection — no SelectionRule, no ScoreAccounting, variable
+  population size, and per-opponent histories that persist for an agent's
+  whole life.
 * :class:`TournamentDynamics` — tournament mode. One step is one complete
   matcher pass ("cycle"); nothing is selected, mutated, or reset, ever.
 
-Generation-boundary reset (DECISIONS #31): **both scores and per-opponent
-histories are cleared** between generations. Under selection the neighbors'
-strategies change, so a remembered relationship would be memory of a
-different agent; consequently a history view's ``round_number`` is cumulative
-within one generation only (#22).
+Generation-boundary reset (DECISIONS #31): under imitation, **both scores
+and per-opponent histories are cleared** between generations — under
+selection the neighbors' strategies change, so a remembered relationship
+would be memory of a different agent; consequently a history view's
+``round_number`` is cumulative within one generation only (#22). In the
+energy economy that rationale dissolves (nobody's strategy is overwritten
+and ids are never reused), so **only scores reset; histories persist for an
+agent's lifetime** — #22's scope is per-mode, and the precedent is the
+tournament's cross-cycle memory (#34). See DECISIONS #79.
 
-RNG draw order per generation (DECISIONS #32, extending #23's match order):
+RNG draw order per generation, imitation (DECISIONS #32, extending #23's
+match order):
     1. the match phase (matcher order; per-round draws per #23),
     2. the selection phase (per slot: incumbent, model, adoption — see
        ``selection.py``),
     3. the mutation phase (per slot: coin only when μ > 0, then a roster
        index only when the coin hits — see ``reproduction.py``).
-Any change to this order changes every seeded run's history — treat it as a
-breaking change requiring a DECISIONS entry.
 
-v2 forward-compatibility (§6.1): growth/energy dynamics (variable population
-size, births/deaths, carrying capacity) change *this* module's internals —
-matching, match play, selection, and reproduction all stay behind their
-existing interfaces.
+RNG draw order per generation, energy economy (M10a, DECISIONS #80):
+    1. the match phase — identical to the above,
+    2. the mortality sub-phase — ONLY when age-mortality is active: exactly
+       one coin per living agent, in ascending agent-id order,
+       unconditionally (even at p = 0.0 or 1.0),
+    3. the birth phase — one μ-mutation draw per admitted parent, in
+       ascending PARENT-id order (coin only when μ > 0, roster index only
+       when it hits, per ``reproduction.py``).
+Everything else at the boundary (energy update, insolvency deaths, capacity
+admission, placement) is deterministic and consumes no RNG. With
+age-mortality off and μ = 0, an economy generation consumes exactly the
+match-phase draws.
+
+Any change to either order changes every seeded run's history — treat it as
+a breaking change requiring a DECISIONS entry.
 """
 
 from __future__ import annotations
@@ -41,6 +62,15 @@ import numpy as np
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core.accounting import build_score_accounting
 from pdsim.core.agent import Agent
+from pdsim.core.economy import (
+    admit_births,
+    age_mortality_active,
+    energy_update,
+    mortality_probability,
+    place_offspring,
+    staggered_founder_ages,
+)
+from pdsim.core.events import AgentSnapshot
 from pdsim.core.game import Action, AgentId, PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import build_matcher
@@ -128,6 +158,10 @@ class GenerationReport:
         cooperation: Executed-action cooperation per ordered strategy pair,
             THIS generation only (per-generation counts, matching this
             event's per-generation character — DECISIONS #65).
+        agents: Per-agent snapshots of the POST-boundary population (M10a)
+            — the exact set entering the next generation, with carried
+            energy and entering age. Populated only by
+            :class:`EconomyDynamics`; always empty under imitation.
     """
 
     index: int
@@ -135,6 +169,7 @@ class GenerationReport:
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
     cooperation: CooperationTable = field(default_factory=dict)
+    agents: tuple[AgentSnapshot, ...] = ()
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -312,6 +347,285 @@ def _tally_by_strategy(
         totals[name] = totals.get(name, 0.0) + agent.score
         rounds[name] = rounds.get(name, 0) + agent.rounds_played
     return counts, totals, rounds
+
+
+class _EngagementTally:
+    """Per-generation match and round counts per agent (M10a, spec Task 0a).
+
+    The energy update's ``engagement_cost × matches_played`` term needs a
+    per-agent MATCH count, and nothing on the agent provides one:
+    ``Agent.rounds_played`` counts rounds (and becomes a lifetime figure once
+    histories persist), and counting distinct opponents undercounts because a
+    pair can play twice in one generation (A drawing B and B drawing A,
+    DECISIONS #57). So the economy loop tallies matches — and rounds, which
+    replace ``agent.rounds_played`` as the #44 per-generation denominator —
+    one finished match at a time, fresh each generation. Pure bookkeeping:
+    consumes no RNG and never influences the simulation.
+    """
+
+    def __init__(self) -> None:
+        """Create an empty tally."""
+        self._matches: dict[AgentId, int] = {}
+        self._rounds: dict[AgentId, int] = {}
+
+    def record(self, result: MatchResult) -> None:
+        """Fold one finished match into both participants' counts.
+
+        Args:
+            result: The match transcript.
+        """
+        for agent_id in result.agent_ids:
+            self._matches[agent_id] = self._matches.get(agent_id, 0) + 1
+            self._rounds[agent_id] = self._rounds.get(agent_id, 0) + result.n_rounds
+
+    def matches(self, agent_id: AgentId) -> int:
+        """Matches an agent took part in this generation.
+
+        Args:
+            agent_id: The agent's passport id.
+
+        Returns:
+            Initiated + drawn matches (0 if it never played).
+        """
+        return self._matches.get(agent_id, 0)
+
+    def rounds(self, agent_id: AgentId) -> int:
+        """Rounds an agent played this generation.
+
+        Args:
+            agent_id: The agent's passport id.
+
+        Returns:
+            The per-generation round count (0 if it never played) — the
+            #44 denominator; never read ``agent.rounds_played`` here, which
+            is a lifetime count under persistent histories.
+        """
+        return self._rounds.get(agent_id, 0)
+
+
+class EconomyDynamics:
+    """Runs the energy-economy loop (M10a, DESIGN §2.10).
+
+    Birth-death dynamics on the existing generational clock: a sibling of
+    :class:`PopulationDynamics`, not a branch inside it — the
+    energy economy is a distinct evolutionary paradigm (differential
+    survival IS the selection), and keeping it separate keeps the imitation
+    path byte-identical. It reuses ``Match``, ``build_matcher``, and
+    ``StrategySwitchReproduction.offspring_strategy`` unchanged, and never
+    constructs a SelectionRule or ScoreAccounting. It yields the same
+    :class:`GenerationReport` type, with the per-agent ``agents`` snapshot
+    populated.
+
+    Invariant: ``self._population`` is ALWAYS in ascending ``agent_id``
+    order. Deaths make ids non-contiguous (id 5 dies; 4 and 6 remain), so
+    "ascending id order over the living set" is NOT ``0..N−1`` and list
+    position is never a proxy for id — the boundary sorts explicitly rather
+    than trusting insertion order.
+    """
+
+    def __init__(self, config: ExperimentConfig, rng: np.random.Generator) -> None:
+        """Set up a run: collaborators, founders, and the passport counter.
+
+        Founders come from ``build_initial_population`` unchanged, then get
+        their economy decoration: ``initial_energy`` (a resolved plain
+        number by config time), no parent, and — when age-mortality is
+        active — staggered ages so the run starts at demographic steady
+        state instead of a synchronized cohort.
+
+        Args:
+            config: The complete, validated experiment description.
+            rng: The run's single seeded random generator (hard rule 5).
+        """
+        self._config = config
+        self._rng = rng
+        self._match = Match(PrisonersDilemma(config.game), config.match, rng)
+        self._matcher = build_matcher(config.matching)
+        self._reproduction = StrategySwitchReproduction(config)
+        founders = build_initial_population(config)
+        dynamics = config.dynamics
+        ages = (
+            staggered_founder_ages(len(founders), dynamics.max_age)
+            if age_mortality_active(dynamics)
+            else [0] * len(founders)
+        )
+        for agent, age in zip(founders, ages, strict=True):
+            agent.energy = dynamics.initial_energy
+            agent.age = age
+            agent.parent_id = None
+        self._population = founders
+        # Monotonic passport counter: ids are never reused, so lineage and
+        # the id-ordered RNG contract stay exact across deaths.
+        self._next_id = len(founders)
+        self._generation = 0
+
+    @property
+    def population(self) -> tuple[Agent, ...]:
+        """The current population, in ascending agent-id order.
+
+        Returns:
+            An immutable snapshot (the agents themselves are live objects);
+            empty after extinction.
+        """
+        return tuple(self._population)
+
+    def run(self) -> Iterator[GenerationReport]:
+        """Play up to the configured number of generations, reporting each.
+
+        Ends early at extinction — a legitimate outcome of a metabolic
+        filter, not an error.
+
+        Yields:
+            One :class:`GenerationReport` per generation played, in order.
+        """
+        for _ in range(self._config.dynamics.generations):
+            yield self.step()
+            if not self._population:
+                break
+
+    def step(self, on_match: Callable[[MatchResult], None] | None = None) -> GenerationReport:
+        """Advance exactly one generation (the M10a boundary sequence).
+
+        The nine steps, in the frozen order (see the module docstring's
+        economy RNG contract): match phase → report-as-played → energy
+        update → age mortality → insolvency deaths → births (capacity
+        admission, then id-ordered stakes/ids/mutation) → age increment →
+        score-only reset → post-boundary snapshot. Deaths happen before
+        births (the cull frees room, survivors breed into it — a deliberate
+        deviation from Hammond–Axelrod's birth-before-death period order,
+        DECISIONS #80).
+
+        Args:
+            on_match: Optional read-only observer called with each finished
+                match's result, in play order (the engine's event hook).
+
+        Returns:
+            The report for the generation that just played — per-strategy
+            fields describe the population AS IT PLAYED (before any death
+            or birth); ``agents`` snapshots the post-boundary population
+            entering the next generation.
+        """
+        dynamics = self._config.dynamics
+
+        # 1. Match phase — identical to the imitation loop (#23 order),
+        #    plus the per-agent engagement tally (spec Task 0a).
+        names = {a.agent_id: strategy_name_of(a.strategy) for a in self._population}
+        cooperation = _CooperationTally()
+        engagement = _EngagementTally()
+        for agent_a, agent_b in self._matcher.pairings(self._population, self._rng):
+            result = self._match.play(agent_a, agent_b)
+            cooperation.record(result, names)
+            engagement.record(result)
+            if on_match is not None:
+                on_match(result)
+
+        # 2. Report the population as it played, BEFORE any death or birth.
+        #    rounds_played comes from the per-generation tally — never from
+        #    agent.rounds_played, which is a lifetime count now that
+        #    histories persist (the silent-decay trap, spec Task 0a).
+        counts: dict[str, int] = {}
+        totals: dict[str, float] = {}
+        rounds: dict[str, int] = {}
+        for agent in self._population:
+            name = names[agent.agent_id]
+            counts[name] = counts.get(name, 0) + 1
+            totals[name] = totals.get(name, 0.0) + agent.score
+            rounds[name] = rounds.get(name, 0) + engagement.rounds(agent.agent_id)
+        mean_scores = {name: totals[name] / counts[name] for name in counts}
+
+        # 3. Energy update — deterministic, every living agent. This is the
+        #    single frozen snapshot deaths and births read.
+        for agent in self._population:
+            agent.energy = energy_update(
+                agent.energy, agent.score, engagement.matches(agent.agent_id), dynamics
+            )
+
+        # 4. Age mortality — one coin per living agent in ascending id
+        #    order, unconditionally, whenever the sub-phase is active (even
+        #    at p = 0.0 or 1.0): the RNG stream depends only on the active
+        #    flag and the population size, never on hazard values.
+        survivors = list(self._population)
+        if age_mortality_active(dynamics):
+            survivors = []
+            for agent in self._population:  # ascending id order — the invariant
+                dies = self._rng.random() < mortality_probability(agent.age, dynamics)
+                if not dies:
+                    survivors.append(agent)
+
+        # 5. Insolvency deaths — deterministic; STRICTLY negative. An agent
+        #    that just paid its stake can sit at exactly 0 and survives
+        #    empty-handed to earn again — reproduction is not suicidal at
+        #    the margin.
+        survivors = [agent for agent in survivors if agent.energy >= 0]
+
+        # 6. Births — threshold, then the two gates. TWO DISTINCT ORDERINGS:
+        #    admit_births decides THE SET by energy priority (energy desc,
+        #    id asc); the loop below then iterates that set in ascending
+        #    PARENT-id order, because id order is the RNG-reproducibility
+        #    contract for the mutation draws. One birth per parent per
+        #    generation, even at e ≥ 2θ.
+        eligible = [a for a in survivors if a.energy >= dynamics.reproduction_threshold]
+        slots = max(0, dynamics.carrying_capacity - len(survivors))
+        admitted = admit_births(eligible, slots)
+        newborns: list[Agent] = []
+        for parent in sorted(admitted, key=lambda agent: agent.agent_id):
+            # Placement BEFORE payment: place_offspring never fails in the
+            # well-mixed M10a world, but pay-then-place would bequeath M11
+            # the bug where a blocked parent is charged for a child never
+            # born.
+            if not place_offspring(survivors, parent):
+                continue
+            parent.energy -= dynamics.offspring_stake + dynamics.reproduction_overhead
+            child_id = self._next_id
+            self._next_id += 1
+            newborns.append(
+                Agent(
+                    agent_id=child_id,
+                    strategy=self._reproduction.offspring_strategy(parent.strategy, self._rng),
+                    memory_depth=self._config.population.memory_depth,
+                    energy=dynamics.offspring_stake,
+                    age=0,
+                    parent_id=parent.agent_id,
+                )
+            )
+
+        # 7. Age increment — survivors only; newborns enter at 0.
+        for agent in survivors:
+            agent.age += 1
+
+        # 8. Reset — SCORE ONLY. Histories persist for an agent's lifetime
+        #    (DECISIONS #79); never call reset_for_new_generation() here.
+        for agent in survivors:
+            agent.reset_score_for_new_generation()
+
+        # The invariant, enforced explicitly: ascending id order. Survivors
+        # are already ascending and newborn ids all exceed theirs, but the
+        # boundary sorts rather than trusting insertion order.
+        self._population = sorted(survivors + newborns, key=lambda agent: agent.agent_id)
+
+        # 9. Snapshot the post-boundary population — the exact set entering
+        #    the next generation, with the energy its next update reads as
+        #    carried-in and the age it enters at.
+        agents = tuple(
+            AgentSnapshot(
+                agent_id=agent.agent_id,
+                parent_id=agent.parent_id,
+                age=agent.age,
+                energy=agent.energy,
+                strategy=strategy_name_of(agent.strategy),
+            )
+            for agent in self._population
+        )
+
+        report = GenerationReport(
+            index=self._generation,
+            composition=counts,
+            mean_scores=mean_scores,
+            rounds_played=rounds,
+            cooperation=cooperation.table(),
+            agents=agents,
+        )
+        self._generation += 1
+        return report
 
 
 @dataclass(frozen=True, slots=True)

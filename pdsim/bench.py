@@ -35,7 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
-from pdsim.core.dynamics import PopulationDynamics
+from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics
 from pdsim.core.strategies import all_strategy_names
 
 DEFAULT_SIZES = (50, 100, 200, 400)
@@ -65,7 +65,13 @@ def _even_composition(size: int) -> dict[str, int]:
 
 
 def _cell_config(
-    size: int, matcher: str, k: int, rounds: int, generations: int, seed: int
+    size: int,
+    matcher: str,
+    k: int,
+    rounds: int,
+    generations: int,
+    seed: int,
+    reproduction_mode: str = "imitation",
 ) -> ExperimentConfig:
     """Build the experiment config for one benchmark grid cell.
 
@@ -76,17 +82,34 @@ def _cell_config(
         rounds: Fixed rounds per match.
         generations: Generations to run (timed; first is warmup).
         seed: Random seed (identical across cells — timing, not science).
+        reproduction_mode: ``"imitation"`` (the v1 loop) or
+            ``"energy_economy"`` (M10a). The economy cell is tuned to keep N
+            CONSTANT — an unreachable breeding bar and a zero living cost —
+            so the timing isolates the economy bookkeeping (ledger,
+            boundary, snapshots, persistent histories) at the same N as the
+            imitation cell instead of timing a drifting population.
 
     Returns:
         A validated evolution-mode config.
     """
+    dynamics: dict[str, object] = {"generations": generations}
+    if reproduction_mode == "energy_economy":
+        dynamics.update(
+            {
+                "reproduction_mode": "energy_economy",
+                "reproduction_threshold": 1e12,  # nobody breeds
+                "offspring_stake": 0.0,
+                "basic_living_cost": 0.0,  # nobody starves
+                "carrying_capacity": max(size, 200),
+            }
+        )
     return ExperimentConfig.model_validate(
         {
             "seed": seed,
             "population": {"size": size, "composition": _even_composition(size)},
             "matching": {"matcher": matcher, "opponents_per_agent": k},
             "match": {"length_mode": "fixed", "rounds_per_match": rounds},
-            "dynamics": {"generations": generations},
+            "dynamics": dynamics,
         }
     )
 
@@ -99,14 +122,19 @@ def time_cell(config: ExperimentConfig, generations: int) -> float:
     a stray slow generation (antivirus, OneDrive, scheduler noise).
 
     Args:
-        config: The cell's experiment config.
+        config: The cell's experiment config (its ``reproduction_mode``
+            picks the loop class, mirroring the engine's dispatch — M10a).
         generations: Total generations to run (>= 2 so at least one
             post-warmup timing exists; enforced by the CLI).
 
     Returns:
         Median wall-clock seconds per post-warmup generation.
     """
-    dynamics = PopulationDynamics(config, np.random.default_rng(config.seed))
+    dynamics: PopulationDynamics | EconomyDynamics
+    if config.dynamics.reproduction_mode == "energy_economy":
+        dynamics = EconomyDynamics(config, np.random.default_rng(config.seed))
+    else:
+        dynamics = PopulationDynamics(config, np.random.default_rng(config.seed))
     timings: list[float] = []
     for _ in range(generations):
         start = time.perf_counter()  # monotonic, high-resolution clock
@@ -152,6 +180,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42).")
     parser.add_argument(
+        "--reproduction-mode",
+        choices=("imitation", "energy_economy"),
+        default="imitation",
+        help=(
+            "Which loop to time (default: imitation). 'energy_economy' times the "
+            "M10a boundary at CONSTANT N (no births, no deaths), isolating the "
+            "economy bookkeeping overhead."
+        ),
+    )
+    parser.add_argument(
         "--out", default=None, help="Optional CSV output path (no default — never committed)."
     )
     return parser
@@ -184,7 +222,13 @@ def main(argv: list[str] | None = None) -> int:
         for matcher in matchers:
             try:
                 config = _cell_config(
-                    size, matcher, args.k, args.rounds, args.generations, args.seed
+                    size,
+                    matcher,
+                    args.k,
+                    args.rounds,
+                    args.generations,
+                    args.seed,
+                    reproduction_mode=args.reproduction_mode,
                 )
             except ValueError as error:
                 print(f"error: N={size}, {matcher}: {error}", file=sys.stderr)

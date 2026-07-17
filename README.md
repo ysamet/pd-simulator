@@ -33,6 +33,8 @@ documented in the generated reference, [docs/PARAMETERS.md](docs/PARAMETERS.md).
 
 ## Launch the app
 
+[if .venv not running then first run ".venv\Scripts\activate" from project root folder]
+
 ```powershell
 streamlit run pdsim/ui/app.py
 ```

@@ -321,3 +321,60 @@ register_scenario(
         ),
     )
 )
+
+# The M10a energy-economy scenario. The numbers are a worked calibration
+# (see the spec and docs/explainers/M10-growth-economy-explainer.md):
+# random_k with k=5 gives ≈ 2k = 10 matches/agent × 10 rounds = 100 rounds;
+# all-C income = 300, all-D income = 100, and the living cost of 200 sits at
+# the midpoint of that window — cooperators net +100/generation, defectors
+# net −100 and are extinct by generation 5.
+
+register_scenario(
+    ScenarioInfo(
+        name="the_growth_economy",
+        display_name="The Growth Economy",
+        description=(
+            "What happens when survival costs energy and playing earns it? "
+            "Agents pay a living bill every generation, breed when they can "
+            "afford the stake, and die when their energy runs out — nobody "
+            "copies anyone. Cooperators generate more energy per interaction "
+            "than defectors do, so the same bill that cooperators shrug off "
+            "can drive defectors extinct, while the population itself grows "
+            "toward its carrying capacity."
+        ),
+        config=ExperimentConfig.model_validate(
+            {
+                "seed": 42,
+                "population": {
+                    "size": 40,
+                    "composition": {"tit_for_tat": 20, "always_defect": 20},
+                },
+                "matching": {"matcher": "random_k", "opponents_per_agent": 5},
+                "match": {"length_mode": "fixed", "rounds_per_match": 10},
+                "dynamics": {
+                    "generations": 60,
+                    "reproduction_mode": "energy_economy",
+                    "reproduction_threshold": 500.0,
+                    "offspring_stake": 400.0,
+                    "basic_living_cost": 200.0,
+                    "carrying_capacity": 200,
+                    "mutation_rate": 0.0,
+                },
+            }
+        ),
+        things_to_try=(
+            "Set the basic living cost to 320 (above the all-cooperator income "
+            "of 300) and EVERYONE dies — the survival window is real. Set it "
+            "to 80 (below the all-defector income of 100) and even defectors "
+            "grow, because the filter is switched off. Switch the composition "
+            "to 40 Always Defect and watch the population collapse over "
+            "generations 4 to 6 — not all at once: every defector is on the "
+            "same average trajectory, so they all approach zero energy "
+            "together, and who actually crosses first is decided by "
+            "participation luck, since under random_k some agents get drawn "
+            "into more matches than others. Set the max age to 20 and watch "
+            "the mean-age chart settle. Set the capital return rate to 0.05 "
+            "and watch the escape velocity appear in the Economy panel."
+        ),
+    )
+)

@@ -14,7 +14,7 @@ use them for progress display, not for time series).
 
 from __future__ import annotations
 
-from pdsim.core.events import CycleFinished, Event, GenerationFinished, RunFinished
+from pdsim.core.events import AgentSnapshot, CycleFinished, Event, GenerationFinished, RunFinished
 
 
 class RunTimeseries:
@@ -61,6 +61,16 @@ class RunTimeseries:
             a derived view, recomputed on load like every aggregate (#47).
         cooperation_overall: The whole population's actions-weighted
             cooperation rate, one value per period (derived view).
+        agent_snapshots: Per-agent post-boundary snapshots, one tuple per
+            period (M10a) — raw data the recorder persists as
+            ``agents.parquet``. Entirely empty for imitation runs and
+            pre-schema-3 recordings, which is how charts know to skip the
+            economy figures; once an economy run has recorded data, an
+            EMPTY tuple for a later period is meaningful (extinction).
+        mean_energy: Mean carried-forward energy per strategy, one value
+            per period — a derived view over the snapshots (#47).
+        mean_age: Mean entering age per strategy, one value per period —
+            a derived view over the snapshots (#47).
         final: The closing ``RunFinished`` event, once it has arrived.
     """
 
@@ -84,6 +94,9 @@ class RunTimeseries:
         self.cooperation_pair_actions: dict[tuple[str, str], list[int]] = {}
         self.cooperation_by_strategy: dict[str, list[float | None]] = {}
         self.cooperation_overall: list[float | None] = []
+        self.agent_snapshots: list[tuple[AgentSnapshot, ...]] = []
+        self.mean_energy: dict[str, list[float | None]] = {}
+        self.mean_age: dict[str, list[float | None]] = {}
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -138,6 +151,7 @@ class RunTimeseries:
             self._append(self.running_mean_scores, running, fill=None)
             self._append(self.running_mean_scores_per_round, running_per_round, fill=None)
             self._fold_cooperation(event.cooperation)
+            self._fold_agents(event.agents)
         elif isinstance(event, CycleFinished):
             self.periods.append(event.index)
             self._append(self.composition, event.composition, fill=0)
@@ -190,6 +204,51 @@ class RunTimeseries:
         self.cooperation_overall.append(
             total_cooperations / total_actions if total_actions else None
         )
+
+    def _fold_agents(self, agents: tuple[AgentSnapshot, ...]) -> None:
+        """Fold one period's per-agent snapshots into the series (M10a).
+
+        Mirrors :meth:`_fold_cooperation`'s compatibility shape: events
+        without snapshots (imitation runs, pre-schema-3 recordings) leave
+        every economy series empty, which is how charts know to skip the
+        economy figures — no error, no gap chart. Once an economy run has
+        recorded data, an empty tuple is meaningful (extinction) and still
+        appends, keeping the series aligned with ``periods``.
+
+        Args:
+            agents: The period's post-boundary snapshots; may be empty.
+        """
+        if not agents and not self.agent_snapshots:
+            return  # no per-agent data in this run: leave the series empty
+        self.agent_snapshots.append(agents)
+        # Derived per-strategy means (#47: recomputed, never persisted).
+        counts: dict[str, int] = {}
+        energy_totals: dict[str, float] = {}
+        age_totals: dict[str, float] = {}
+        for snapshot in agents:
+            counts[snapshot.strategy] = counts.get(snapshot.strategy, 0) + 1
+            energy_totals[snapshot.strategy] = (
+                energy_totals.get(snapshot.strategy, 0.0) + snapshot.energy
+            )
+            age_totals[snapshot.strategy] = age_totals.get(snapshot.strategy, 0.0) + snapshot.age
+        self._append(self.mean_energy, {n: energy_totals[n] / counts[n] for n in counts}, fill=None)
+        self._append(self.mean_age, {n: age_totals[n] / counts[n] for n in counts}, fill=None)
+
+    @property
+    def population_size(self) -> list[int]:
+        """Total population per period — derived, never stored (#47).
+
+        ``N(G) = sum(composition.values())``: the raw composition already
+        carries the population size, so this is a cheap recomputation
+        rather than a persisted column. Under imitation it is constant;
+        in the energy economy it is the growth curve.
+
+        Returns:
+            One total per period, aligned with ``periods``.
+        """
+        return [
+            sum(series[i] for series in self.composition.values()) for i in range(len(self.periods))
+        ]
 
     def strategy_names(self) -> tuple[str, ...]:
         """Return every strategy seen so far, in first-appearance order.

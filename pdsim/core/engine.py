@@ -24,7 +24,7 @@ from typing import Literal, get_args
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
-from pdsim.core.dynamics import PopulationDynamics, TournamentDynamics
+from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics, TournamentDynamics
 from pdsim.core.events import (
     CycleFinished,
     Event,
@@ -108,6 +108,16 @@ def _run_evolution(
 ) -> Iterator[Event]:
     """Drive the evolution loop, emitting events per generation.
 
+    Dispatches on ``config.dynamics.reproduction_mode`` (M10a):
+    :class:`PopulationDynamics` for ``"imitation"``,
+    :class:`EconomyDynamics` for ``"energy_economy"``. An economy run can
+    end EARLY at extinction — a legitimate outcome of a metabolic filter,
+    not an error — so ``RunFinished.completed`` counts the generations
+    actually played, and an extinct run closes with empty composition and
+    scores. Under imitation the population never empties, so ``completed``
+    always equals ``config.dynamics.generations`` and the stream is
+    byte-identical to pre-M10a runs.
+
     Args:
         config: The experiment description.
         rng: The run's seeded generator.
@@ -117,7 +127,11 @@ def _run_evolution(
         Match-level events (if requested), ``GenerationFinished`` per
         generation, and the closing ``RunFinished``.
     """
-    dynamics = PopulationDynamics(config, rng)
+    dynamics: PopulationDynamics | EconomyDynamics
+    if config.dynamics.reproduction_mode == "energy_economy":
+        dynamics = EconomyDynamics(config, rng)
+    else:
+        dynamics = PopulationDynamics(config, rng)
     buffer: list[Event] = []
     on_match = None
     if granularity != "generation":
@@ -128,8 +142,10 @@ def _run_evolution(
 
     # The registry guarantees generations >= 1, so `report` is always bound
     # by the time RunFinished is built.
+    completed = 0
     for _ in range(config.dynamics.generations):
         report = dynamics.step(on_match=on_match)
+        completed += 1
         yield from buffer
         buffer.clear()
         yield GenerationFinished(
@@ -138,12 +154,16 @@ def _run_evolution(
             mean_scores=report.mean_scores,
             rounds_played=report.rounds_played,
             cooperation=report.cooperation,
+            agents=report.agents,
         )
+        if not dynamics.population:
+            break  # extinction: the run ends here (economy mode only)
+    extinct = not dynamics.population
     yield RunFinished(
         mode="evolution",
-        completed=config.dynamics.generations,
-        composition=report.composition,
-        mean_scores=report.mean_scores,
+        completed=completed,
+        composition={} if extinct else report.composition,
+        mean_scores={} if extinct else report.mean_scores,
         total_scores=None,
     )
 

@@ -100,9 +100,12 @@ def execute_run(
     if export_charts:
         # Lazy import (see the module-level note): keeps plotly out of
         # plotting-free consumers such as the sweep workers.
+        from pdsim.ui.economy_helpers import chart_carrying_capacity
         from pdsim.viz import charts
 
-        charts.export_run_charts(recorder.timeseries, folder)
+        charts.export_run_charts(
+            recorder.timeseries, folder, carrying_capacity=chart_carrying_capacity(config)
+        )
     return folder
 
 
@@ -207,13 +210,21 @@ def main(argv: list[str] | None = None) -> int:
         # execute_run already discarded the partial folder (DECISIONS #53).
         print("\nInterrupted — partial run discarded.", file=sys.stderr)
         return 130  # conventional exit code for SIGINT
-    completed = (
-        config.tournament_cycles if config.mode == "tournament" else config.dynamics.generations
+    # The true count comes from the last period event, not the config: an
+    # energy-economy run can end EARLY at extinction (M10a), and under
+    # imitation/tournament the two are equal anyway.
+    completed = last[0].index + 1 if last else 0
+    extinct = config.mode != "tournament" and completed < config.dynamics.generations
+    print(
+        f"\nRun complete: {completed} {period_label}s, seed {config.seed}."
+        + (" Population extinct." if extinct else "")
     )
-    print(f"\nRun complete: {completed} {period_label}s, seed {config.seed}.")
     if last:
         from pdsim.viz import charts  # lazy: keep plotting out of importers
 
+        # The standings table prints the LAST period that played — for an
+        # extinct run that is the final population as it played, which is
+        # more informative on a console than the empty final composition.
         final = last[0]
         run_finished = RunFinished(
             mode=config.mode,

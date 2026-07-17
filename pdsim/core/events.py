@@ -62,6 +62,36 @@ class MatchFinished:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentSnapshot:
+    """One agent's state as it enters the next generation (M10a).
+
+    The per-agent grain of the energy economy: a ``GenerationFinished``
+    event carries one of these per *post-boundary* agent — the exact set
+    entering the next generation, with the energy each carries forward and
+    the age it enters at. Births and deaths are reconstructed by diffing
+    consecutive snapshots (an id present now but not before was born, with
+    ``parent_id`` naming its parent; an id present before but not now died)
+    — explicit birth/death events are deliberately NOT emitted in the
+    synchronous model, where everything happens at one atomic boundary
+    (they belong to M10b's async event time).
+
+    Attributes:
+        agent_id: The agent's lifetime passport id — never reused.
+        parent_id: The parent's passport id; ``None`` for founders.
+        age: Age (in generations) entering the next generation.
+        energy: Energy carried into the next generation (what its next
+            energy update reads as carried-in).
+        strategy: Strategy machine name.
+    """
+
+    agent_id: AgentId
+    parent_id: AgentId | None
+    age: int
+    energy: float
+    strategy: str
+
+
+@dataclass(frozen=True, slots=True)
 class GenerationFinished:
     """One completed generation (evolution mode only).
 
@@ -81,6 +111,11 @@ class GenerationFinished:
             only, matching the event's per-generation character
             (DECISIONS #60/#65). Rate + count together make every aggregate
             exactly recomputable by actions-weighted averaging.
+        agents: Per-agent snapshots of the POST-boundary population (M10a)
+            — populated only in ``energy_economy`` mode; always empty under
+            imitation, which keeps imitation payloads byte-identical to
+            pre-M10a runs and the schema guard honest (a run has per-agent
+            data exactly when these are non-empty).
     """
 
     index: int
@@ -88,6 +123,7 @@ class GenerationFinished:
     mean_scores: dict[str, float]
     rounds_played: dict[str, int] = field(default_factory=dict)
     cooperation: dict[tuple[str, str], tuple[float, int]] = field(default_factory=dict)
+    agents: tuple[AgentSnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

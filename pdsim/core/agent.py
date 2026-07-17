@@ -40,24 +40,54 @@ class Agent:
     tuples every round, making a full match O(length²) in moves. That is fine
     for the v1 envelope (~50-round matches, populations in the hundreds) and
     is the known hotspot for the future vectorized backend (DESIGN §3.1).
+    In economy mode (M10a) histories additionally PERSIST across generations,
+    so the copied length grows with the *relationship*, not the match —
+    ``memory_depth`` is the existing bound (it caps what strategies see, so
+    it caps the copy), and the app's calibration readout warns when it is
+    unlimited under round-robin.
+
+    Economy attributes (M10a — inert defaults, untouched by the imitation
+    path):
+
+    * ``energy`` — the agent's energy stock in ``energy_economy`` mode: a
+      *stock* it owns across generations, unlike ``score``, which is a
+      per-generation *flow*. Always 0.0 under imitation.
+    * ``age`` — completed generations lived (economy mode); newborns and
+      founders without age-mortality start at 0.
+    * ``parent_id`` — the passport id of the agent's parent (economy mode);
+      ``None`` for founders. Ids are never reused, so lineage is exact.
     """
 
     def __init__(
-        self, agent_id: AgentId, strategy: Strategy, memory_depth: int | None = None
+        self,
+        agent_id: AgentId,
+        strategy: Strategy,
+        memory_depth: int | None = None,
+        energy: float = 0.0,
+        age: int = 0,
+        parent_id: AgentId | None = None,
     ) -> None:
         """Create an agent.
 
         Args:
-            agent_id: Stable identity within the current generation.
+            agent_id: Stable identity within the current generation (a
+                lifetime "passport id" in economy mode — never reused).
             strategy: The decision rule this agent plays.
             memory_depth: How many recent rounds per opponent the strategy may
                 see; ``None`` means unlimited (registry:
                 ``population.memory_depth``).
+            energy: Starting energy stock (economy mode; inert 0.0 default).
+            age: Starting age in generations (economy mode; founders may be
+                staggered — see ``pdsim/core/economy.py``).
+            parent_id: The parent's passport id, or ``None`` for founders.
         """
         self.agent_id = agent_id
         self.strategy = strategy
         self.memory_depth = memory_depth
         self.score: float = 0.0
+        self.energy = energy
+        self.age = age
+        self.parent_id = parent_id
         self._histories: dict[AgentId, _PairHistory] = {}
 
     @property
@@ -143,3 +173,18 @@ class Agent:
         """
         self.score = 0.0
         self._histories.clear()
+
+    def reset_score_for_new_generation(self) -> None:
+        """Zero the score, keeping every per-opponent history (M10a).
+
+        The economy boundary's reset: scores must reset every generation
+        (the energy update consumes exactly that generation's raw score),
+        but an economy agent is a *persistent creature* whose memory
+        persists with it — ids are never reused and nobody's strategy is
+        overwritten, so agent 7 next generation IS the same agent 7 (the
+        #31 rationale for clearing histories is selection-specific and does
+        not apply; the precedent is the tournament's cross-cycle memory,
+        DECISIONS #34). ``PopulationDynamics`` keeps calling
+        :meth:`reset_for_new_generation`, unchanged.
+        """
+        self.score = 0.0

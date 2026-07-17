@@ -1276,3 +1276,396 @@ immediately after M9.5b while the sweep layer is fresh — that would hold
 the spine's invariant change behind a convenience and would guess the
 browser's shape without campaign evidence. The browser increment keeps a
 descriptive name (no M-number) until it is scoped.
+
+**#76 — 2026-07-16 — Milestone renumbering: execution order = numeric
+order, no gaps (v2 spine update).** The v2 milestones are relabelled so the
+numbers match the build order. This supersedes the **numbering** — *not*
+the substance or rationale — of **#58** and **#75**: the economy-first
+argument and the browser-after-campaign-evidence argument both stand; only
+the labels move. The old #58 "M12 deliberately before M11" swap
+**dissolves** — the numbers now simply match the order. Tags keeps its M12
+label (sparing cross-reference churn in DESIGN §6.5 and the code); two NEW
+milestones join the spine (population structure at M11, economy policy at
+M15); the sweep browser and the vectorized engine get numbers (M13, M18).
+
+| Exec order | Milestone | OLD label | NEW label |
+|---|---|---|---|
+| 1 | Growth economy (M10a sync, M10b async) | M10 | **M10** |
+| 2 | Population structure — adjacency + local birth (NEW) | — | **M11** |
+| 3 | Tags / attributes | M12 | **M12** |
+| 4 | Sweep browser | (unnumbered) | **M13** |
+| 5 | Perturbation mutation | M11 | **M14** |
+| 6 | Economy policy (tax / redistribution / immigration / inheritance) (NEW) | — | **M15** |
+| 7 | Public Goods Game + group matching | M13 | **M16** |
+| 8 | Reputation / punishment / exclusion | M14 | **M17** |
+| 9 | Vectorized engine (review-at) | (unnumbered) | **M18** |
+
+Spine: **M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18.** Population
+structure is placed *before* the sweep browser by #75's own logic: the
+browser is a read-only view over run data, and structure changes what run
+data exists, so the browser is built after structure and is structure-aware
+from birth. Entries #1-#75 use the old labels; from this entry on, the new.
+Alternative rejected: keeping the swapped numbering — it forced every
+conversation to carry the "M12 before M11" caveat for no benefit.
+
+**#77 — 2026-07-16 — M10a: energy REPLACES imitation — a reproduction-mode
+fork, not a selection rule (spec `docs/specs/M10a-growth-economy.md`).**
+`dynamics.reproduction_mode` ∈ {`imitation`, `energy_economy`} selects
+between two evolutionary paradigms: v1's imitation dynamics (fixed N, a
+SelectionRule copies strategies between slots) and M10a's birth-death
+dynamics (agents hold energy — a persistent STOCK, unlike the score flow —
+earn it by playing, pay a living cost, breed at a threshold, die at
+insolvency or of age; population size varies; extinction is a legitimate
+run ending). Differential survival IS the selection: in `energy_economy`
+mode the whole SelectionRule family and ScoreAccounting are ignored (the
+#34 greyed-never-hidden pattern, now paradigm-level: `_IMITATION_PARAMS`
+grey under the economy, the eleven `_ECONOMY_PARAMS` grey under imitation;
+μ is in NEITHER set — both modes consume it, imitation slots and economy
+newborns alike). Implementation shape: a **sibling class**
+`EconomyDynamics` beside `PopulationDynamics` — never a branch inside it —
+so the imitation path stays byte-identical (pinned by the untouched golden
+tests plus new regression tests); the engine dispatches on the mode;
+tournament mode ignores it (`reproduction_mode` joined
+`IGNORED_IN_TOURNAMENT`). The two new cross-field validators (σ ≤ θ on
+DynamicsConfig; K ≥ N on ExperimentConfig) run **only in `energy_economy`
+mode** — a refinement of the spec's letter forced by #34 (ignored
+parameters are never validation errors) and hard rule 8: a pre-M10a config
+with N = 300 must keep loading even though the (ignored) default K is 200.
+Alternatives rejected: energy as a sixth SelectionRule (it is not a rule
+over scores — it changes N, agent identity, and the meaning of a
+generation); a branch inside PopulationDynamics (would thread economy
+conditionals through the byte-identity-guaranteed loop).
+
+**#78 — 2026-07-16 — The registry's first DERIVED defaults: nullable None
+= "auto", resolved to plain numbers at config validation (M10a).**
+`dynamics.initial_energy` (auto → the offspring stake σ, so founders start
+life exactly like newborns) and `dynamics.senescence_factor` (auto → the
+factor that makes the death chance reach exactly 1.0 at `max_age`:
+`(1/base_hazard)^(1/max_age)`; 1.0 when either input is off) use
+`nullable=True` + `default=None` — reusing the existing
+`population.memory_depth` machinery rather than inventing an `"auto"`
+string sentinel in a float field (the design freeze said "a sentinel (e.g.
+'auto')"; None + nullable IS that sentinel). The arithmetic lives in pure
+free functions (`resolve_initial_energy`, `resolve_senescence_factor` in
+`config/experiment.py`); a `mode="before"` pydantic validator applies them
+to the raw input mapping (a `mode="after"` hook cannot assign on the frozen
+models), treating an absent key and an explicit None identically. Because
+resolution happens before validation, **a stored `config.yaml` always holds
+plain numbers** — hard rule 8: the auto rule can never retroactively change
+an existing run. Two ride-alongs this forced: (a) the app's nullable-widget
+machinery gained a float branch ("Set … manually?" checkbox; the int
+"Limit …?" branch is untouched); (b) `widget_values_from_config` applies
+the **inverse** mapping — a stored value that equals what the auto rule
+would produce is presented as blank/auto (loss-free: reassembly resolves
+straight back), so loading a scenario shows the auto boxes unchecked
+instead of a spurious "manually set 1.0".
+
+**#79 — 2026-07-16 — Per-opponent histories PERSIST across generations in
+economy mode; scores still reset (M10a; amends the SCOPE of #22, does not
+overturn it).** #31's rationale for clearing histories — under selection
+the neighbours' strategies change, so a remembered relationship is memory
+of a different agent — is selection-specific and dissolves in the economy:
+nobody's strategy is overwritten, passport ids are never reused, and agent
+7 next generation IS the same agent 7. The blessed precedent is the
+tournament's cross-cycle memory (#34): an economy agent is a persistent
+creature, and its memory persists with it. Mechanism: a new
+`Agent.reset_score_for_new_generation()` beside (never replacing)
+`reset_for_new_generation()`; `PopulationDynamics` still calls the full
+reset, unchanged. Named consequences: `HistoryView.round_number` is
+lifetime-cumulative against a given opponent in economy mode (#22's
+"cumulative within one generation only" is now per-mode — it remains true
+under imitation); `round_number == 0` detects a first meeting EVER;
+**GrimTrigger is lifetime-grim** (a generation-3 betrayal is punished at
+generation 200 — pinned by test); `Agent.rounds_played` becomes a lifetime
+count there, so `EconomyDynamics` builds `GenerationReport.rounds_played`
+(#44's denominator) from a per-generation tally (`_EngagementTally`,
+matches + rounds per passport id — the Task 0a fallback: no per-agent
+match count existed, and distinct-opponents undercounts because a pair can
+play twice per generation, #57). The honest cost: `view_of`'s O(length²)
+copy now grows with the RELATIONSHIP, not the match — unbounded under
+round_robin (quadratic in run length), barely felt under random_k;
+`memory_depth` is the bound, and the calibration readout warns (never
+forbids) when it is unlimited. Alternative rejected: clearing histories in
+the economy too — it would erase direct reciprocity between persistent
+creatures, the very thing the paradigm models.
+
+**#80 — 2026-07-16 — The M10a boundary sequence and its RNG contract
+(extends #32; frozen — any change is a breaking change requiring a new
+entry).** `EconomyDynamics.step()`: (1) match phase, identical to #23; (2)
+report the population AS IT PLAYED (per-strategy fields keep their existing
+meanings; energy is additive, never a replacement); (3) deterministic
+energy update `e ← e·(1+r) + raw_score − L − engagement·matches` — the one
+frozen snapshot deaths and births read; (4) age-mortality sub-phase, ONLY
+when active (`base_hazard > 0 or senescence_factor ≠ 1 or max_age > 0`):
+exactly one `rng.random()` coin per living agent in ascending agent-id
+order, unconditionally — even at p = 0.0 or 1.0 — so the stream depends
+only on the active flag and the population size, never on hazard values;
+(5) insolvency deaths, deterministic, **strictly negative** (`e < 0`: a
+parent that just paid σ can sit at exactly 0 and survives empty-handed —
+reproduction is not suicidal at the margin); (6) births: eligible at
+`e ≥ θ`; `slots = K − survivors`; **admission by energy priority** (energy
+desc, id asc) — deterministic and RNG-FREE, a deliberate choice over a
+random lottery that would inject fresh RNG for no scientific gain; then
+the admitted SET is iterated in **ascending parent-id order** for
+placement-check → σ+overhead payment → passport-id assignment → μ-mutation
+draw. TWO ORDERINGS, kept separate on purpose: admission decides *the set*
+by energy, id-order is the RNG-reproducibility contract (pinned by a test
+where the orders differ). Placement is checked BEFORE the stake is paid —
+`place_offspring` never fails in M10a's well-mixed world, but
+pay-then-place would bequeath M11 the charged-for-a-child-never-born bug
+(pinned by a stub test). One birth per parent per generation, even at
+e ≥ 2θ — the dynastic channel runs through breeding frequency, not
+endowment. (7) survivors age += 1; (8) score-only reset (#79); (9)
+per-agent snapshot of the post-boundary population (the exact set entering
+G+1, with carried-forward energy and entering age — an agent that earned,
+bred, and died within one boundary has its gross earnings only in the
+per-strategy means; accepted grain). **Death-before-birth is a plain design
+preference and deviates from Hammond–Axelrod**, whose period order is
+immigration → interaction → reproduction → death: in H-A a newborn can die
+in its birth period and the first period differs — named honestly, NOT
+justified as "spatially correct for M11" (the canonical spatial model does
+the opposite). Rejected: fully-simultaneous no-ordering (ambiguous at
+capacity). Founder ages are staggered (`i % max_age`) when age-mortality is
+active, starting runs at the demographic steady state instead of a
+colony-ship cohort collapse. The population list invariant: ALWAYS sorted
+by ascending agent_id, explicitly — deaths make ids non-contiguous, so
+list position is never a proxy for id. With age-mortality off and μ = 0,
+an economy generation consumes exactly the match-phase draws.
+
+**#81 — 2026-07-16 — The variable-N `random_k` contract: clamp, don't
+raise (M10a; defines territory #57 never reached).** `RandomK.pairings`
+drops its k > N−1 ValueError and clamps the draw to `size = min(k, N−1)`.
+Safety against #57's seeded-history contract: at every N ≥ k+1 — the only
+regime the fixed-N engine could occupy — the clamp is a literal no-op, so
+every existing seeded run is byte-identical (pinned by a regression test
+against the pre-clamp algorithm verbatim). The new behaviour exists only in
+the N < k+1 regime deaths create. Corners (verified and tested): N = 2 —
+each agent plays the one other; N = 1 — `rng.choice(0, size=0)` returns
+empty WITHOUT raising and consumes NO RNG, so the lone survivor plays
+nothing, earns nothing, still pays its living cost, and starves at the next
+boundary unless capital returns clear the bill (the intended thermodynamics
+of a population of one under a metabolic bill — observed live in the
+all-defector scenario run, where the last defector spends generation 6
+alone); N = 0 — extinction, the run has already ended. Config validation
+still enforces k ≤ N−1 at generation 0, unchanged. Alternatives rejected:
+**raising** (a valid config must not crash because the population got small
+mid-run — a metabolic filter is *supposed* to be able to shrink a
+population, that is the science); **skipping** (0 matches when N−1 < k — a
+discontinuous cliff with no mechanism motivating the jump). `RoundRobin`
+needed no change; its income scaling with N is a calibration fact the
+Economy panel surfaces, not a correctness one.
+
+**#82 — 2026-07-16 — Per-agent snapshots instead of birth/death events;
+extinction ends a run early (M10a observability).** `GenerationFinished`
+gains one optional field: `agents: tuple[AgentSnapshot, ...]` (agent_id,
+parent_id, age, energy, strategy) — the POST-boundary population, populated
+only in economy mode and empty under imitation (keeping those payloads
+byte-identical to pre-M10a; `CycleFinished` gains nothing — a tournament
+has no economy). **Rejected — explicit birth/death events**: the snapshot
+sequence reconstructs the entire birth/death record by diff (an id present
+at G but not G−1 was born, `parent_id` names its parent; present at G−1 but
+not G died), so event types would duplicate truth (#47) and complicate the
+observer-only granularity model (#35) for no gain — in the synchronous
+model everything happens at one atomic boundary; explicit events belong to
+M10b, where async event time makes per-event ordering meaningful.
+**Rejected — a population-size payload field**: `N = sum(composition
+.values())` (#47 raw-not-derived); `RunTimeseries.population_size` is a
+derived property, and the stacked composition chart already IS the
+population-growth chart. Extinction: the engine breaks after yielding the
+`GenerationFinished` whose post-boundary population is empty;
+`RunFinished.completed` counts generations actually played (still always
+equal to the configured count under imitation), an extinct run closes with
+empty composition/scores, `_headline` reports "population extinct at
+generation N", and the CLI derives its completed count from the last period
+event (printing "Population extinct." when the run ended early) instead of
+trusting the config. The run card, charts, loader, and sweep metrics all
+survive an extinct run (tested).
+
+**#83 — 2026-07-16 — Persistence schema 3: `agents.parquet` + economy
+summary fields; the version tracks the PRESENCE of per-agent data (M10a; a
+pure application of the #47/#65 pattern).** New sibling table
+`agents.parquet` — the filename the module docstring reserved since M7 —
+one row per (period, post-boundary agent): period, agent_id, parent_id
+(nullable pandas Int64; founders `<NA>`), age, energy, strategy. No
+born/died flags (derivable by diff, #47). Written ONLY when the run
+produced snapshots, and `summary.json`'s `schema_version` is 3 exactly
+then: an imitation run under M10a code writes NO agents.parquet and
+schema_version **2** (`PER_STRATEGY_SCHEMA_VERSION`), byte-identical to
+pre-M10a recordings — the honest thing for the version to track. (The
+config.yaml header comment, written before any event exists, anticipates
+the version from the config's reproduction mode.) `summary.json` gains
+`total_agents_born` (largest passport id + 1 — free from the id contract)
+and `population_final` (size of the last snapshot; 0 for extinct runs);
+both `None` for imitation runs; the existing `population_size` field stays
+config-derived INITIAL size, documented as such. `timeseries.parquet` and
+`cooperation.parquet` untouched — **rejected: widening timeseries with
+energy columns**, which would write NaN-filled columns for every imitation
+run (#47c forbids exactly that). Loader: accepts 1, 2, and 3; rejects > 3;
+`agents.parquet` reads with the same missing-file → empty-mapping shape as
+`_read_cooperation`, and snapshots are refed through `GenerationFinished`
+so every derived view (per-strategy mean energy/age, population curve) is
+recomputed by the exact code the live run used. A schema-1/2 folder simply
+renders without the economy views — no migration, no error.
+
+**#84 — 2026-07-16 — M10a bench re-run and validation observations (the
+#58/#65 vectorization-trigger discipline).** `python -m pdsim.bench` gained
+a `--reproduction-mode` flag; its economy cell is tuned to CONSTANT N (an
+unreachable breeding bar, zero living cost) so the timing isolates the
+economy bookkeeping at the same N as the imitation cell. This machine,
+N ∈ {100, 200}, 50-round matches, 3 timed generations, repeated per #65's
+noise warning (repeats agreed): under **random_k** the economy costs ≈
+5-10% over imitation (0.36 → 0.38 s/gen at N=200) — the ledger, boundary,
+and snapshots are cheap; under **round_robin** it costs ≈ 45-60% (7.6 →
+~11.2 s/gen at N=200), and that gap is the **#79 persistent-history
+growth** (every pair re-meets every generation, so the O(length²) view
+copy grows per generation), not the boundary machinery — exactly what the
+calibration readout's memory note warns about, bounded by `memory_depth`.
+The cost model's structure is unchanged and the trigger stays **M18,
+review-at**. Validation observation worth recording: the spec's all-D
+extinction trace ("extinct at generation 5") is exact only in mean-field —
+under random_k, participation luck spreads the collapse over boundaries
+4-6 (seed 42: 40 → 40 → 40 → 21 → 1 → 0, extinct at generation 6, the last
+generation being a lone defector playing zero matches — the #81 N=1 corner
+occurring naturally). The growth side ran exactly as calibrated: N grew
+40 → 200 = K and plateaued, Always Defect was squeezed out, 220 passports
+issued, `population_final` 200.
+
+**#85 — 2026-07-17 — M10 splits into M10a (synchronous) / M10b (async), and
+energy-replaces-imitation TIES OFF #64's deferred `cumulative` accounting
+(recovered from the design-freeze tail; supplements #77).** The growth
+economy ships in two parts: M10a delivers the entire variable-N invariant on
+the existing generational clock; M10b — the asynchronous / Moran-style event
+time-model — is a separate later spec. Rejected: **one-milestone-both-modes**
+(the async time-model dissolves the generation as the unit of time, a second
+invariant change that must not ride along with the first) and **async-first**
+(the synchronous economy is testable against the existing golden machinery
+and freezes the ledger semantics the async model will inherit). Separately,
+the paradigm fork resolves an open option: #64 deferred a `cumulative` score
+accounting to §6.1. **Energy IS that cumulative stock — but repurposed, so
+the option is resolved-by-replacement rather than built.** Accounting
+produces "the effective scores selection reads"; energy is "a stock
+reproduction spends". Different jobs → the economy *replaces* imitation
+instead of composing with it as a fifth accounting rule, and #64's
+`cumulative` option should be read as closed by this entry (#64 itself
+stands unedited — append-only log).
+
+**#86 — 2026-07-17 — `engagement_cost` is per-MATCH, not per-round — a
+deliberate deviation from DESIGN §6.1's "per-round living cost" phrasing
+(recovered from the design-freeze tail; supplements #80's ledger).** The
+ledger's two cost components are additive and independently switchable:
+`basic_living_cost` per generation (existence) and `engagement_cost` per
+match played (interaction). Per-ROUND was rejected: it would couple the cost
+to `rounds_per_match` — making the match-length knobs silently *economic*
+(changing match length would re-price survival) — and under continuation
+mode it would inherit a RANDOM match length, entangling a cost term with the
+RNG stream. Also rejected: **coupling the two costs by a ratio** — the units
+do not work (energy/generation versus energy/match needs a match count to
+convert, but N — and with it the match count — changes every generation by
+design), and a coupled pair would break M9.5 sweep-axis independence, where
+each cost must be sweepable alone.
+
+**#87 — 2026-07-17 — Offspring endowment is the stake transfer, nothing
+else (recovered from the design-freeze tail; supplements #78/#80).** A
+newborn starts with exactly σ, paid out of its parent's stock. Rejected:
+**fixed endowment independent of σ** (creates energy from nothing or
+destroys it silently — the ledger stops balancing and reproduction stops
+being a transfer); **zero endowment** (not needed as an option — it is
+simply the σ = 0 corner of the existing knob); **binary fission** (parent
+splits its balance in half — it entangles the child's start in life with the
+parent's current wealth, so the dynastic channel would run through
+endowment; the frozen design routes dynasty through *breeding frequency*
+instead, #80's one-birth-per-generation rule, which keeps σ a clean,
+sweepable constant).
+
+**#88 — 2026-07-17 — Capital returns create a STRUCTURALLY PERMANENT
+dynasty mechanism — named as a mechanism, not buried (recovered from the
+design-freeze tail; supplements #80).** With `capital_return_rate` r > 0,
+an agent whose stock exceeds the escape velocity `e* = total cost / r` pays
+its bills from returns alone — self-sustaining regardless of play, immune
+to the metabolic filter, clearing θ forever. Combined with the
+highest-energy-first admission gate (#80), rich lineages breed with
+priority at capacity: rentier wealth converts directly into reproductive
+privilege, and the dynasty is structurally permanent, not a lucky streak.
+This is a deliberate experimental instrument (the Economy panel surfaces e*
+whenever r > 0), not an accident. One bound worth recording: capital return
+CANNOT compound a debt — insolvency deaths run at every boundary, so every
+living agent enters every generation at e ≥ 0, and `(1 + r)` only ever
+multiplies non-negative stocks.
+
+**#89 — 2026-07-17 — Recovered design-freeze addenda (small rationales that
+lived only in the truncated tail; supplements #76/#77/#78/#80/#83).**
+(a) **Carrying capacity K is aspatial-specific, not universal**: a lattice
+gets capacity for free from site occupancy — K is the well-mixed model
+paying cash for what structure will provide structurally, so under M11
+capacity may become emergent from site count rather than a parameter.
+(b) The capacity and structural gates are **two named free functions**
+(`admit_births`, `place_offspring`) rather than a speculative ABC — hard
+rule 6: M11 updates DESIGN first, then generalises; the seam is named now,
+the abstraction waits for its second implementation. (c) **Passport-id
+reuse was rejected** ("hotel-room splicing"): reusing a dead agent's id
+would stitch together the histories of unrelated creatures who happened to
+occupy the same slot — with persistent per-opponent memory (#79), an id
+must mean one creature forever. (d) The **effective-max-age check is
+warn-don't-forbid**: an explicit senescence factor that reaches certainty
+before `max_age` is allowed with a soft note — someone may legitimately
+want a population where nobody reaches the cap. (e) The **calibration
+readout ships IN M10a**, not later — app-first validation ("set up an
+economy, observe growth") is not honest if the person cannot see where the
+survival window lies. (f) For the record, per the append-only rule: #58 and
+#75 were NOT retro-edited by the #76 renumbering; their labels are simply
+read through the #76 table.
+
+**#90 — 2026-07-17 — The all-defector trace sits on a KNIFE EDGE at
+boundary 4 — fix the text, keep the numbers (refines #84's observation;
+design-layer reproduction confirmed the series).** Mechanism, precisely:
+in `the_growth_economy` with 40 Always Defect, the mean-field defector
+energy at boundary 4 is EXACTLY 0.0 (e₀ 400 + 4×100 income − 4×200 cost),
+and the measured population mean and minimum at that boundary are both 0.0.
+Death is strictly `e < 0`, so at boundary 4 survival is decided by
+participation luck ALONE (#44/#57: under random_k an agent's match count
+varies around 2k), which is why the boundary splits the population almost
+exactly in half (seed 42: 40 → 40 → 40 → 40 → 21 → 1 → 0, extinct at
+generation 6, the finale being the #81 lone-survivor corner). The
+extinction GENERATION is therefore seed-sensitive; the scenario pins seed
+42, so the observed run is reproducible. **The scenario was deliberately
+NOT re-tuned to make the collapse crisp**: the smear across boundaries 4-6
+is not noise obscuring the result — it IS participation luck appearing in
+the economy exactly where theory says it should; a defector population
+dying on a precise schedule would be the suspicious outcome. The
+calibration (L = 200 at the window midpoint, ±100 symmetric) stays. What
+changed instead: the scenario's `things_to_try` now describes the
+generations-4-to-6 collapse and teaches the mechanism (it previously said
+"dies at generation 5" — live, user-facing, and wrong), and explainer §4
+gained the general lesson: a mean-field trace tells you when the AVERAGE
+agent dies, not when the population does. The spec's mean-field trace
+stays as written — frozen per #62; this entry is the record.
+
+**#91 — 2026-07-17 — The cost model gains a GENERATIONS term under the
+economy with unbounded memory — measured, confirmed, and scoped (completes
+#84's attribution; DESIGN §3.1 amended).** #84 attributed the economy's
+round-robin overhead to #79's persistent-history growth; that attribution
+was a hypothesis with a falsifiable prediction — `view_of` copies the
+visible history every round, histories grow by ≈ `rounds` per re-meeting,
+so the per-generation cost should rise LINEARLY with the generation index
+under round-robin (every pair re-meets every generation) and stay near-flat
+under random_k, while imitation stays flat everywhere (histories wiped each
+boundary). Measured (N = 50, 50 rounds, median s/gen, each cell run twice
+per #65 — repeats agreed within 2%): **imitation round_robin FLAT** (0.44
+at G = 20 → 0.45 at G = 100); **economy round_robin GROWS** (1.13 at
+G = 20 → 3.47 at G = 100, ×3.1 — matching the ≈ (2G−1) copy-ratio
+prediction at the bench's median generation); **economy random_k grows
+slowly** (0.15 → 0.24, ×1.6). The random_k cell sharpens the claim rather
+than contradicting it: the growth term scales with the PAIR-RECURRENCE
+probability — ≈ 1 under round-robin, ≈ 2k/(N−1) under random_k — and at
+N = 50, k = 5 that is ≈ 0.20, one-fifth the round-robin rate, visible at
+100 generations. It vanishes exactly in the large-N regime random_k is
+chosen for. Consequence, now stated in DESIGN §3.1: the
+`7.5 µs × N × k × rounds` model holds per-generation for imitation, for
+tournaments, and asymptotically for economy + random_k at large N; under
+**economy + round_robin with unbounded `memory_depth`** the per-generation
+cost grows with the generation index, so a long run is SUPERLINEAR in
+`generations` (quadratic total). `memory_depth` is the bound (it caps what
+strategies see, hence what `view_of` copies), and the Economy panel's
+memory-growth note (#79) is the user-facing warning. A measurement, not a
+refactor: the vectorization trigger stays **M18, review-at**; bench output
+remains environment-specific and uncommitted.

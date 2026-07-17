@@ -72,3 +72,32 @@ def test_reset_for_new_generation_clears_score_and_history() -> None:
     agent.reset_for_new_generation()
     assert agent.score == 0.0
     assert agent.view_of(1).round_number == 0
+
+
+def test_economy_attributes_default_inert() -> None:
+    """energy/age/parent_id exist with inert defaults (M10a, principle 2)."""
+    agent = Agent(agent_id=0, strategy=StubAlwaysCooperate())
+    assert agent.energy == 0.0
+    assert agent.age == 0
+    assert agent.parent_id is None
+
+
+def test_economy_attributes_settable_at_construction() -> None:
+    """The economy loop decorates newborns through the constructor."""
+    agent = Agent(agent_id=9, strategy=StubAlwaysCooperate(), energy=400.0, age=2, parent_id=3)
+    assert agent.energy == 400.0
+    assert agent.age == 2
+    assert agent.parent_id == 3
+
+
+def test_reset_score_keeps_histories() -> None:
+    """The M10a score-only reset: memory persists, the score does not."""
+    agent = Agent(agent_id=0, strategy=StubAlwaysCooperate())
+    agent.record_round(1, Action.COOPERATE, Action.DEFECT, payoff=0.0)
+    agent.score = 5.0
+    agent.reset_score_for_new_generation()
+    assert agent.score == 0.0
+    assert agent.view_of(1).round_number == 1  # the relationship survives
+    # The full reset still wipes everything (imitation path unchanged).
+    agent.reset_for_new_generation()
+    assert agent.view_of(1).round_number == 0

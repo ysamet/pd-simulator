@@ -7,7 +7,13 @@ indifference to fine-grained events, and capturing the final summary.
 
 from __future__ import annotations
 
-from pdsim.core.events import CycleFinished, GenerationFinished, MatchFinished, RunFinished
+from pdsim.core.events import (
+    AgentSnapshot,
+    CycleFinished,
+    GenerationFinished,
+    MatchFinished,
+    RunFinished,
+)
 from pdsim.core.timeseries import RunTimeseries
 
 
@@ -151,3 +157,72 @@ class TestTournamentFolding:
         assert timeseries.periods == [0, 1]
         assert timeseries.total_scores == {"a": [4.0, 9.0], "b": [9.0, 14.0]}
         assert timeseries.composition == {"a": [1, 1], "b": [1, 1]}
+
+
+class TestAgentSnapshotFolding:
+    """M10a: per-agent snapshots and the derived economy series."""
+
+    @staticmethod
+    def _snapshot(agent_id: int, energy: float, age: int, strategy: str = "a") -> AgentSnapshot:
+        """Build a snapshot with the fields these tests care about."""
+        return AgentSnapshot(
+            agent_id=agent_id, parent_id=None, age=age, energy=energy, strategy=strategy
+        )
+
+    def test_imitation_events_leave_economy_series_empty(self) -> None:
+        """No snapshots ever → charts know to skip the economy figures."""
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(GenerationFinished(index=0, composition={"a": 2}, mean_scores={"a": 1.0}))
+        assert timeseries.agent_snapshots == []
+        assert timeseries.mean_energy == {}
+        assert timeseries.mean_age == {}
+
+    def test_snapshots_fold_into_derived_means(self) -> None:
+        """Per-strategy mean energy and age come straight from the snapshots."""
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(
+            GenerationFinished(
+                index=0,
+                composition={"a": 2, "b": 1},
+                mean_scores={"a": 1.0, "b": 2.0},
+                agents=(
+                    self._snapshot(0, energy=100.0, age=1, strategy="a"),
+                    self._snapshot(1, energy=300.0, age=3, strategy="a"),
+                    self._snapshot(2, energy=50.0, age=0, strategy="b"),
+                ),
+            )
+        )
+        assert timeseries.mean_energy == {"a": [200.0], "b": [50.0]}
+        assert timeseries.mean_age == {"a": [2.0], "b": [0.0]}
+        assert len(timeseries.agent_snapshots) == 1
+
+    def test_extinction_period_still_appends(self) -> None:
+        """Once economy data exists, an empty snapshot is meaningful."""
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(
+            GenerationFinished(
+                index=0,
+                composition={"a": 1},
+                mean_scores={"a": 1.0},
+                agents=(self._snapshot(0, energy=10.0, age=1),),
+            )
+        )
+        timeseries.add(
+            GenerationFinished(index=1, composition={"a": 1}, mean_scores={"a": 0.5}, agents=())
+        )
+        assert timeseries.agent_snapshots == [
+            (self._snapshot(0, energy=10.0, age=1),),
+            (),
+        ]
+        assert timeseries.mean_energy == {"a": [10.0, None]}
+
+    def test_population_size_is_derived_from_composition(self) -> None:
+        """#47: N per period is a recomputation, never a stored series."""
+        timeseries = RunTimeseries(mode="evolution")
+        timeseries.add(GenerationFinished(index=0, composition={"a": 3}, mean_scores={"a": 1.0}))
+        timeseries.add(
+            GenerationFinished(
+                index=1, composition={"a": 2, "b": 4}, mean_scores={"a": 1.0, "b": 1.0}
+            )
+        )
+        assert timeseries.population_size == [3, 6]

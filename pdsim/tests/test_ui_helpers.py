@@ -197,3 +197,91 @@ class TestValidationMessages:
             messages = helpers.validation_messages(error)
         assert any("at most" in message for message in messages)
         assert not any(message.startswith("Value error") for message in messages)
+
+
+class TestEconomyGreying:
+    """M10a: the coarse reproduction-mode split in the greying rules (#34)."""
+
+    def test_selection_family_greys_out_under_the_economy(self) -> None:
+        """Differential survival IS the selection — the copiers are inert."""
+        values = {"run.mode": "evolution", "dynamics.reproduction_mode": "energy_economy"}
+        for key in (
+            "dynamics.selection_rule",
+            "dynamics.selection_beta",
+            "dynamics.score_accounting",
+            "dynamics.accounting_window",
+        ):
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "energy economy" in note
+
+    def test_economy_knobs_grey_out_under_imitation(self) -> None:
+        """The eleven knobs are only read in the energy economy."""
+        values = {"run.mode": "evolution", "dynamics.reproduction_mode": "imitation"}
+        for key in helpers._ECONOMY_PARAMS:
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "IGNORED under imitation" in note
+
+    def test_mutation_rate_is_never_paradigm_greyed(self) -> None:
+        """μ is consumed by BOTH modes (imitation slots, economy newborns)."""
+        for mode in ("imitation", "energy_economy"):
+            values = {"run.mode": "evolution", "dynamics.reproduction_mode": mode}
+            disabled, _ = helpers.greying("dynamics.mutation_rate", values)
+            assert not disabled, mode
+
+    def test_paradigm_check_wins_over_the_rule_level_check(self) -> None:
+        """Under the economy, β gets the paradigm note, not the fermi note."""
+        values = {
+            "run.mode": "evolution",
+            "dynamics.reproduction_mode": "energy_economy",
+            "dynamics.selection_rule": "proportional",
+        }
+        _, note = helpers.greying("dynamics.selection_beta", values)
+        assert "energy economy" in note
+        assert "fermi" not in note
+
+    def test_everything_dynamics_greys_in_tournament_mode(self) -> None:
+        """reproduction_mode and the economy knobs joined the #34 list."""
+        values = {"run.mode": "tournament"}
+        for key in ("dynamics.reproduction_mode", "dynamics.carrying_capacity"):
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "tournament" in note
+
+    def test_economy_widgets_enabled_in_economy_mode(self) -> None:
+        """The knobs are live exactly when the economy reads them."""
+        values = {"run.mode": "evolution", "dynamics.reproduction_mode": "energy_economy"}
+        disabled, note = helpers.greying("dynamics.carrying_capacity", values)
+        assert not disabled
+        assert note == ""
+
+
+class TestDerivedDefaultWidgetValues:
+    """M10a: resolved auto values present as blank (the resolver's inverse)."""
+
+    def test_scenario_with_auto_values_loads_as_blank(self) -> None:
+        """The growth-economy scenario stores resolved numbers, shown as auto."""
+        config = get_scenario_info("the_growth_economy").config
+        values = helpers.widget_values_from_config(config)
+        assert values["dynamics.initial_energy"] is None  # 400 == the stake
+        assert values["dynamics.senescence_factor"] is None  # 1.0 == auto
+
+    def test_explicit_values_survive_the_round_trip(self) -> None:
+        """A value the auto rule would NOT produce stays visible."""
+        data = get_scenario_info("the_growth_economy").config.model_dump(mode="json")
+        data["dynamics"]["initial_energy"] = 123.0
+        data["dynamics"]["senescence_factor"] = 1.6
+        from pdsim.config.experiment import ExperimentConfig
+
+        config = ExperimentConfig.model_validate(data)
+        values = helpers.widget_values_from_config(config)
+        assert values["dynamics.initial_energy"] == 123.0
+        assert values["dynamics.senescence_factor"] == 1.6
+
+    def test_blank_values_reassemble_to_the_same_config(self) -> None:
+        """The inverse mapping is loss-free: rebuild resolves right back."""
+        config = get_scenario_info("the_growth_economy").config
+        values = helpers.widget_values_from_config(config)
+        rebuilt = helpers.build_config(values, dict(config.population.composition))
+        assert rebuilt == config

@@ -136,7 +136,7 @@ Chance that an agent's action is accidentally flipped — it meant to cooperate 
 - **Allowed values:** 2 to 10000
 - **Default:** `100`
 
-Number of agents in the population. It stays constant across generations: selection always produces exactly this many agents. Practical note for v1: a few hundred agents is the comfortable limit for live visualization.
+Number of agents the run STARTS with. Under 'imitation' reproduction it stays constant across generations: selection always produces exactly this many agents. In the 'energy_economy' reproduction mode the population changes from generation to generation — this is only the founding count. Practical note: a few hundred agents is the comfortable limit for live visualization.
 
 #### `population.memory_depth` — Memory depth
 
@@ -155,6 +155,16 @@ How many past rounds against each specific opponent a strategy may remember. Lea
 - **Default:** `200`
 
 How many generations the simulation runs. In each generation everyone plays their matches, scores are tallied, and the next generation is formed by selection and mutation.
+
+#### `dynamics.reproduction_mode` — Reproduction mode
+
+- **Type:** choice
+- **Allowed values:** one of: `imitation`, `energy_economy`
+- **Default:** `imitation`
+
+How the next generation comes to be. 'imitation' is the classic setting: the population size never changes — each slot in the next generation copies a parent's strategy, chosen by the selection rule below. 'energy_economy' replaces copying with living: agents hold a stock of energy, earn it by playing, pay it to stay alive, and reproduce when they can afford to — nobody copies anyone, the population grows and shrinks (and can even go extinct), and differential survival IS the selection. Switching to 'energy_economy' makes the selection rule and score accounting settings inert (they stay visible but are ignored).
+
+*Learn more:* The two classic families of evolutionary dynamics: imitation (cultural copying, e.g. the Fermi rule) versus birth-death dynamics (organisms with metabolisms, e.g. Epstein & Axtell's Sugarscape).
 
 #### `dynamics.selection_rule` — Selection rule
 
@@ -233,6 +243,98 @@ How many recent generations are averaged when score accounting is 'sliding_windo
 - **Default:** `0.5`
 
 How much of the past is kept when score accounting is 'exponential_discount'. Each generation, the score selection sees blends the new raw score with the previous blended score — higher values remember longer. At 0 the past is forgotten entirely, exactly like per-generation accounting. Must be below 1, or new scores would never matter at all.
+
+#### `dynamics.reproduction_threshold` — Reproduction threshold (θ)
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `500.0`
+
+Energy an agent must hold at the end of a generation to have a child, in the energy economy. Reaching this bar is the 'can afford a child' test; the parent then pays the offspring stake to the newborn. Must be at least the offspring stake, so a parent always survives its own reproduction.
+
+#### `dynamics.offspring_stake` — Offspring stake (σ)
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `400.0`
+
+Energy a newborn starts life with, paid out of its parent's stock at the moment of birth, in the energy economy. A bigger stake gives children a longer runway but drains parents more — reproduction transfers wealth, it does not create it.
+
+#### `dynamics.initial_energy` — Initial energy
+
+- **Type:** number
+- **Allowed values:** at least 0; may be empty (= off/unlimited)
+- **Default:** empty (no limit)
+
+Energy each founding agent starts the run with, in the energy economy. Leave blank for 'same as the offspring stake' — founders then start life exactly like newborns.
+
+#### `dynamics.basic_living_cost` — Basic living cost (L)
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `200.0`
+
+Energy every agent pays at the end of each generation simply for existing, in the energy economy. This is the metabolic bill: an agent whose play cannot cover it slides toward death. Set it between the all-defector and all-cooperator incomes to make cooperation a survival matter — the Economy panel shows exactly where that window lies.
+
+*Learn more:* The living cost is the metabolic filter: it converts 'scoring poorly' into 'starving', which is what lets defectors go extinct instead of merely being out-copied.
+
+#### `dynamics.engagement_cost` — Engagement cost
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `0.0`
+
+Energy an agent pays per match it takes part in, in the energy economy. At 0, playing is free and more matches are always better; above 0, every interaction has a price, so agents that get drawn into many matches also pay more.
+
+#### `dynamics.reproduction_overhead` — Reproduction overhead
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `0.0`
+
+Extra energy a parent burns at each birth, on top of the offspring stake, in the energy economy. The stake reaches the child; this overhead simply disappears — it is the cost of the act of reproduction itself.
+
+#### `dynamics.capital_return_rate` — Capital return rate (r)
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `0.0`
+
+Interest earned on energy carried between generations, in the energy economy: carried-over energy is multiplied by (1 + this rate) each generation. Above zero it creates rentiers — an agent whose stock exceeds the 'escape velocity' shown in the Economy panel pays its bills from returns alone, forever, no matter how it plays.
+
+#### `dynamics.carrying_capacity` — Carrying capacity (K)
+
+- **Type:** whole number
+- **Allowed values:** at least 1
+- **Default:** `200`
+
+The most agents the world can hold, in the energy economy. Births only fill seats left below this cap — at capacity, nobody new gets in until deaths free room, and the richest would-be parents are admitted first. It is the well-mixed model's stand-in for physical room; once the population gets a spatial structure (a later milestone), capacity may instead emerge from the number of sites.
+
+#### `dynamics.base_hazard` — Base hazard
+
+- **Type:** number
+- **Allowed values:** 0 to 1
+- **Default:** `0.0`
+
+Chance a brand-new agent dies of background causes at each generation boundary, in the energy economy. The chance grows with age when the senescence factor is above 1. At 0 — with no maximum age set — nobody dies of age at all; only of running out of energy.
+
+#### `dynamics.senescence_factor` — Senescence factor
+
+- **Type:** number
+- **Allowed values:** at least 0; may be empty (= off/unlimited)
+- **Default:** empty (no limit)
+
+How steeply the death chance climbs with age, in the energy economy: each generation of age multiplies the base hazard by this factor. Leave blank for 'auto', which picks the value that makes the death chance reach exactly 1.0 at the maximum age. Values above 1 mean aging; exactly 1 means age never matters.
+
+*Learn more:* An exponentially climbing death rate is the Gompertz law of mortality — the standard first model of aging.
+
+#### `dynamics.max_age` — Max age
+
+- **Type:** whole number
+- **Allowed values:** at least 0
+- **Default:** `0`
+
+A hard age cap, in the energy economy: an agent that reaches this age dies at the next generation boundary, no matter what. 0 means no cap. With a cap set and the senescence factor left blank, the death chance rises smoothly to certainty exactly at this age.
 
 ### Run
 
@@ -373,6 +475,12 @@ What does selection intensity actually do? With β = 0.001, scores barely matter
 Can a small band of reciprocators invade a world of defectors? Twenty Always Defect agents and just four Tit for Tats, but the matches are long (high continuation probability — a long 'shadow of the future') and selection is strong. Cooperation among the few can out-earn universal betrayal.
 
 **Things to try:** Lower the continuation probability to 0.5 (short matches) and the invasion fails — the shadow of the future is the whole story. Try 2 Tit for Tats instead of 4: is there a critical cluster size?
+
+### The Growth Economy (`the_growth_economy`)
+
+What happens when survival costs energy and playing earns it? Agents pay a living bill every generation, breed when they can afford the stake, and die when their energy runs out — nobody copies anyone. Cooperators generate more energy per interaction than defectors do, so the same bill that cooperators shrug off can drive defectors extinct, while the population itself grows toward its carrying capacity.
+
+**Things to try:** Set the basic living cost to 320 (above the all-cooperator income of 300) and EVERYONE dies — the survival window is real. Set it to 80 (below the all-defector income of 100) and even defectors grow, because the filter is switched off. Switch the composition to 40 Always Defect and watch the population collapse over generations 4 to 6 — not all at once: every defector is on the same average trajectory, so they all approach zero energy together, and who actually crosses first is decided by participation luck, since under random_k some agents get drawn into more matches than others. Set the max age to 20 and watch the mean-age chart settle. Set the capital return rate to 0.05 and watch the escape velocity appear in the Economy panel.
 
 ## Outcome metrics
 

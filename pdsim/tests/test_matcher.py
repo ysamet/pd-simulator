@@ -119,10 +119,50 @@ class TestRandomK:
         agents = _population(7)
         assert _id_pairs(matcher, agents, seed=42) == _id_pairs(matcher, agents, seed=42)
 
-    def test_k_larger_than_population_fails_plainly(self) -> None:
-        """The defensive matcher-level check names both numbers."""
-        with pytest.raises(ValueError, match="offers only 3"):
-            list(RandomK(_random_k_config(4)).pairings(_population(4), np.random.default_rng(0)))
+    def test_clamp_is_a_noop_at_n_at_least_k_plus_one(self) -> None:
+        """The M10a clamp changes nothing in the old regime (byte-identity).
+
+        At every N ≥ k + 1, min(k, N − 1) = k, so the clamped draw must be
+        byte-identical to the pre-clamp algorithm — checked by re-running
+        the original unclamped draw with the same seed (#57 preserved).
+        """
+        k, n, seed = 3, 8, 7
+        agents = _population(n)
+        clamped = _id_pairs(RandomK(_random_k_config(k)), agents, seed=seed)
+        rng = np.random.default_rng(seed)
+        reference = []  # the pre-M10a algorithm, verbatim: size=k, no clamp
+        for initiator in agents:
+            others = [agent for agent in agents if agent is not initiator]
+            drawn = rng.choice(len(others), size=k, replace=False)
+            reference.extend((initiator.agent_id, others[i].agent_id) for i in drawn)
+        assert clamped == reference
+
+    def test_shrunken_population_clamps_instead_of_raising(self) -> None:
+        """N < k + 1 (M10a variable-N territory): everyone meets everyone."""
+        pairs = _id_pairs(RandomK(_random_k_config(5)), _population(3), seed=0)
+        # Each of the 3 agents initiates min(5, 2) = 2 matches.
+        assert len(pairs) == 3 * 2
+        for initiator in range(3):
+            opponents = {b for a, b in pairs if a == initiator}
+            assert opponents == {i for i in range(3) if i != initiator}
+
+    def test_two_survivors_play_each_other(self) -> None:
+        """N = 2 corner: each agent plays the one other agent."""
+        pairs = _id_pairs(RandomK(_random_k_config(5)), _population(2), seed=0)
+        assert pairs == [(0, 1), (1, 0)]
+
+    def test_lone_survivor_plays_nothing_and_consumes_no_rng(self) -> None:
+        """N = 1 corner: zero matches, and the zero-size draw is RNG-free."""
+        rng = np.random.default_rng(11)
+        state_before = rng.bit_generator.state
+        pairs = list(RandomK(_random_k_config(5)).pairings(_population(1), rng))
+        assert pairs == []
+        assert rng.bit_generator.state == state_before
+
+    def test_empty_population_yields_nothing(self) -> None:
+        """N = 0 corner (extinction): no initiators, no pairs, no error."""
+        pairs = list(RandomK(_random_k_config(5)).pairings([], np.random.default_rng(0)))
+        assert pairs == []
 
     def test_opponent_frequencies_are_approximately_uniform(self) -> None:
         """Statistical sanity: draws show no favoritism (fixed seed).

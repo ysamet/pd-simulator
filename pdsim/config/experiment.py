@@ -41,8 +41,55 @@ __all__ = [
     "MatchingConfig",
     "PopulationConfig",
     "load_config",
+    "resolve_initial_energy",
+    "resolve_senescence_factor",
     "save_config",
 ]
+
+
+def resolve_initial_energy(initial_energy: float | None, offspring_stake: float) -> float:
+    """Resolve the ``dynamics.initial_energy`` derived default (M10a).
+
+    ``None`` means "auto": founders start with the offspring stake, so they
+    begin life exactly like newborns. A pure function so the rule is
+    unit-testable on its own — the config validator only *calls* it, and the
+    resolved plain number is what ``save_config`` writes (hard rule 8: the
+    auto rule can never retroactively change a saved run).
+
+    Args:
+        initial_energy: The configured value, or ``None`` for auto.
+        offspring_stake: The configured offspring stake σ.
+
+    Returns:
+        The energy each founder starts the run with.
+    """
+    return offspring_stake if initial_energy is None else initial_energy
+
+
+def resolve_senescence_factor(
+    senescence_factor: float | None, base_hazard: float, max_age: int
+) -> float:
+    """Resolve the ``dynamics.senescence_factor`` derived default (M10a).
+
+    ``None`` means "auto": when a base hazard and a maximum age are both set,
+    pick the factor that makes the per-boundary death chance climb from
+    ``base_hazard`` at age 0 to exactly 1.0 at ``max_age`` —
+    ``(1 / base_hazard) ** (1 / max_age)``. Without both, aging has nothing
+    to calibrate against and auto means "age never matters" (factor 1.0).
+
+    Args:
+        senescence_factor: The configured value, or ``None`` for auto.
+        base_hazard: The configured per-boundary death chance at age 0.
+        max_age: The configured hard age cap (0 = no cap).
+
+    Returns:
+        The per-generation multiplier applied to the death chance.
+    """
+    if senescence_factor is not None:
+        return senescence_factor
+    if base_hazard > 0 and max_age > 0:
+        return (1.0 / base_hazard) ** (1.0 / max_age)
+    return 1.0
 
 
 def _registry_field(key: str) -> FieldInfo:
@@ -272,10 +319,17 @@ class PopulationConfig(_RegistryBackedModel):
 
 
 class DynamicsConfig(_RegistryBackedModel):
-    """Evolutionary dynamics: selection and mutation (``docs/DESIGN.md`` §2.7).
+    """Evolutionary dynamics: selection, mutation, and the economy (§2.7/§2.10).
 
     Attributes:
         generations: Number of generations to simulate.
+        reproduction_mode: How the next generation comes to be —
+            ``"imitation"`` (the classic fixed-N setting: selection rule +
+            copying) or ``"energy_economy"`` (M10a birth-death dynamics:
+            agents earn/pay/inherit energy and the population size varies).
+            Under ``"energy_economy"`` the whole selection family and score
+            accounting are ignored (the DECISIONS #34 pattern); under
+            ``"imitation"`` all the economy parameters below are ignored.
         selection_rule: Selection rule name — ``"fermi"``, ``"proportional"``,
             ``"tournament_k"``, ``"truncation"``, or ``"threshold_cloning"``
             (M9a; each rule reads only its own parameters below, the others
@@ -287,16 +341,44 @@ class DynamicsConfig(_RegistryBackedModel):
             under ``"truncation"`` (0 < q ≤ 1).
         selection_threshold_multiplier: Survival bar for
             ``"threshold_cloning"``, as a multiple of the mean score.
-        mutation_rate: Strategy-switch mutation probability μ.
+        mutation_rate: Strategy-switch mutation probability μ (consumed by
+            BOTH reproduction modes: imitation slots and economy newborns).
         score_accounting: Which score selection consumes —
             ``"per_generation"`` (raw, the classic setting),
             ``"sliding_window"``, or ``"exponential_discount"`` (M9a).
         accounting_window: Window W for ``"sliding_window"``.
         accounting_discount: Discount λ for ``"exponential_discount"``.
+        reproduction_threshold: θ — end-of-generation energy required to
+            breed (energy economy only).
+        offspring_stake: σ — energy transferred from parent to newborn at
+            birth. Must not exceed θ (validated), so a parent survives its
+            own reproduction.
+        initial_energy: Founders' starting energy. ``None`` in the raw input
+            means "auto = same as the offspring stake" and is resolved to a
+            plain number at validation time (never stored as null — hard
+            rule 8; see :func:`resolve_initial_energy`).
+        basic_living_cost: L — energy every agent pays per generation simply
+            for existing (the metabolic bill).
+        engagement_cost: Energy paid per match played.
+        reproduction_overhead: Extra energy burned (not transferred) by the
+            parent at each birth.
+        capital_return_rate: r — interest on energy carried between
+            generations (carried-in energy is multiplied by 1 + r).
+        carrying_capacity: K — the population cap; births only fill seats
+            below it. Must be at least the starting population size
+            (checked at the experiment level).
+        base_hazard: Per-boundary death chance at age 0 (the mortality trio,
+            with the two below).
+        senescence_factor: Per-generation multiplier on the death chance.
+            ``None`` in the raw input means "auto = reach certainty exactly
+            at max_age" and is resolved to a plain number at validation time
+            (see :func:`resolve_senescence_factor`).
+        max_age: Hard age cap; 0 means no cap.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
         "generations": "dynamics.generations",
+        "reproduction_mode": "dynamics.reproduction_mode",
         "selection_rule": "dynamics.selection_rule",
         "selection_beta": "dynamics.selection_beta",
         "selection_tournament_k": "dynamics.selection_tournament_k",
@@ -306,9 +388,21 @@ class DynamicsConfig(_RegistryBackedModel):
         "score_accounting": "dynamics.score_accounting",
         "accounting_window": "dynamics.accounting_window",
         "accounting_discount": "dynamics.accounting_discount",
+        "reproduction_threshold": "dynamics.reproduction_threshold",
+        "offspring_stake": "dynamics.offspring_stake",
+        "initial_energy": "dynamics.initial_energy",
+        "basic_living_cost": "dynamics.basic_living_cost",
+        "engagement_cost": "dynamics.engagement_cost",
+        "reproduction_overhead": "dynamics.reproduction_overhead",
+        "capital_return_rate": "dynamics.capital_return_rate",
+        "carrying_capacity": "dynamics.carrying_capacity",
+        "base_hazard": "dynamics.base_hazard",
+        "senescence_factor": "dynamics.senescence_factor",
+        "max_age": "dynamics.max_age",
     }
 
     generations: int = _registry_field("dynamics.generations")
+    reproduction_mode: str = _registry_field("dynamics.reproduction_mode")
     selection_rule: str = _registry_field("dynamics.selection_rule")
     selection_beta: float = _registry_field("dynamics.selection_beta")
     selection_tournament_k: int = _registry_field("dynamics.selection_tournament_k")
@@ -320,6 +414,90 @@ class DynamicsConfig(_RegistryBackedModel):
     score_accounting: str = _registry_field("dynamics.score_accounting")
     accounting_window: int = _registry_field("dynamics.accounting_window")
     accounting_discount: float = _registry_field("dynamics.accounting_discount")
+    reproduction_threshold: float = _registry_field("dynamics.reproduction_threshold")
+    offspring_stake: float = _registry_field("dynamics.offspring_stake")
+    # Annotated plain float, not float | None: the mode="before" resolver
+    # below guarantees a number is present before field validation runs, so
+    # a constructed config always holds the resolved value (hard rule 8).
+    initial_energy: float = _registry_field("dynamics.initial_energy")
+    basic_living_cost: float = _registry_field("dynamics.basic_living_cost")
+    engagement_cost: float = _registry_field("dynamics.engagement_cost")
+    reproduction_overhead: float = _registry_field("dynamics.reproduction_overhead")
+    capital_return_rate: float = _registry_field("dynamics.capital_return_rate")
+    carrying_capacity: int = _registry_field("dynamics.carrying_capacity")
+    base_hazard: float = _registry_field("dynamics.base_hazard")
+    senescence_factor: float = _registry_field("dynamics.senescence_factor")
+    max_age: int = _registry_field("dynamics.max_age")
+
+    # New concept — `@model_validator(mode="before")`: unlike the "after"
+    # hooks elsewhere in this module (which see the finished, FROZEN model
+    # and so cannot assign fields), a "before" validator receives the raw
+    # input mapping and may rewrite it. That is exactly what a derived
+    # default needs: replace None/absent with the resolved number BEFORE
+    # pydantic fills defaults and freezes the model. Because it runs before
+    # defaults are applied, an absent key and an explicit None are treated
+    # identically, and any inputs the arithmetic needs are read from the
+    # mapping with the Parameter Registry default as fallback.
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_derived_defaults(cls, data: object) -> object:
+        """Resolve the two auto ("None") defaults into plain numbers (M10a).
+
+        Args:
+            data: The raw input mapping (or an already-built model, passed
+                through untouched).
+
+        Returns:
+            The mapping with ``initial_energy`` and ``senescence_factor``
+            always present as numbers — so ``save_config`` writes plain
+            numbers and the auto rules can never retroactively change a
+            stored run (hard rule 8).
+        """
+        if not isinstance(data, dict):
+            return data
+
+        def raw(field: str, key: str) -> registry.ParamValue:
+            value = data.get(field)
+            return registry.get_spec(key).default if value is None else value
+
+        resolved = dict(data)
+        resolved["initial_energy"] = resolve_initial_energy(
+            data.get("initial_energy"), raw("offspring_stake", "dynamics.offspring_stake")
+        )
+        resolved["senescence_factor"] = resolve_senescence_factor(
+            data.get("senescence_factor"),
+            raw("base_hazard", "dynamics.base_hazard"),
+            raw("max_age", "dynamics.max_age"),
+        )
+        return resolved
+
+    @model_validator(mode="after")
+    def _check_stake_fits_threshold(self) -> Self:
+        """Check σ ≤ θ: a parent must survive its own reproduction (M10a).
+
+        Runs only when the energy economy actually reads these parameters —
+        under ``"imitation"`` they are ignored, and ignored parameters are
+        never validation errors (DECISIONS #34).
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If the offspring stake exceeds the reproduction
+                threshold in ``"energy_economy"`` mode.
+        """
+        if (
+            self.reproduction_mode == "energy_economy"
+            and self.offspring_stake > self.reproduction_threshold
+        ):
+            raise ValueError(
+                f"dynamics.offspring_stake is {self.offspring_stake}, which is more "
+                f"than dynamics.reproduction_threshold ({self.reproduction_threshold}). "
+                "The stake a parent pays its newborn cannot exceed the energy bar "
+                "for breeding, or reproduction would kill the parent. Lower the "
+                "stake (or raise the threshold)."
+            )
+        return self
 
 
 class ExperimentConfig(_RegistryBackedModel):
@@ -432,6 +610,38 @@ class ExperimentConfig(_RegistryBackedModel):
                     "from. Lower the tournament size (or grow the population) so "
                     "k is at most N."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _check_capacity_fits_population(self) -> Self:
+        """Check K ≥ N: generation 0 must not already exceed capacity (M10a).
+
+        A cross-section check like ``_check_matching_fits_population`` — it
+        spans dynamics and population, so it lives on the full experiment.
+        Runs only when the carrying capacity is actually consumed: evolution
+        mode with ``"energy_economy"`` reproduction. Under imitation (or in
+        tournament mode) the capacity is ignored, and ignored parameters are
+        never validation errors (DECISIONS #34) — which also keeps every
+        pre-M10a config loading unchanged (hard rule 8).
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If the starting population is bigger than the
+                carrying capacity in an energy-economy run.
+        """
+        if (
+            self.mode == "evolution"
+            and self.dynamics.reproduction_mode == "energy_economy"
+            and self.dynamics.carrying_capacity < self.population.size
+        ):
+            raise ValueError(
+                f"dynamics.carrying_capacity is {self.dynamics.carrying_capacity}, "
+                f"but the population starts with {self.population.size} agents — "
+                "generation 0 would already exceed capacity. Raise the carrying "
+                "capacity (or start with fewer agents)."
+            )
         return self
 
     @model_validator(mode="after")

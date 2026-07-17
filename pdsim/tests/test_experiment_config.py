@@ -347,3 +347,86 @@ dynamics:
         path.write_text("- just\n- a\n- list\n", encoding="utf-8")
         with pytest.raises(ValueError, match="YAML mapping"):
             load_config(path)
+
+
+class TestEconomyConfig:
+    """M10a: the derived defaults and the two economy cross-field checks."""
+
+    def test_resolve_initial_energy(self) -> None:
+        """None means 'same as the offspring stake'; numbers pass through."""
+        from pdsim.config.experiment import resolve_initial_energy
+
+        assert resolve_initial_energy(None, 400.0) == 400.0
+        assert resolve_initial_energy(250.0, 400.0) == 250.0
+        assert resolve_initial_energy(0.0, 400.0) == 0.0  # explicit zero is not auto
+
+    def test_resolve_senescence_factor(self) -> None:
+        """The auto rule and its worked example (0.01, 20 → 1.2589…)."""
+        from pdsim.config.experiment import resolve_senescence_factor
+
+        assert resolve_senescence_factor(None, 0.01, 20) == pytest.approx(1.2589, abs=1e-4)
+        assert resolve_senescence_factor(None, 0.0, 20) == 1.0  # no hazard: nothing to calibrate
+        assert resolve_senescence_factor(None, 0.01, 0) == 1.0  # no cap: nothing to calibrate
+        assert resolve_senescence_factor(1.6, 0.01, 20) == 1.6  # explicit override passes through
+
+    def test_derived_defaults_resolve_at_construction(self) -> None:
+        """A config never holds None for the two auto fields."""
+        cfg = _minimal_config()
+        assert cfg.dynamics.initial_energy == 400.0  # the default stake
+        assert cfg.dynamics.senescence_factor == 1.0
+
+    def test_auto_follows_the_configured_stake_and_mortality(self) -> None:
+        """The resolver reads sibling raw inputs, not just registry defaults."""
+        cfg = _minimal_config(
+            dynamics={
+                "reproduction_mode": "energy_economy",
+                "offspring_stake": 250.0,
+                "reproduction_threshold": 300.0,
+                "base_hazard": 0.01,
+                "max_age": 20,
+            }
+        )
+        assert cfg.dynamics.initial_energy == 250.0
+        assert cfg.dynamics.senescence_factor == pytest.approx(1.2589, abs=1e-4)
+
+    def test_saved_yaml_holds_plain_numbers(self, tmp_path: Path) -> None:
+        """Hard rule 8: the auto rule can never change a stored run."""
+        cfg = _minimal_config()
+        path = save_config(cfg, tmp_path / "config.yaml")
+        text = path.read_text(encoding="utf-8")
+        assert "initial_energy: 400.0" in text
+        assert "senescence_factor: 1.0" in text
+        assert load_config(path) == cfg
+
+    def test_stake_above_threshold_rejected_in_economy_mode(self) -> None:
+        """σ > θ would make reproduction suicidal — a plain-message error."""
+        with pytest.raises(ValidationError, match="offspring_stake"):
+            _minimal_config(
+                dynamics={
+                    "reproduction_mode": "energy_economy",
+                    "offspring_stake": 600.0,
+                    "reproduction_threshold": 500.0,
+                }
+            )
+
+    def test_stake_above_threshold_ignored_under_imitation(self) -> None:
+        """#34: ignored parameters are never validation errors."""
+        cfg = _minimal_config(dynamics={"offspring_stake": 600.0, "reproduction_threshold": 500.0})
+        assert cfg.dynamics.reproduction_mode == "imitation"
+
+    def test_capacity_below_population_rejected_in_economy_mode(self) -> None:
+        """Generation 0 must not already exceed K."""
+        with pytest.raises(ValidationError, match="carrying_capacity"):
+            _minimal_config(
+                dynamics={"reproduction_mode": "energy_economy", "carrying_capacity": 50}
+            )
+
+    def test_capacity_below_population_ignored_under_imitation(self) -> None:
+        """Pre-M10a configs (N > default K) must keep loading (hard rule 8)."""
+        cfg = _minimal_config(
+            population={
+                "size": 300,
+                "composition": {"tit_for_tat": 150, "always_defect": 150},
+            }
+        )
+        assert cfg.dynamics.carrying_capacity == 200  # < N, and that is fine here

@@ -45,7 +45,8 @@ from pdsim.sweep.spec import (
     sweep_spec_yaml,
     sweep_validation_messages,
 )
-from pdsim.ui import helpers, sweep_helpers
+from pdsim.ui import economy_helpers, helpers, sweep_helpers
+from pdsim.ui.economy_helpers import ECONOMY_HELP
 from pdsim.viz import charts
 
 CUSTOM = "Custom"
@@ -85,9 +86,11 @@ def _widget(spec: ParameterSpec, *, disabled: bool = False, note: str = "") -> P
     """Render the right widget for a ParameterSpec and return its value.
 
     The mapping (DECISIONS #38): bool → checkbox, choice → selectbox,
-    int/float → number_input with the spec's bounds, nullable int → a
-    "limit?" checkbox plus a number input. Widget keys are the registry
-    keys, so scenario loading can address every widget by parameter.
+    int/float → number_input with the spec's bounds, nullable → a checkbox
+    plus a number input ("Limit ...?" for nullable ints, whose None means
+    unlimited; "Set ... manually?" for nullable floats, whose None means
+    auto — the M10a derived defaults). Widget keys are the registry keys,
+    so scenario loading can address every widget by parameter.
 
     Args:
         spec: The parameter to render.
@@ -95,10 +98,11 @@ def _widget(spec: ParameterSpec, *, disabled: bool = False, note: str = "") -> P
         note: Extra tooltip line explaining why it is greyed out.
 
     Returns:
-        The widget's current value (``None`` for an unlimited nullable).
+        The widget's current value (``None`` for an unlimited/auto
+        nullable).
     """
     help_text = _help_text(spec, note)
-    if spec.nullable:
+    if spec.nullable and spec.kind == "int":
         limited = st.checkbox(
             f"Limit {spec.label.lower()}?",
             key=f"{spec.key}#limit",
@@ -114,6 +118,23 @@ def _widget(spec: ParameterSpec, *, disabled: bool = False, note: str = "") -> P
             disabled=disabled or not limited,
         )
         return int(value) if limited else None
+    if spec.nullable:  # nullable float: None means "auto" (M10a)
+        manual = st.checkbox(
+            f"Set {spec.label.lower()} manually?",
+            key=f"{spec.key}#limit",
+            help=help_text,
+            disabled=disabled,
+        )
+        value = st.number_input(
+            spec.label,
+            min_value=None if spec.minimum is None else float(spec.minimum),
+            step=0.01,
+            format="%.4g",
+            key=f"{spec.key}#value",
+            help=help_text,
+            disabled=disabled or not manual,
+        )
+        return float(value) if manual else None
     if spec.kind == "bool":
         return bool(st.checkbox(spec.label, key=spec.key, help=help_text, disabled=disabled))
     if spec.kind == "choice":
@@ -165,10 +186,15 @@ def _load_state(
     """
     for spec in helpers.panel_specs():
         value = values.get(spec.key, spec.default)
-        if spec.nullable:
+        if spec.nullable and spec.kind == "int":
             st.session_state[f"{spec.key}#limit"] = value is not None
             st.session_state[f"{spec.key}#value"] = (
                 int(value) if value is not None else int(spec.minimum or 1)
+            )
+        elif spec.nullable:  # nullable float: None means "auto" (M10a)
+            st.session_state[f"{spec.key}#limit"] = value is not None
+            st.session_state[f"{spec.key}#value"] = (
+                float(value) if value is not None else float(spec.minimum or 0.0)
             )
         else:
             st.session_state[spec.key] = value
@@ -259,13 +285,22 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
             columns = st.columns(2)
             for i, spec in enumerate(section_specs):
                 # Widgets render in registry order, so the values a widget's
-                # greying keys off (run.mode, matching.matcher) are already
-                # gathered when it renders (helpers.greying, DECISIONS #34).
+                # greying keys off (run.mode, matching.matcher,
+                # dynamics.reproduction_mode) are already gathered when it
+                # renders (helpers.greying, DECISIONS #34).
                 disabled, note = helpers.greying(spec.key, values)
                 with columns[i % 2]:
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
             if section == "Population":
                 composition = _composition_panel()
+            if (
+                section == "Dynamics"
+                and values.get("run.mode") == "evolution"
+                and values.get("dynamics.reproduction_mode") == "energy_economy"
+            ):
+                # The Population section renders before Dynamics (registry
+                # order), so the composition is already gathered here.
+                _economy_panel(values, composition)
 
     with st.expander("Per-strategy parameters"):
         st.caption(
@@ -305,9 +340,135 @@ def _composition_panel() -> dict[str, int]:
     return counts
 
 
+def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
+    """Render the Economy calibration readout inside the Dynamics expander.
+
+    Presentation only (the #38 split): all arithmetic lives in the
+    Streamlit-free :func:`pdsim.ui.economy_helpers.calibration_report`, and
+    every inline (?) text comes from the single ``ECONOMY_HELP`` source so
+    app wording and docs cannot drift. Verdict line first, then the window,
+    then the conditional readouts (M10a spec Task 11).
+
+    Args:
+        values: The widget values gathered so far this script run (every
+            section before Dynamics has already rendered).
+        composition: The population mix gathered by the Population section.
+    """
+    st.markdown("---")
+    st.markdown("**Economy calibration** — where the survival window lies for these settings.")
+    try:
+        config = helpers.build_config(values, composition)
+    except ValidationError as error:
+        st.info("The calibration readout appears once the configuration is valid:")
+        for message in helpers.validation_messages(error):
+            st.caption(f"• {message}")
+        return
+    report = economy_helpers.calibration_report(config)
+
+    # The verdict line first (the spec's order), then the window.
+    st.markdown(
+        f"A cooperator nets **{report.cooperator_net:+g}** per generation; "
+        f"a defector nets **{report.defector_net:+g}** per generation."
+    )
+    col_matches, col_c, col_d, col_window = st.columns(4)
+    col_matches.metric(
+        "Matches per agent",
+        f"{report.expected_matches:g}",
+        help=ECONOMY_HELP["expected_matches"],
+    )
+    col_c.metric("All-C income", f"{report.all_c_income:g}", help=ECONOMY_HELP["income"])
+    col_d.metric("All-D income", f"{report.all_d_income:g}", help=ECONOMY_HELP["income"])
+    col_window.metric(
+        "Survival window",
+        f"{report.all_d_income:g} ≤ cost < {report.all_c_income:g}",
+        help=ECONOMY_HELP["window"],
+    )
+    if report.window_verdict == "inside":
+        st.markdown(
+            f"Total per-generation cost **{report.total_cost:g}** is **inside** the "
+            "window — cooperators can pay the bill, defectors cannot: the "
+            "metabolic filter is on."
+        )
+    elif report.window_verdict == "above":
+        st.markdown(
+            f"Total per-generation cost **{report.total_cost:g}** is **above** the "
+            "window — even an all-cooperator cannot pay the bill; expect the "
+            "population to die out."
+        )
+    else:
+        st.markdown(
+            f"Total per-generation cost **{report.total_cost:g}** is **below** the "
+            "window — even defectors profit; the metabolic filter is switched off."
+        )
+
+    if report.escape_velocity is not None:
+        st.metric(
+            "Escape velocity e*",
+            f"{report.escape_velocity:g}",
+            help=ECONOMY_HELP["escape_velocity"],
+        )
+    if report.senescence_factor is not None:
+        col_factor, col_eff, col_theta, col_kids = st.columns(4)
+        col_factor.metric(
+            "Senescence factor (resolved)",
+            f"{report.senescence_factor:.4f}",
+            help=(
+                "The factor actually used this run — a blank 'auto' input "
+                "resolves to the value that reaches certain death exactly at "
+                "the max age."
+            ),
+        )
+        if report.effective_max_age is not None:
+            col_eff.metric(
+                "Effective max age",
+                f"{report.effective_max_age:.1f}",
+                help=ECONOMY_HELP["effective_max_age"],
+            )
+        if report.generations_to_threshold is not None:
+            col_theta.metric(
+                "Generations to θ",
+                f"{report.generations_to_threshold:.1f}",
+                help=ECONOMY_HELP["generations_to_threshold"],
+            )
+        if report.expected_offspring is not None:
+            col_kids.metric(
+                "Expected offspring",
+                f"{report.expected_offspring:g}",
+                help=ECONOMY_HELP["generations_to_threshold"],
+            )
+    if report.effective_max_age_note:
+        st.warning(report.effective_max_age_note)
+    if report.memory_note:
+        st.info(report.memory_note)
+    st.caption(report.regime_note)
+    # A toggle, not an expander — Streamlit forbids nesting expanders, and
+    # this panel already lives inside the Dynamics expander.
+    if st.toggle(
+        "Explain the economy concepts (?)",
+        key="economy_concepts",
+        help="Energy, admission at capacity, estate destruction, passport ids.",
+    ):
+        st.markdown(f"**Energy (a stock, not a score)** — {ECONOMY_HELP['energy']}")
+        st.markdown(f"**Admission at capacity** — {ECONOMY_HELP['admission']}")
+        st.markdown(f"**Estate destruction on death** — {ECONOMY_HELP['estate_destruction']}")
+        st.markdown(f"**Passport ids and lineage** — {ECONOMY_HELP['passport_id']}")
+
+
 def _request_stop() -> None:
     """Flag the running event loop to stop (button callback)."""
     st.session_state["stop_requested"] = True
+
+
+def _economy_placeholders() -> tuple[DeltaGenerator, DeltaGenerator, DeltaGenerator]:
+    """Create the three economy chart placeholders (M10a house layout).
+
+    Returns:
+        Placeholders for the population and mean-energy charts (a column
+        pair) and the mean-age chart (full width below them). They stay
+        blank for runs without per-agent snapshots.
+    """
+    col_pop, col_energy = st.columns(2)
+    return col_pop.empty(), col_energy.empty(), st.empty()
 
 
 def _draw_charts(
@@ -319,6 +480,8 @@ def _draw_charts(
     per_round: bool,
     whole_game: bool,
     key_prefix: str = "chart",
+    economy: tuple[DeltaGenerator, DeltaGenerator, DeltaGenerator] | None = None,
+    carrying_capacity: float | None = None,
 ) -> None:
     """Redraw the mode-appropriate charts into their placeholders.
 
@@ -335,6 +498,11 @@ def _draw_charts(
         whole_game: Time scope for the mean chart (DECISIONS #45).
         key_prefix: Distinguishes chart elements rendered by different app
             areas in the same script run (live view vs results browser).
+        economy: Placeholders for the population / mean-energy / mean-age
+            charts (M10a); left untouched when the run carries no per-agent
+            snapshots (imitation runs, pre-schema-3 recordings — #65 again).
+        carrying_capacity: K for the population chart's dashed reference
+            line (config-derived; ``None`` outside the energy economy).
     """
     if not timeseries.periods:
         return
@@ -353,6 +521,23 @@ def _draw_charts(
             charts.cooperation_chart(timeseries),
             use_container_width=True,
             key=f"{key_prefix}_coop_{draw_id}",
+        )
+    if economy is not None and any(timeseries.agent_snapshots):
+        population, energy, age = economy
+        population.plotly_chart(
+            charts.population_chart(timeseries, carrying_capacity),
+            use_container_width=True,
+            key=f"{key_prefix}_population_{draw_id}",
+        )
+        energy.plotly_chart(
+            charts.mean_energy_chart(timeseries),
+            use_container_width=True,
+            key=f"{key_prefix}_energy_{draw_id}",
+        )
+        age.plotly_chart(
+            charts.mean_age_chart(timeseries),
+            use_container_width=True,
+            key=f"{key_prefix}_age_{draw_id}",
         )
 
 
@@ -422,6 +607,8 @@ def _run_live(
         col_left, col_right = st.columns(2)
         chart_left, chart_right = col_left.empty(), col_right.empty()
         chart_coop = st.empty()  # full-width, below the pair (M9b)
+        chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
+        capacity = economy_helpers.chart_carrying_capacity(config)
         period_label = "cycle" if config.mode == "tournament" else "generation"
         fine_events = 0
         draws = 0
@@ -440,13 +627,29 @@ def _run_live(
             elif isinstance(event, GenerationFinished | CycleFinished):
                 draws += 1
                 _draw_charts(
-                    timeseries, chart_left, chart_right, chart_coop, draws, per_round, whole_game
+                    timeseries,
+                    chart_left,
+                    chart_right,
+                    chart_coop,
+                    draws,
+                    per_round,
+                    whole_game,
+                    economy=chart_economy,
+                    carrying_capacity=capacity,
                 )
                 progress.caption(f"{period_label} {event.index + 1} finished")
                 if delay > 0:
                     time.sleep(delay)
         _draw_charts(
-            timeseries, chart_left, chart_right, chart_coop, draws + 1, per_round, whole_game
+            timeseries,
+            chart_left,
+            chart_right,
+            chart_coop,
+            draws + 1,
+            per_round,
+            whole_game,
+            economy=chart_economy,
+            carrying_capacity=capacity,
         )
         note = f"Results of the last run (seed {config.seed})"
         if stopped:
@@ -467,9 +670,13 @@ def _run_live(
                 folder = recorder.finalize()
                 settled = True
                 st.session_state.pop("_discard_note", None)  # clean end: no banner
-                charts.export_run_charts(recorder.timeseries, folder)
+                charts.export_run_charts(recorder.timeseries, folder, carrying_capacity=capacity)
                 st.caption(f"Recorded to {folder} — see the Results browser tab.")
-        st.session_state["last_run"] = {"timeseries": timeseries, "note": note}
+        st.session_state["last_run"] = {
+            "timeseries": timeseries,
+            "note": note,
+            "carrying_capacity": capacity,
+        }
     finally:
         if recorder is not None and not settled:
             _discard_recording(recorder)
@@ -675,6 +882,8 @@ def _results_browser() -> None:
         score_view == "per_round",
         scope == "whole_game" and not tournament,
         key_prefix="browser",
+        economy=_economy_placeholders(),
+        carrying_capacity=economy_helpers.chart_carrying_capacity(loaded.config),
     )
     _final_summary_area(loaded.timeseries)
 
@@ -798,6 +1007,8 @@ def _run_lab() -> None:
                 0,
                 per_round,
                 whole_game,
+                economy=_economy_placeholders(),
+                carrying_capacity=last.get("carrying_capacity"),
             )
             _final_summary_area(timeseries)
 

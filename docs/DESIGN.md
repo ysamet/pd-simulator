@@ -180,6 +180,59 @@ tournament mode — valid in the config but without effect, NOT a validation
 error — so configs can switch modes without surgery and the UI can simply grey
 those parameters out (DECISIONS #34).
 
+### 2.10 The energy economy (M10a — reproduction mode `energy_economy`)
+
+A second evolutionary paradigm beside imitation, selected by
+`dynamics.reproduction_mode` (DECISIONS #77): **birth-death dynamics**.
+Agents hold a stock of **energy** — a persistent asset, unlike the
+per-generation score flow — earn it by playing, pay it to exist, and spend
+it on children. Differential survival IS the selection: in `energy_economy`
+mode the whole SelectionRule family and ScoreAccounting are ignored (the
+#34 greyed-not-hidden pattern), while mutation μ still applies to newborns.
+Population size becomes **variable** — the load-bearing v2 invariant: it is
+constant within a generation and changes only at the boundary. Runs can end
+early at **extinction**, a legitimate outcome.
+
+The per-agent state: `energy`, `age`, and a lifetime **passport id** with
+`parent_id` lineage — ids are never reused, so the family tree is exact and
+id-ordering survives death-created gaps. Per-opponent histories **persist
+for an agent's whole life** (an economy agent is a persistent creature; the
+#31 clearing rationale is selection-specific — DECISIONS #79); only scores
+reset per generation. GrimTrigger is lifetime-grim; `memory_depth` is the
+history-copy cost bound.
+
+The boundary sequence (`EconomyDynamics.step()`, frozen in DECISIONS #80):
+match phase (unchanged) → report-as-played → **energy update**
+(`e ← e·(1+r) + score − L − engagement·matches`, deterministic) → **age
+mortality** (one coin per living agent in ascending id order, only when the
+mortality trio is active) → **insolvency deaths** (`e < 0`, strictly
+negative, deterministic) → **births** (eligible at `e ≥ θ`; free seats
+under carrying capacity K filled by energy-priority admission, RNG-free;
+ids and μ-draws assigned in parent-id order; parent pays σ + overhead,
+child starts at σ) → age increment → score-only reset → per-agent snapshot
+of the post-boundary population. Deaths precede births (a deliberate
+deviation from Hammond–Axelrod's period order, #80). All births and deaths
+are computed against one frozen end-of-generation snapshot — the
+generation stays atomic. Mortality: hazard `base_hazard ×
+senescence_factor^age` capped at 1, plus a hard `max_age`; founder ages are
+staggered to the steady-state distribution when age-mortality is active.
+
+Derived defaults (the registry's first, DECISIONS #78): `initial_energy`
+blank = the offspring stake; `senescence_factor` blank = the value reaching
+certain death exactly at `max_age`. Both resolve to plain numbers at config
+validation, so stored `config.yaml` files never contain the auto rule.
+
+Under variable N, `random_k` clamps its draw to `min(k, N−1)` — a no-op in
+every fixed-N regime, so pre-M10a seeded histories are untouched (#81); a
+population of one plays nothing, still pays its bill, and starves. The
+UI's **Economy panel** (`ui/economy_helpers.calibration_report`) derives
+the survival window (`all-D income ≤ cost < all-C income`), escape velocity
+`e* = cost / r`, and mortality/memory readouts straight from the config —
+note the window is N-stable under `random_k` (bounded ≈ 2k interaction
+budget) but moves with N under round-robin. Still out of scope: async/Moran
+event time (M10b), population structure and local birth (M11), estate
+policy beyond destroy-on-death (M15).
+
 ## 3. Architecture
 
 ```
@@ -196,10 +249,13 @@ pdsim/
                      #   truncation, threshold_cloning (M9a, DECISIONS #63)
     accounting.py    # ScoreAccounting ABC; per_generation, sliding_window,
                      #   exponential_discount (M9a, DECISIONS #64)
-    reproduction.py  # StrategySwitchReproduction (mutation μ); (v2: perturbation)
-    dynamics.py      # run loops: PopulationDynamics + GenerationReport (evolution);
-                     #   TournamentDynamics + CycleReport (tournament) (fixed size v1;
-                     #   v2: growth/energy economy, carrying capacity, async/Moran)
+    reproduction.py  # StrategySwitchReproduction (mutation μ); (M14: perturbation)
+    economy.py       # M10a pure boundary helpers: energy ledger, mortality,
+                     #   capacity admission, placement gate, founder ages (§2.10)
+    dynamics.py      # run loops: PopulationDynamics (imitation) + EconomyDynamics
+                     #   (energy economy, M10a) + GenerationReport (evolution);
+                     #   TournamentDynamics + CycleReport (tournament)
+                     #   (M10b: async/Moran event time)
     events.py        # typed event dataclasses (see §4)
     engine.py        # run(config, granularity) -> Iterator[Event] (see §4)
     timeseries.py    # RunTimeseries: folds period events into chart/recorder series
@@ -220,6 +276,8 @@ pdsim/
   ui/
     app.py           # Streamlit app: Run lab + Results browser tabs (§4.1, §8)
     helpers.py       # Streamlit-free config <-> widget-state mapping (testable)
+    economy_helpers.py # Streamlit-free Economy panel arithmetic: the M10a
+                     #   calibration readout + single-source (?) texts (§2.10)
   run.py             # headless CLI: python -m pdsim.run (+ execute_run seam, §6.6)
   gendocs.py         # generates docs/PARAMETERS.md from the registries (§5)
   bench.py           # benchmark rider: python -m pdsim.bench (§3.1 trigger data)
@@ -245,8 +303,33 @@ Key contracts:
 ### 3.1 Performance strategy
 
 - v1 engine is object-per-agent, optimized for readability and debuggability.
-  Practical envelope (order of magnitude, 50 rounds/match, round-robin):
-  N=100 → several generations/sec; N=300 → seconds/generation; N≥1000 → too slow.
+  The practical envelope is **per matcher** — the validated cost model is
+  `s/gen ≈ 7.5 µs × N × k × rounds` (M9a bench, DECISIONS #65), where k is
+  the per-agent match count (N−1 under round-robin, 2k under random_k):
+  - **round_robin, 50 rounds**: N=100 → several generations/sec; N=300 →
+    seconds/generation; N≥1000 → too slow. This is the only regime the old
+    "N≥1000 → too slow" claim describes.
+  - **random_k**: the per-agent budget is bounded by k regardless of N, so
+    thousands of agents stay affordable — N=1000 at k=5, 50 rounds is on
+    the order of a second per generation, not minutes.
+  Large-N work is a **headless/sweep product**; live visualization stays in
+  the low hundreds — a chart-rendering limit (DECISIONS #10), not an engine
+  limit.
+- **The generations term (M10a, measured in DECISIONS #91).** The model
+  above holds *per-generation* for imitation, for tournaments, and
+  asymptotically for the energy economy under random_k at large N. Under
+  **`energy_economy` + round_robin with unbounded `memory_depth`** it does
+  NOT: per-opponent histories persist for an agent's lifetime (#79) and
+  every pair re-meets every generation, so the `view_of` history copy grows
+  by ≈ `rounds` per generation and the per-generation cost rises linearly
+  with the generation index — a long round_robin economy run is
+  **superlinear in `generations`** (quadratic total; measured ×3.1 in
+  s/gen from G=20 to G=100 at N=50 while the imitation control stayed
+  flat). The growth term scales with the pair-recurrence probability — ≈ 1
+  under round-robin, ≈ 2k/(N−1) under random_k — so it vanishes in exactly
+  the large-N regime random_k is chosen for. `memory_depth` bounds it (it
+  caps what strategies see, hence what the copy transfers), and the Economy
+  panel's memory-growth note is the user-facing warning.
 - The performance strategy has **three independent dimensions** (DECISIONS
   #46, #59):
   1. **Faster execution/rendering of a given interaction count.** Engine side:
@@ -285,9 +368,18 @@ unfolds. Five event types (DECISIONS #35):
 - `GenerationFinished` (evolution mode) — generation index, population
   composition (strategy → count), per-strategy mean scores, per-strategy
   rounds played (agent-rounds; the exact per-round denominator — DECISIONS
-  #44), and THIS generation's executed-action cooperation table per ordered
+  #44), THIS generation's executed-action cooperation table per ordered
   (actor strategy, opponent strategy) pair as (rate, actions counted)
-  (M9b, DECISIONS #65).
+  (M9b, DECISIONS #65), and — in `energy_economy` mode only — `agents`, a
+  tuple of **`AgentSnapshot`** values (agent_id, parent_id, age, energy,
+  strategy) describing the POST-boundary population entering the next
+  generation (M10a, §2.10). Empty under imitation, keeping those payloads
+  byte-identical to pre-M10a. Births/deaths are reconstructed by diffing
+  consecutive snapshots — deliberately no explicit birth/death events in
+  the synchronous model (they belong to M10b's async event time, #82). No
+  population-size field either: `N = sum(composition.values())` (#47).
+  Extinction ends the run early: `RunFinished.completed` counts generations
+  actually played, and an extinct run closes with empty composition/scores.
 - `CycleFinished` (tournament mode) — cycle index, composition (constant), and
   per-strategy **cumulative** totals + per-agent mean scores + rounds played
   + the run-cumulative cooperation table (#65 — cumulative like everything
@@ -421,19 +513,22 @@ the seed scenarios.
 
 ## 6. Designed-for future extensions (build nothing that blocks these)
 
-### 6.1 Growing populations — score-as-energy economy (v2)
-Reproduction costs a score threshold T (deducted from parent / staked to offspring);
-optional per-round living cost with death at score ≤ 0; carrying capacity K (at K,
-births require deaths → Moran-like). Growth regime vs at-capacity regime as distinct
-experimental phases. Requires: variable-size population handling in dynamics,
-offspring-initial-score policy, score accounting options — all already isolated in
-`dynamics.py` / `reproduction.py` / `ScoreAccounting`.
+### 6.1 Growing populations — score-as-energy economy (M10 — part a SHIPPED)
+The synchronous half landed as **M10a** (§2.10, DECISIONS #77-#84): the energy
+ledger, stake-transfer reproduction, the mortality trio, carrying capacity with
+deterministic admission, passport lineage, variable N, and extinction. Still
+future: **M10b** — the asynchronous / Moran-style event time-model (explicit
+birth/death events become meaningful there); **M11** — population structure
+(adjacency + local birth; the `place_offspring` gate in `core/economy.py` is
+its designed seam, and K may become emergent from site count); **M15** —
+economy policy (taxation, redistribution, immigration, inheritance beyond the
+destroy-on-death corner).
 
-### 6.2 N-player games, reputation, punishment (v2)
+### 6.2 N-player games, reputation, punishment (M16-M17)
 Public Goods Game and variants (threshold/step-level, volunteer's dilemma, n-player
-snowdrift) via the arity-agnostic `Game` interface. Reciprocity machinery for group
-games: public reputation scores, targeted peer punishment (pay a cost to fine a
-defector), exclusion. These enter as engine mechanics + strategy-view extensions.
+snowdrift) via the arity-agnostic `Game` interface (M16). Reciprocity machinery for
+group games: public reputation scores, targeted peer punishment (pay a cost to fine a
+defector), exclusion (M17). These enter as engine mechanics + strategy-view extensions.
 
 ### 6.3 Spatial / geographic layer (v3+)
 Agents get an optional `position`; `SpatialKernel` matcher makes interaction
@@ -458,7 +553,7 @@ interactivity arrive. Safe because of the headless-engine rule (§1.2). YAML con
 remain first-class alongside the UI forever — they are the batch/scripting interface
 (e.g., scheduled experiment sweeps in Claude Cowork).
 
-### 6.5 Agent attributes and attribute-conditional strategies (v2, with v3 extensions)
+### 6.5 Agent attributes and attribute-conditional strategies (M12, with v3 extensions)
 
 Agents carry a generic **attributes mapping** (e.g. color, group membership,
 location-derived tags — extensible key/value data, not hard-coded fields),
@@ -494,9 +589,10 @@ built in #66–#71; spec `docs/specs/M09c-sweep-layer.md`, companion explainer
 `docs/explainers/M9.5-sweeps-and-invasion.md`). It runs a controlled *family*
 of experiments and summarises the family as a table and a metric-vs-axis
 curve; its founding purpose is invasion-threshold questions. **M9.5a (the
-headless core) shipped**; a Streamlit **Sweep tab** for authoring, tweaking,
-and launching a sweep from the app is **M9.5b**, a separate later spec —
-the execution stays headless either way.
+headless core) and M9.5b (the Sweep tab) both shipped** — the execution
+stays headless either way. The comprehensive **sweep browser** is **M13**
+in the renumbered spine (DECISIONS #76), sequenced after population
+structure (M11) so it is structure-aware from birth.
 
 **Defining principle (#59):** the layer consumes only configs and recorded
 run folders. It touches no engine semantics (no `pdsim/core/` change, no RNG
@@ -580,11 +676,25 @@ Each recorded run is a folder `runs/<timestamp>_<slug>/` (name collisions get
   and population cooperation aggregates are recomputed on load. Rates are
   per-generation in evolution and run-cumulative in tournament (the #65
   asymmetry, mirroring the period events).
-- **`summary.json`** — `schema_version` (currently 2), run id, timestamps,
-  code version, mode, seed, N, periods completed, scenario name (if any),
-  wall-clock duration, headline outcome, `final_cooperation_rate` (schema 2),
-  and the final composition/means/totals — everything a run card renders
-  without opening the parquet.
+- **`agents.parquet`** (schema 3 — M10a, DECISIONS #83) — RAW per-period,
+  per-AGENT snapshot rows: period, agent_id, parent_id (nullable Int64;
+  founders `<NA>`), age, energy, strategy. Written ONLY when the run
+  produced snapshots (energy-economy runs); no born/died flags — the
+  birth/death record is derivable by diffing consecutive periods (#47).
+  Per-strategy mean-energy/age series and the population-size curve are
+  recomputed on load. `timeseries.parquet` and `cooperation.parquet` are
+  untouched — their per-strategy grain is unchanged (widening timeseries
+  with energy columns was rejected: NaN columns for every imitation run,
+  which #47c forbids).
+- **`summary.json`** — `schema_version` (3 when per-agent data exists; an
+  imitation run under M10a code still writes 2, byte-identical to pre-M10a
+  recordings), run id, timestamps, code version, mode, seed, N, periods
+  completed, scenario name (if any), wall-clock duration, headline outcome
+  (including "population extinct at generation N"), `final_cooperation_rate`
+  (schema 2), `total_agents_born` and `population_final` (schema 3; `None`
+  for imitation runs — note `population_size` remains the config-derived
+  INITIAL size), and the final composition/means/totals — everything a run
+  card renders without opening the parquet.
 - **Chart HTML exports** — written by the CLI/UI layers via
   `viz.charts.export_run_charts` (never by `pdsim/io`, hard rule 4); a run
   folder is complete without them.
@@ -600,13 +710,15 @@ deleted (confirmation step, `delete_run`) and renamed (`rename_run`:
 validated names, collision-safe, keeps `summary.json` and the index
 coherent) from the browser.
 
-**Schema guard** (§6.3/§6.5, DECISIONS #46/#47/#65): `summary.json`'s
+**Schema guard** (§6.3/§6.5, DECISIONS #46/#47/#65/#83): `summary.json`'s
 `schema_version` plus the file-naming convention — sibling tables arrive
 without breaking migrations, exactly as `cooperation.parquet` did in schema 2
-and as a future per-agent table (`agents.parquet`, for spatial and attribute
-snapshots) still can. Loaders reject folders written by a NEWER schema
-version and accept older ones: a schema-1 folder simply has no cooperation
-data and renders without the cooperation chart (#65).
+and `agents.parquet` in schema 3 (which still reserves room for the §6.3
+spatial and §6.5 attribute snapshot columns). Loaders reject folders written
+by a NEWER schema version and accept older ones: a schema-1 folder simply
+has no cooperation data and renders without the cooperation chart; a
+schema-1/2 folder has no per-agent data and renders without the
+population/energy/age charts (#65 compatibility, applied again).
 
 Consumers: the headless CLI (`python -m pdsim.run <config.yaml>` or
 `--scenario NAME`) records every run; the UI's "Record this run" control

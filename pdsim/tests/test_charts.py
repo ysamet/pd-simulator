@@ -7,9 +7,11 @@ pin (the viz layer must survive a future dashboard migration, DESIGN §6.4).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from pdsim.core.events import CycleFinished, GenerationFinished, RunFinished
+from pdsim.core.events import AgentSnapshot, CycleFinished, GenerationFinished, RunFinished
 from pdsim.core.strategies import all_strategy_names
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.viz import charts
@@ -174,3 +176,97 @@ class TestFinalSummary:
         rows = charts.final_summary_rows(final)
         assert rows[0] == {"Strategy": "Tit for Tat", "Agents": 17, "Mean score": 90.0}
         assert rows[1]["Strategy"] == "Grim Trigger"
+
+
+def _economy_series() -> RunTimeseries:
+    """Build a small hand-made economy timeseries with snapshots (M10a).
+
+    Returns:
+        Two generations of a growing TFT/AllD economy.
+    """
+    timeseries = RunTimeseries(mode="evolution")
+    timeseries.add(
+        GenerationFinished(
+            index=0,
+            composition={"tit_for_tat": 2, "always_defect": 2},
+            mean_scores={"tit_for_tat": 2.0, "always_defect": 7.0},
+            rounds_played={"tit_for_tat": 4, "always_defect": 4},
+            agents=(
+                AgentSnapshot(
+                    agent_id=0, parent_id=None, age=1, energy=50.0, strategy="tit_for_tat"
+                ),
+                AgentSnapshot(
+                    agent_id=1, parent_id=None, age=1, energy=70.0, strategy="tit_for_tat"
+                ),
+                AgentSnapshot(
+                    agent_id=2, parent_id=None, age=1, energy=30.0, strategy="always_defect"
+                ),
+                AgentSnapshot(
+                    agent_id=3, parent_id=None, age=1, energy=20.0, strategy="always_defect"
+                ),
+            ),
+        )
+    )
+    timeseries.add(
+        GenerationFinished(
+            index=1,
+            composition={"tit_for_tat": 2, "always_defect": 2},
+            mean_scores={"tit_for_tat": 3.0, "always_defect": 5.0},
+            rounds_played={"tit_for_tat": 4, "always_defect": 4},
+            agents=(
+                AgentSnapshot(
+                    agent_id=0, parent_id=None, age=2, energy=90.0, strategy="tit_for_tat"
+                ),
+                AgentSnapshot(
+                    agent_id=1, parent_id=None, age=2, energy=110.0, strategy="tit_for_tat"
+                ),
+                AgentSnapshot(agent_id=4, parent_id=0, age=0, energy=40.0, strategy="tit_for_tat"),
+                AgentSnapshot(
+                    agent_id=2, parent_id=None, age=2, energy=10.0, strategy="always_defect"
+                ),
+            ),
+        )
+    )
+    return timeseries
+
+
+class TestEconomyCharts:
+    """M10a: the population / mean-energy / mean-age figures."""
+
+    def test_population_chart_plots_the_derived_total(self) -> None:
+        """One line, y = sum of the composition per period."""
+        figure = charts.population_chart(_economy_series())
+        assert len(figure.data) == 1
+        assert list(figure.data[0].y) == [4, 4]
+
+    def test_population_chart_draws_the_capacity_line_when_given(self) -> None:
+        """K arrives as a dashed horizontal reference line."""
+        with_k = charts.population_chart(_economy_series(), carrying_capacity=200.0)
+        without_k = charts.population_chart(_economy_series())
+        assert len(with_k.layout.shapes) == 1
+        assert with_k.layout.shapes[0].y0 == 200.0
+        assert len(without_k.layout.shapes) == 0
+
+    def test_mean_energy_and_age_charts_have_one_line_per_strategy(self) -> None:
+        """The derived snapshot series feed the house line chart."""
+        series = _economy_series()
+        energy = charts.mean_energy_chart(series)
+        age = charts.mean_age_chart(series)
+        assert len(energy.data) == 2
+        assert len(age.data) == 2
+        by_name = {trace.name: list(trace.y) for trace in energy.data}
+        assert by_name["Tit for Tat"] == [60.0, 80.0]  # (50+70)/2, (90+110+40)/3
+
+    def test_export_includes_economy_charts_only_with_snapshots(self, tmp_path: Path) -> None:
+        """A schema-1/2 series exports no economy figures and does not error."""
+        economy_files = {
+            path.name
+            for path in charts.export_run_charts(
+                _economy_series(), tmp_path, carrying_capacity=200.0
+            )
+        }
+        assert {"population.html", "mean_energy.html", "mean_age.html"} <= economy_files
+        plain_files = {
+            path.name for path in charts.export_run_charts(_evolution_series(), tmp_path)
+        }
+        assert not {"population.html", "mean_energy.html", "mean_age.html"} & plain_files

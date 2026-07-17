@@ -522,10 +522,12 @@ register(
         label="Population size (N)",
         section="Population",
         description=(
-            "Number of agents in the population. It stays constant across "
-            "generations: selection always produces exactly this many agents. "
-            "Practical note for v1: a few hundred agents is the comfortable limit "
-            "for live visualization."
+            "Number of agents the run STARTS with. Under 'imitation' reproduction "
+            "it stays constant across generations: selection always produces "
+            "exactly this many agents. In the 'energy_economy' reproduction mode "
+            "the population changes from generation to generation — this is only "
+            "the founding count. Practical note: a few hundred agents is the "
+            "comfortable limit for live visualization."
         ),
     )
 )
@@ -565,6 +567,38 @@ register(
             "How many generations the simulation runs. In each generation everyone "
             "plays their matches, scores are tallied, and the next generation is "
             "formed by selection and mutation."
+        ),
+    )
+)
+
+# Registered immediately after dynamics.generations and BEFORE the selection
+# family on purpose (M10a): the app renders widgets in registry order, and the
+# greying of the selection/accounting widgets keys off this widget's value —
+# it must already be gathered when they render (DECISIONS #34 pattern).
+register(
+    ParameterSpec(
+        key="dynamics.reproduction_mode",
+        kind="choice",
+        default="imitation",
+        choices=("imitation", "energy_economy"),
+        label="Reproduction mode",
+        section="Dynamics",
+        description=(
+            "How the next generation comes to be. 'imitation' is the classic "
+            "setting: the population size never changes — each slot in the next "
+            "generation copies a parent's strategy, chosen by the selection rule "
+            "below. 'energy_economy' replaces copying with living: agents hold a "
+            "stock of energy, earn it by playing, pay it to stay alive, and "
+            "reproduce when they can afford to — nobody copies anyone, the "
+            "population grows and shrinks (and can even go extinct), and "
+            "differential survival IS the selection. Switching to "
+            "'energy_economy' makes the selection rule and score accounting "
+            "settings inert (they stay visible but are ignored)."
+        ),
+        learn_more=(
+            "The two classic families of evolutionary dynamics: imitation "
+            "(cultural copying, e.g. the Fermi rule) versus birth-death dynamics "
+            "(organisms with metabolisms, e.g. Epstein & Axtell's Sugarscape)."
         ),
     )
 )
@@ -761,6 +795,220 @@ register(
             "values remember longer. At 0 the past is forgotten entirely, exactly "
             "like per-generation accounting. Must be below 1, or new scores would "
             "never matter at all."
+        ),
+    )
+)
+
+# --- The energy-economy knobs (M10a). All are read ONLY when
+# dynamics.reproduction_mode is "energy_economy" — valid but ignored under
+# imitation (the DECISIONS #34 pattern; the UI greys them out with a note).
+# Two of them (initial_energy, senescence_factor) are the registry's first
+# DERIVED defaults: nullable, with None meaning "auto" — the config layer
+# resolves them to plain numbers at validation time (DECISIONS #78).
+
+register(
+    ParameterSpec(
+        key="dynamics.reproduction_threshold",
+        kind="float",
+        default=500.0,
+        minimum=0.0,
+        label="Reproduction threshold (θ)",
+        section="Dynamics",
+        description=(
+            "Energy an agent must hold at the end of a generation to have a "
+            "child, in the energy economy. Reaching this bar is the 'can afford "
+            "a child' test; the parent then pays the offspring stake to the "
+            "newborn. Must be at least the offspring stake, so a parent always "
+            "survives its own reproduction."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.offspring_stake",
+        kind="float",
+        default=400.0,
+        minimum=0.0,
+        label="Offspring stake (σ)",
+        section="Dynamics",
+        description=(
+            "Energy a newborn starts life with, paid out of its parent's stock "
+            "at the moment of birth, in the energy economy. A bigger stake gives "
+            "children a longer runway but drains parents more — reproduction "
+            "transfers wealth, it does not create it."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.initial_energy",
+        kind="float",
+        default=None,
+        minimum=0.0,
+        nullable=True,
+        label="Initial energy",
+        section="Dynamics",
+        description=(
+            "Energy each founding agent starts the run with, in the energy "
+            "economy. Leave blank for 'same as the offspring stake' — founders "
+            "then start life exactly like newborns."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.basic_living_cost",
+        kind="float",
+        default=200.0,
+        minimum=0.0,
+        label="Basic living cost (L)",
+        section="Dynamics",
+        description=(
+            "Energy every agent pays at the end of each generation simply for "
+            "existing, in the energy economy. This is the metabolic bill: an "
+            "agent whose play cannot cover it slides toward death. Set it "
+            "between the all-defector and all-cooperator incomes to make "
+            "cooperation a survival matter — the Economy panel shows exactly "
+            "where that window lies."
+        ),
+        learn_more=(
+            "The living cost is the metabolic filter: it converts 'scoring "
+            "poorly' into 'starving', which is what lets defectors go extinct "
+            "instead of merely being out-copied."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.engagement_cost",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        label="Engagement cost",
+        section="Dynamics",
+        description=(
+            "Energy an agent pays per match it takes part in, in the energy "
+            "economy. At 0, playing is free and more matches are always better; "
+            "above 0, every interaction has a price, so agents that get drawn "
+            "into many matches also pay more."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.reproduction_overhead",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        label="Reproduction overhead",
+        section="Dynamics",
+        description=(
+            "Extra energy a parent burns at each birth, on top of the offspring "
+            "stake, in the energy economy. The stake reaches the child; this "
+            "overhead simply disappears — it is the cost of the act of "
+            "reproduction itself."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.capital_return_rate",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        label="Capital return rate (r)",
+        section="Dynamics",
+        description=(
+            "Interest earned on energy carried between generations, in the "
+            "energy economy: carried-over energy is multiplied by (1 + this "
+            "rate) each generation. Above zero it creates rentiers — an agent "
+            "whose stock exceeds the 'escape velocity' shown in the Economy "
+            "panel pays its bills from returns alone, forever, no matter how "
+            "it plays."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.carrying_capacity",
+        kind="int",
+        default=200,
+        minimum=1,
+        label="Carrying capacity (K)",
+        section="Dynamics",
+        description=(
+            "The most agents the world can hold, in the energy economy. Births "
+            "only fill seats left below this cap — at capacity, nobody new gets "
+            "in until deaths free room, and the richest would-be parents are "
+            "admitted first. It is the well-mixed model's stand-in for physical "
+            "room; once the population gets a spatial structure (a later "
+            "milestone), capacity may instead emerge from the number of sites."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.base_hazard",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        maximum=1.0,
+        label="Base hazard",
+        section="Dynamics",
+        description=(
+            "Chance a brand-new agent dies of background causes at each "
+            "generation boundary, in the energy economy. The chance grows with "
+            "age when the senescence factor is above 1. At 0 — with no maximum "
+            "age set — nobody dies of age at all; only of running out of energy."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.senescence_factor",
+        kind="float",
+        default=None,
+        minimum=0.0,
+        minimum_exclusive=True,
+        nullable=True,
+        label="Senescence factor",
+        section="Dynamics",
+        description=(
+            "How steeply the death chance climbs with age, in the energy "
+            "economy: each generation of age multiplies the base hazard by this "
+            "factor. Leave blank for 'auto', which picks the value that makes "
+            "the death chance reach exactly 1.0 at the maximum age. Values "
+            "above 1 mean aging; exactly 1 means age never matters."
+        ),
+        learn_more=(
+            "An exponentially climbing death rate is the Gompertz law of "
+            "mortality — the standard first model of aging."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.max_age",
+        kind="int",
+        default=0,
+        minimum=0,
+        label="Max age",
+        section="Dynamics",
+        description=(
+            "A hard age cap, in the energy economy: an agent that reaches this "
+            "age dies at the next generation boundary, no matter what. 0 means "
+            "no cap. With a cap set and the senescence factor left blank, the "
+            "death chance rises smoothly to certainty exactly at this age."
         ),
     )
 )

@@ -269,6 +269,78 @@ def cooperation_pair_rows(timeseries: RunTimeseries) -> list[dict[str, object]]:
     return rows
 
 
+def population_chart(
+    timeseries: RunTimeseries, carrying_capacity: float | None = None
+) -> go.Figure:
+    """Total population per period, against the carrying-capacity line (M10a).
+
+    The stacked composition chart already shows growth in its total height;
+    this figure makes N versus K legible — which is the point of the K
+    story: watch the growth curve hit the cap and flatten.
+
+    Args:
+        timeseries: The run's accumulated series (``population_size`` is
+            derived from the raw composition, #47).
+        carrying_capacity: K, drawn as a dashed reference line when given
+            (callers pass it only for energy-economy runs — it comes from
+            the config, never from the recorded data).
+
+    Returns:
+        A single population line, plus the dashed K line when provided.
+    """
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=timeseries.periods,
+            y=timeseries.population_size,
+            mode="lines",
+            name="Population",
+            line={"color": "#444444", "width": 2},
+        )
+    )
+    if carrying_capacity is not None:
+        figure.add_hline(
+            y=carrying_capacity,
+            line_dash="dash",
+            line_color="#888888",
+            annotation_text=f"carrying capacity K = {carrying_capacity:g}",
+            annotation_position="bottom right",
+        )
+    figure.update_layout(
+        title="Population size",
+        xaxis_title=_period_label(timeseries.mode),
+        yaxis_title="Agents",
+        margin={"t": 40, "b": 40},
+    )
+    return figure
+
+
+def mean_energy_chart(timeseries: RunTimeseries) -> go.Figure:
+    """Mean carried-forward energy per strategy over time (M10a).
+
+    Args:
+        timeseries: The run's accumulated series (the energy means are
+            derived from the per-agent snapshots).
+
+    Returns:
+        One line per strategy, in the stable house colors.
+    """
+    return _line_chart(timeseries, timeseries.mean_energy, "Mean energy", "Mean energy per agent")
+
+
+def mean_age_chart(timeseries: RunTimeseries) -> go.Figure:
+    """Mean entering age per strategy over time (M10a).
+
+    Args:
+        timeseries: The run's accumulated series (the age means are derived
+            from the per-agent snapshots).
+
+    Returns:
+        One line per strategy, in the stable house colors.
+    """
+    return _line_chart(timeseries, timeseries.mean_age, "Mean age", "Mean age (generations)")
+
+
 def total_score_chart(timeseries: RunTimeseries) -> go.Figure:
     """Cumulative total score per strategy over cycles (tournament only).
 
@@ -289,7 +361,9 @@ def total_score_chart(timeseries: RunTimeseries) -> go.Figure:
     )
 
 
-def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
+def export_run_charts(
+    timeseries: RunTimeseries, folder: Path, carrying_capacity: float | None = None
+) -> list[Path]:
     """Write a run's charts as standalone HTML files into a run folder.
 
     The chart-export seam (DECISIONS #48): recording (``pdsim/io``) never
@@ -300,9 +374,13 @@ def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
     Args:
         timeseries: The run's accumulated (or reconstructed) series.
         folder: The run folder to write into.
+        carrying_capacity: K for the population chart's reference line;
+            callers pass it for energy-economy runs (it lives in the
+            config, not the recorded series).
 
     Returns:
-        The written file paths (composition or totals, plus mean scores).
+        The written file paths (composition or totals, plus mean scores;
+        cooperation and the three economy charts when their data exists).
     """
     if timeseries.mode == "tournament":
         figures = {"total_scores": total_score_chart(timeseries)}
@@ -311,6 +389,10 @@ def export_run_charts(timeseries: RunTimeseries, folder: Path) -> list[Path]:
     figures["mean_scores"] = mean_score_chart(timeseries)
     if timeseries.cooperation_overall:  # absent for pre-schema-2 recordings
         figures["cooperation"] = cooperation_chart(timeseries)
+    if any(timeseries.agent_snapshots):  # absent for imitation / pre-schema-3
+        figures["population"] = population_chart(timeseries, carrying_capacity)
+        figures["mean_energy"] = mean_energy_chart(timeseries)
+        figures["mean_age"] = mean_age_chart(timeseries)
     written = []
     for name, figure in figures.items():
         path = folder / f"{name}.html"

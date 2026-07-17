@@ -20,6 +20,7 @@ from pdsim.config.experiment import ExperimentConfig, load_config
 from pdsim.core import engine
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import (
+    PER_STRATEGY_SCHEMA_VERSION,
     SCHEMA_VERSION,
     RunRecorder,
     _rmtree_robust,
@@ -138,10 +139,15 @@ class TestSchemaGuards:
     """DECISIONS #46/#47: room to grow without breaking migrations."""
 
     def test_summary_carries_schema_version_and_code_version(self, tmp_path: Path) -> None:
-        """The run card fields and the schema stamp are all present."""
+        """The run card fields and the schema stamp are all present.
+
+        An imitation run has no per-agent data, so it writes schema 2 —
+        byte-identical to pre-M10a recordings (M10a principle 2); only
+        energy-economy runs write ``SCHEMA_VERSION`` (3).
+        """
         folder, _ = _record(_config(), tmp_path, scenario="my_scenario")
         summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
-        assert summary["schema_version"] == SCHEMA_VERSION
+        assert summary["schema_version"] == PER_STRATEGY_SCHEMA_VERSION
         assert summary["code_version"]["package"]
         assert summary["scenario"] == "my_scenario"
         assert summary["mode"] == "evolution"
@@ -295,3 +301,105 @@ class TestListAndDelete:
         with (folder / "summary.json").open(encoding="utf-8"):
             with pytest.raises(PermissionError):
                 _rmtree_robust(folder, attempts=2, base_delay=0.01)
+
+
+def _economy_config(**dynamics_overrides: object) -> ExperimentConfig:
+    """Build a small energy-economy config for persistence tests (M10a).
+
+    Args:
+        **dynamics_overrides: Extra dynamics fields.
+
+    Returns:
+        A validated economy config with births and growth in 4 generations.
+    """
+    dynamics: dict[str, object] = {
+        "reproduction_mode": "energy_economy",
+        "mutation_rate": 0.0,
+        "generations": 4,
+        "reproduction_threshold": 40.0,
+        "offspring_stake": 30.0,
+        "initial_energy": 20.0,
+        "basic_living_cost": 5.0,
+        "carrying_capacity": 40,
+    }
+    dynamics.update(dynamics_overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 11,
+            "population": {
+                "size": 6,
+                "composition": {"tit_for_tat": 3, "always_defect": 3},
+            },
+            "match": {"length_mode": "fixed", "rounds_per_match": 4},
+            "dynamics": dynamics,
+        }
+    )
+
+
+class TestEconomyPersistence:
+    """M10a schema 3: agents.parquet, the summary fields, and the loader."""
+
+    def test_economy_run_writes_schema_3_with_agents_parquet(self, tmp_path: Path) -> None:
+        """The per-agent sibling table and the honest version stamp."""
+        folder, live = _record(_economy_config(), tmp_path)
+        assert (folder / "agents.parquet").is_file()
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == SCHEMA_VERSION
+        assert summary["population_final"] == len(live.agent_snapshots[-1])
+        max_id = max(s.agent_id for snapshot in live.agent_snapshots for s in snapshot)
+        assert summary["total_agents_born"] == max_id + 1
+        # The config header anticipates schema 3 for economy runs.
+        assert "# schema_version: 3" in (folder / "config.yaml").read_text(encoding="utf-8")
+
+    def test_imitation_run_writes_no_agents_parquet(self, tmp_path: Path) -> None:
+        """Principle 2: imitation folders are byte-compatible with pre-M10a."""
+        folder, _ = _record(_config(), tmp_path)
+        assert not (folder / "agents.parquet").exists()
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == PER_STRATEGY_SCHEMA_VERSION
+        assert summary["total_agents_born"] is None
+        assert summary["population_final"] is None
+        assert "# schema_version: 2" in (folder / "config.yaml").read_text(encoding="utf-8")
+
+    def test_economy_round_trip_reconstructs_every_series(self, tmp_path: Path) -> None:
+        """Loading refeeds the same code the live run used (#47/#65)."""
+        folder, live = _record(_economy_config(), tmp_path)
+        loaded = load_run(folder).timeseries
+        assert loaded.agent_snapshots == live.agent_snapshots
+        assert loaded.mean_energy == live.mean_energy
+        assert loaded.mean_age == live.mean_age
+        assert loaded.population_size == live.population_size
+        assert loaded.composition == live.composition
+
+    def test_founder_parent_ids_survive_the_parquet_round_trip(self, tmp_path: Path) -> None:
+        """parent_id is a nullable integer: founders are None, children exact."""
+        folder, _ = _record(_economy_config(), tmp_path)
+        loaded = load_run(folder).timeseries
+        first = loaded.agent_snapshots[0]
+        assert any(s.parent_id is None for s in first)  # founders
+        all_snapshots = [s for snapshot in loaded.agent_snapshots for s in snapshot]
+        assert any(isinstance(s.parent_id, int) for s in all_snapshots)  # children
+
+    def test_extinct_run_records_and_reloads(self, tmp_path: Path) -> None:
+        """Extinction is a legitimate outcome end to end (spec Task 7).
+
+        An unpayable living cost kills everyone at the second boundary
+        (starting energy carries them past boundary 1, then runs dry), so
+        the run ends early with an honest headline — and the folder
+        round-trips, extinct final period included.
+        """
+        folder, live = _record(_economy_config(basic_living_cost=50.0), tmp_path)
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["periods_completed"] < 4
+        assert summary["population_final"] == 0
+        assert "extinct" in summary["headline"]
+        loaded = load_run(folder)
+        assert loaded.timeseries.agent_snapshots == live.agent_snapshots
+        assert loaded.timeseries.final is not None
+        assert loaded.timeseries.final.composition == {}
+        # And the sweep metrics survive an extinct run (spec Task 7).
+        from pdsim.sweep.metrics import get_metric
+
+        assert get_metric("final_share").compute(loaded, strategy="tit_for_tat") is not None
+        assert get_metric("fixation_flag").compute(loaded, strategy="tit_for_tat") is not None
+        assert get_metric("final_cooperation").compute(loaded) is not None

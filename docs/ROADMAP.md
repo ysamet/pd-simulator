@@ -1,5 +1,29 @@
 # ROADMAP.md
 
+## Renumbering note (2026-07-16, DECISIONS #76)
+
+The v2 milestone labels were renumbered when M10a landed so that **execution
+order = numeric order, with no gaps**. The old #58/#75 "M12 deliberately
+before M11" swap dissolves — the numbers now simply match the order. Tags
+keeps its M12 label (sparing cross-reference churn); two new milestones
+(population structure, economy policy) join the spine; the sweep browser and
+the vectorized engine get numbers.
+
+| Exec order | Milestone | OLD label | NEW label |
+|---|---|---|---|
+| 1 | Growth economy (M10a sync, M10b async) | M10 | **M10** |
+| 2 | Population structure — adjacency + local birth (NEW) | — | **M11** |
+| 3 | Tags / attributes | M12 | **M12** |
+| 4 | Sweep browser | (unnumbered) | **M13** |
+| 5 | Perturbation mutation | M11 | **M14** |
+| 6 | Economy policy (tax / redistribution / immigration / inheritance) (NEW) | — | **M15** |
+| 7 | Public Goods Game + group matching | M13 | **M16** |
+| 8 | Reputation / punishment / exclusion | M14 | **M17** |
+| 9 | Vectorized engine (review-at) | (unnumbered) | **M18** |
+
+References to milestone numbers in DECISIONS entries #1-#75 use the OLD
+labels; from #76 on, the NEW labels.
+
 ## v1 — Pairwise evolutionary PD with live web UI
 
 Milestone order (each lands with tests + docs):
@@ -39,101 +63,89 @@ Milestone order (each lands with tests + docs):
 
 Out of scope for v1 (but nothing may block them): everything below.
 
-## v2 — Economy-first: growth, sweeps, tags, group games
+## v2 — Economy-first: growth, structure, tags, group games
 
-Milestone spine (DECISIONS #58; sweep-browser placement #75):
-**M9 → M9.5 → M10 → sweep browser → M12 → M11 → M13 → M14**.
-M12 deliberately runs *before* M11: the owner's research program targets
-tag-based/ethnocentrism dynamics, and tags come after M10 so they are built
-variable-N-aware from birth. The sweep browser (kept descriptively named —
-no M-number until scoped) runs right after M10, not before it: M10's
-variable-N invariant is the spine's load-bearing change and must not wait
-behind a read-only convenience (#75).
+Milestone spine (renumbered in DECISIONS #76; economy-first rationale in
+#58/#75): **M9 → M9.5 → M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18.**
+M10's variable-N invariant is the spine's load-bearing change — every
+downstream milestone is built variable-N-aware from birth. Population
+structure (M11) runs before the sweep browser (M13) by #75's own logic:
+the browser is a read-only view over run data, and structure changes what
+run data exists.
 
 - **M9 — Selection rules, score accounting, cooperation recording.**
-  Fitness-proportional, tournament(k), truncation/elitist, and
-  threshold-cloning selection rules; sliding-window and exponentially
-  discounted score accounting — all plug-ins to the existing ABCs. Plus
-  pairwise cooperation-rate recording at strategy-pair resolution
-  (schema_version bump; DECISIONS #60) and a benchmark rider capturing
-  wall-clock per generation across N × matcher, so the vectorization
-  trigger becomes data.
-  ✅ M9a (part 1 of 2) landed 2026-07-08: the four selection rules
-  (DECISIONS #63), the ScoreAccounting seam with sliding-window and
-  exponential-discount options (DECISIONS #64), and the benchmark rider
-  (`python -m pdsim.bench`) — spec:
-  `docs/specs/M09a-selection-accounting-bench.md`; 440 tests passing.
+  ✅ M9a landed 2026-07-08: four selection rules (DECISIONS #63), the
+  ScoreAccounting seam (#64), and the benchmark rider (`python -m
+  pdsim.bench`) — spec `docs/specs/M09a-selection-accounting-bench.md`;
+  440 tests passing.
   ✅ M9b landed 2026-07-09 — **M9 complete**: pairwise cooperation-rate
   recording at strategy-pair resolution, cooperation chart + pair-matrix
-  table, `cooperation.parquet`, schema_version 2 with loaders accepting
-  both schemas (DECISIONS #65; spec
+  table, `cooperation.parquet`, schema_version 2 (DECISIONS #65; spec
   `docs/specs/M09b-cooperation-recording.md`); 457 tests passing.
-- **M9.5 — Sweep/search layer** (DECISIONS #59). SweepSpec YAML config
-  families (base config + parameter/composition/seed axes), a parallel
-  batch runner (`python -m pdsim.sweep`, multiprocessing across runs), the
-  **Outcome Metrics Registry** (fourth registry-idiom instance: final
-  share, fixation with censoring semantics, quasi-fixation variants,
-  cooperation-collapse metrics — pure post-processing over recorded runs),
-  and `sweeps/<name>/` persistence with a per-run summary parquet and a
-  metric-vs-axis chart. First research program: invasion thresholds.
-  ✅ M9.5a (headless core) landed 2026-07-11: the `pdsim/sweep/` subpackage
-  (SweepSpec + three-bucket composition + Outcome Metrics Registry +
-  parallel runner with resume and failure isolation), `python -m
-  pdsim.sweep`, and the metric-vs-axis chart builder — spec
-  `docs/specs/M09c-sweep-layer.md`, companion explainer
-  `docs/explainers/M9.5-sweeps-and-invasion.md` (DECISIONS #66-#71); 509
-  tests passing.
+- **M9.5 — Sweep/search layer** (DECISIONS #59).
+  ✅ M9.5a (headless core) landed 2026-07-11: `pdsim/sweep/` (SweepSpec +
+  three-bucket composition + Outcome Metrics Registry + parallel runner
+  with resume and failure isolation), `python -m pdsim.sweep`, and the
+  metric-vs-axis chart builder — spec `docs/specs/M09c-sweep-layer.md`,
+  explainer `docs/explainers/M9.5-sweeps-and-invasion.md` (DECISIONS
+  #66-#71); 509 tests passing.
   ✅ M9.5b (Sweep tab) landed 2026-07-13 — **M9.5 complete**: a third
-  Streamlit tab authors the full SweepSpec surface (structural three-bucket
-  composition UI, parameter axes, seeds, metrics), validates through the
-  one shared path, launches the unchanged headless runner as a detached
-  subprocess, and monitors it (manual status refresh + the headline
-  metric-vs-axis chart) — spec `docs/specs/M09d-sweep-tab.md` (DECISIONS
-  #72-#74); 555 tests passing. The comprehensive **sweep browser**
-  (member-run drilldown, multi-sweep browsing, overlays, filtering) remains
-  a deliberately deferred follow-on — scheduled as the FIRST increment
-  AFTER M10, not immediately next (#74, #75; see the bullet below).
-- **M10 — Score-as-energy growth economy.** Reproduction cost T, offspring
-  stake, per-round living cost, death at score ≤ 0, carrying capacity K;
-  asynchronous (Moran-style) event mode. Possible split: synchronous
-  growth first, async/Moran second. Chat-designed first: offspring score
-  policy, death semantics, birth/death RNG order (seeded-history contract
-  extending #32), selection under energy-driven reproduction, matchers
-  under variable N, event/schema changes (DECISIONS #58).
-- **Sweep browser (deferred follow-on — first increment after M10; no
-  M-number until scoped).** Member-run drilldown from a sweep's summary,
+  Streamlit tab authors, validates, launches (detached headless CLI), and
+  monitors sweeps — spec `docs/specs/M09d-sweep-tab.md` (DECISIONS
+  #72-#74); 555 tests passing.
+- **M10 — Score-as-energy growth economy.**
+  ✅ M10a (synchronous generational) landed 2026-07-16 (DECISIONS
+  #76-#84; spec `docs/specs/M10a-growth-economy.md`, explainer
+  `docs/explainers/M10-growth-economy-explainer.md`; DESIGN §2.10): the
+  `energy_economy` reproduction mode — energy ledger (living cost,
+  engagement cost, capital returns), stake-transfer reproduction, the
+  mortality trio with staggered founders, carrying capacity with
+  deterministic admission, passport-id lineage, variable N with the
+  `random_k` clamp, extinction as a run ending, per-agent snapshots +
+  `agents.parquet` (schema_version 3), the Economy calibration panel,
+  three economy charts, and the `the_growth_economy` scenario; 645 tests
+  passing.
+  ⬜ M10b — the asynchronous / Moran-style event time-model (explicit
+  birth/death events become meaningful there). A separate later spec.
+- **M11 — Population structure (NEW).** Adjacency + local birth: the
+  `place_offspring` structural gate (built in M10a as the well-mixed
+  always-True corner) becomes neighbourhood-aware; carrying capacity may
+  become emergent from site count. Designs the bridge to the v3 spatial
+  layer. Chat-designed first (hard rule 6: DESIGN before code).
+- **M12 — Agent attributes + attribute-conditional strategies.** Generic
+  attributes mapping with visibility and inheritance policies; strategies
+  conditioning on an opponent's visible tags (Riolo tags; Hammond &
+  Axelrod ethnocentrism — richer with the v3 spatial layer). Built
+  variable-N-aware on top of M10. See DESIGN §6.5, DECISIONS #46/#58.
+- **M13 — Sweep browser.** Member-run drilldown from a sweep's summary,
   multi-sweep interactive browsing, multi-curve overlays, summary-table
   filtering, side-by-side member comparison — the affordances deferred out
-  of M9.5b. Sequenced here so it is designed from real invasion-campaign
-  evidence (which sweeps get re-opened, what actually gets compared)
-  rather than guessed up front, and so M10's variable-N invariant is not
-  held behind a read-only convenience (DECISIONS #74, #75).
-- **M12 (before M11) — Agent attributes + attribute-conditional
-  strategies.** Generic attributes mapping with visibility and inheritance
-  policies; strategies conditioning on an opponent's visible tags (Riolo
-  tags; Hammond & Axelrod ethnocentrism — richer with the v3 spatial
-  layer). See DESIGN §6.5, DECISIONS #46/#58.
-- **M11 — Parameter-perturbation mutation** (Gaussian noise on continuous
-  strategy parameters → genuine strategy evolution), plus the
+  of M9.5b (#74), designed from real invasion-campaign evidence and
+  structure-aware from birth (#75, #76).
+- **M14 — Parameter-perturbation mutation.** Gaussian noise on continuous
+  strategy parameters → genuine strategy evolution, plus the
   variant-identity machinery it requires (resolves the #30 deferral).
-- **M13 — Public Goods Game + variants:** threshold/step-level, volunteer's
+- **M15 — Economy policy (NEW).** Taxation, redistribution, immigration,
+  and inheritance policies over the M10 energy substrate (today's corner:
+  estates are destroyed on death — the 100% inheritance tax).
+- **M16 — Public Goods Game + variants:** threshold/step-level, volunteer's
   dilemma, n-player snowdrift; group-size parameter; group matching.
-- **M14 — Reciprocity machinery for group games:** public reputation,
+- **M17 — Reciprocity machinery for group games:** public reputation,
   targeted peer punishment (costly fines), exclusion — designed against
   M12's visible-attributes surface (reputation is nearly a dynamic public
   attribute).
-
-**Unscheduled, empirically triggered:** the **vectorized NumPy engine
-backend** for populations in the thousands — paired with sampling matchers
-(RandomK shipped in v1/M8, SpatialKernel in v3) to reach thousands of agents
-at interactive speed (see DESIGN §3.1). It is deliberately NOT on the spine:
-it lands when actual experiments/sweeps show the sampling matchers cannot
-buy the needed scale (M9's benchmark rider supplies the data; DECISIONS #58).
+- **M18 — Vectorized NumPy engine backend (review-at).** For populations in
+  the thousands — paired with sampling matchers to reach thousands of
+  agents at interactive speed (DESIGN §3.1). Empirically triggered: it
+  lands when experiments/sweeps show the sampling matchers cannot buy the
+  needed scale (the bench supplies the data; DECISIONS #58/#65; M10a's
+  re-bench kept the trigger untripped, #84).
 
 ## v3+ — Geography and real-world scenario modeling
 
 - Spatial layer: `Agent.position`, SpatialKernel matcher (distance-weighted
-  interaction), configurable initial dispersion.
+  interaction), configurable initial dispersion — generalising M11's
+  adjacency structure.
 - Agent movement over time: `MovementRule` ABC (random walk, drift toward
   similar neighbors, post-interaction relocation) on a configurable schedule,
   feeding SpatialKernel matching; movement is population dynamics, not a
@@ -143,9 +155,8 @@ buy the needed scale (M9's benchmark rider supplies the data; DECISIONS #58).
 - Scenario modeling toolkit for societal/geopolitical conflicts (asymmetric payoffs,
   alliances/sanctions as mechanics, heterogeneous endowments).
 - Richer dashboard (Dash or FastAPI+React) replacing Streamlit if needed.
-- Sweep operation story. The sweep *capability* itself is v2/M9.5
-  (DECISIONS #59); what remains for v3+ is only how it is operated at
-  scale: scheduled, Cowork-driven experiment campaigns, plus the deferred
-  adaptive threshold-bisection search increment. (In-UI sweep browsing is
-  no longer v3+ — it is scheduled in v2 as the first increment after M10,
-  DECISIONS #75.)
+- Sweep operation story. The sweep *capability* is v2/M9.5 and in-UI sweep
+  browsing is v2/M13 (DECISIONS #59/#75/#76); what remains for v3+ is only
+  how it is operated at scale: scheduled, Cowork-driven experiment
+  campaigns, plus the deferred adaptive threshold-bisection search
+  increment.

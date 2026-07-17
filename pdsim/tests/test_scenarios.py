@@ -29,6 +29,9 @@ V1_SCENARIOS = {
     "defectors_paradise",
 }
 
+ALL_SCENARIOS = V1_SCENARIOS | {"the_growth_economy"}
+"""The five v1 seed scenarios plus M10a's energy-economy scenario."""
+
 
 def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
     """Derive a cheap variant of a scenario config for smoke tests.
@@ -48,6 +51,10 @@ def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
     composition = {name: min(2, count) for name, count in data["population"]["composition"].items()}
     data["population"]["composition"] = composition
     data["population"]["size"] = sum(composition.values())
+    # random_k's k must fit the shrunk population (k ≤ N − 1 at generation 0).
+    data["matching"]["opponents_per_agent"] = min(
+        data["matching"]["opponents_per_agent"], data["population"]["size"] - 1
+    )
     data["dynamics"]["generations"] = 2
     data["tournament_cycles"] = 2
     if data["match"]["length_mode"] == "continuation":
@@ -60,9 +67,9 @@ def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
 class TestSeedScenarios:
     """The five curated scenarios from DESIGN §5.1."""
 
-    def test_all_five_registered(self) -> None:
-        """The registry holds exactly the v1 seed scenarios."""
-        assert set(all_scenario_names()) == V1_SCENARIOS
+    def test_all_registered(self) -> None:
+        """The registry holds exactly the curated scenarios."""
+        assert set(all_scenario_names()) == ALL_SCENARIOS
 
     def test_configs_are_validated_experiment_configs(self) -> None:
         """Every scenario carries a real (already-validated) config."""
@@ -120,7 +127,7 @@ class TestRegistryMechanics:
 class TestScenariosRunEndToEnd:
     """Every scenario must actually run through the engine (size-reduced)."""
 
-    @pytest.mark.parametrize("name", sorted(V1_SCENARIOS))
+    @pytest.mark.parametrize("name", sorted(ALL_SCENARIOS))
     def test_scenario_smoke_run(self, name: str) -> None:
         """The event stream terminates with exactly one RunFinished."""
         config = _shrunk(get_scenario_info(name).config)

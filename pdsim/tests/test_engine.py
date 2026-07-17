@@ -252,3 +252,77 @@ class TestModes:
             )
         )
         assert stream_a == stream_b
+
+
+class TestEconomyDispatchAndExtinction:
+    """M10a: reproduction-mode dispatch and the early-extinction ending."""
+
+    @staticmethod
+    def _economy_config(**dynamics_overrides: object) -> ExperimentConfig:
+        """Build a small energy-economy config.
+
+        Args:
+            **dynamics_overrides: Extra dynamics fields.
+
+        Returns:
+            A validated economy config (4 agents, 2-round matches).
+        """
+        dynamics: dict[str, object] = {
+            "reproduction_mode": "energy_economy",
+            "mutation_rate": 0.0,
+            "generations": 6,
+            "reproduction_threshold": 500.0,
+            "offspring_stake": 400.0,
+            "initial_energy": 30.0,
+            "basic_living_cost": 0.0,
+            "carrying_capacity": 50,
+        }
+        dynamics.update(dynamics_overrides)
+        return ExperimentConfig.model_validate(
+            {
+                "population": {
+                    "size": N_AGENTS,
+                    "composition": {"tit_for_tat": 2, "always_defect": 2},
+                },
+                "match": {"length_mode": "fixed", "rounds_per_match": ROUNDS},
+                "dynamics": dynamics,
+            }
+        )
+
+    def test_economy_generations_carry_agent_snapshots(self) -> None:
+        """Dispatch reached EconomyDynamics: the events have per-agent data."""
+        events = list(engine.run(self._economy_config()))
+        generations = [e for e in events if isinstance(e, GenerationFinished)]
+        assert generations
+        assert all(e.agents for e in generations)
+        final = events[-1]
+        assert isinstance(final, RunFinished)
+        assert final.completed == 6
+
+    def test_imitation_generations_have_empty_snapshots(self) -> None:
+        """The imitation payload is byte-identical to pre-M10a (agents=())."""
+        events = list(engine.run(_evolution_config()))
+        generations = [e for e in events if isinstance(e, GenerationFinished)]
+        assert all(e.agents == () for e in generations)
+        final = events[-1]
+        assert isinstance(final, RunFinished)
+        assert final.completed == GENERATIONS  # never early under imitation
+
+    def test_extinction_ends_the_run_early_and_honestly(self) -> None:
+        """An unpayable bill: the stream ends at extinction, not at plan.
+
+        Living cost 1000 exceeds any possible income at 30 starting energy,
+        so everyone dies at the first boundary: exactly one generation
+        plays, and RunFinished reports empty final standings.
+        """
+        config = self._economy_config(basic_living_cost=1000.0)
+        events = list(engine.run(config))
+        generations = [e for e in events if isinstance(e, GenerationFinished)]
+        assert len(generations) == 1
+        assert generations[0].composition  # the population as it played
+        assert generations[0].agents == ()  # nobody survived the boundary
+        final = events[-1]
+        assert isinstance(final, RunFinished)
+        assert final.completed == 1
+        assert final.composition == {}
+        assert final.mean_scores == {}
