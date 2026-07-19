@@ -166,6 +166,16 @@ How the next generation comes to be. 'imitation' is the classic setting: the pop
 
 *Learn more:* The two classic families of evolutionary dynamics: imitation (cultural copying, e.g. the Fermi rule) versus birth-death dynamics (organisms with metabolisms, e.g. Epstein & Axtell's Sugarscape).
 
+#### `dynamics.time_model` — Time model
+
+- **Type:** choice
+- **Allowed values:** one of: `synchronous`, `asynchronous`
+- **Default:** `synchronous`
+
+The clock the simulation runs on. 'synchronous' is the classic generational clock: everyone plays their matches, then the whole population is updated at once at the generation boundary — exactly the behaviour of every earlier version. 'asynchronous' dissolves the generation: time advances one small event at a time — one agent is activated, plays its matches, and any births or deaths happen immediately, not at a boundary. The charts then count 'generation-equivalents': one activation per current member of the population, on average, adds up to one generation's worth of time, so the two clocks stay comparable. Under 'asynchronous' the reproduction mode, selection rule, and score accounting settings are ignored (an asynchronous run is always birth-death dynamics), and the matching scheme is ignored too — partners are drawn one activation at a time, using the opponents-per-agent count.
+
+*Learn more:* Whether everyone updates at once or one at a time is a classic modelling choice that can change outcomes (Huberman & Glance 1993). The asynchronous clock here follows the Moran-process convention: N single-agent events make one generation.
+
 #### `dynamics.selection_rule` — Selection rule
 
 - **Type:** choice

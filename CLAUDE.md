@@ -134,8 +134,9 @@ the owner will confirm the milestone's features in the app: the scenario to
 load, the widget interactions, and the expected observable behavior — CLI
 steps only for inherently headless features (DECISIONS #61).
 
-Spec mechanics (DECISIONS #62): file names are
-`M<zero-padded milestone><letter>-<slug>.md`; each spec opens with
+Spec mechanics (DECISIONS #62, naming amended by #92): file names are
+`M<zero-padded milestone><letter>-<slug>-spec.md` (and explainers end
+`-explainer.md`); older files predating #92 keep their names; each spec opens with
 `Status: draft | in progress | implemented (see DECISIONS #...)`, updated as
 work proceeds. Specs are **frozen intent** — authoritative until the
 milestone lands; deviations during implementation are logged in

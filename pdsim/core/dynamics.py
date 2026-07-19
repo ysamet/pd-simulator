@@ -70,7 +70,7 @@ from pdsim.core.economy import (
     place_offspring,
     staggered_founder_ages,
 )
-from pdsim.core.events import AgentSnapshot
+from pdsim.core.events import AgentSnapshot, DemographicEvent
 from pdsim.core.game import Action, AgentId, PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import build_matcher
@@ -161,7 +161,15 @@ class GenerationReport:
         agents: Per-agent snapshots of the POST-boundary population (M10a)
             — the exact set entering the next generation, with carried
             energy and entering age. Populated only by
-            :class:`EconomyDynamics`; always empty under imitation.
+            :class:`EconomyDynamics`; always empty under imitation. In
+            asynchronous reports (M10b) these snapshot the living
+            population at the recording point.
+        gen_equiv_time: The generation-equivalent clock at this recording
+            point (M10b) — ``None`` in every synchronous report.
+        demographic_events: The explicit birth/death/imitation events of
+            this recording period, in occurrence order (M10b) — the engine
+            flushes them into the stream immediately before this period's
+            ``GenerationFinished``. Always empty in synchronous reports.
     """
 
     index: int
@@ -170,6 +178,8 @@ class GenerationReport:
     rounds_played: dict[str, int] = field(default_factory=dict)
     cooperation: CooperationTable = field(default_factory=dict)
     agents: tuple[AgentSnapshot, ...] = ()
+    gen_equiv_time: float | None = None
+    demographic_events: tuple[DemographicEvent, ...] = ()
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:

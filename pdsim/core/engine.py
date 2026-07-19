@@ -24,6 +24,7 @@ from typing import Literal, get_args
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
+from pdsim.core.async_dynamics import AsyncDynamics
 from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics, TournamentDynamics
 from pdsim.core.events import (
     CycleFinished,
@@ -72,7 +73,11 @@ def run(config: ExperimentConfig, granularity: Granularity = "generation") -> It
         )
     rng = np.random.default_rng(config.seed)
     if config.mode == "tournament":
+        # time_model is ignored in tournament mode (#34): a tournament has
+        # no demography, so there is nothing for an event-time clock to do.
         yield from _run_tournament(config, rng, granularity)
+    elif config.dynamics.time_model == "asynchronous":
+        yield from _run_async(config, rng, granularity)
     else:
         yield from _run_evolution(config, rng, granularity)
 
@@ -164,6 +169,69 @@ def _run_evolution(
         completed=completed,
         composition={} if extinct else report.composition,
         mean_scores={} if extinct else report.mean_scores,
+        total_scores=None,
+    )
+
+
+def _run_async(
+    config: ExperimentConfig, rng: np.random.Generator, granularity: Granularity
+) -> Iterator[Event]:
+    """Drive the asynchronous event-time loop (M10b), emitting per period.
+
+    The period grain is the recording cadence (per generation-equivalent in
+    Phase A), not the generation: each period yields its buffered
+    fine-grained events (if requested), then its explicit demographic
+    events in occurrence order (always — they are period-level truth,
+    spec Design 7), then the period's ``GenerationFinished`` with
+    ``gen_equiv_time`` stamped. ``RunFinished.completed`` counts the
+    period-level events emitted — its grain follows the cadence
+    (documented in the M10b spec). Extinction ends the run early with the
+    #82 semantics.
+
+    Args:
+        config: The experiment description.
+        rng: The run's seeded generator.
+        granularity: Finest event level to emit.
+
+    Yields:
+        Match-level events (if requested), demographic events,
+        ``GenerationFinished`` per recording period, and the closing
+        ``RunFinished``.
+    """
+    dynamics = AsyncDynamics(config, rng)
+    buffer: list[Event] = []
+    on_match = None
+    if granularity != "generation":
+
+        def on_match(result: MatchResult) -> None:
+            """Buffer one match's events until the period completes."""
+            buffer.extend(_match_events(result, granularity))
+
+    completed = 0
+    report = None
+    for report in dynamics.run(on_match=on_match):
+        completed += 1
+        yield from buffer
+        buffer.clear()
+        yield from report.demographic_events
+        yield GenerationFinished(
+            index=report.index,
+            composition=report.composition,
+            mean_scores=report.mean_scores,
+            rounds_played=report.rounds_played,
+            cooperation=report.cooperation,
+            agents=report.agents,
+            gen_equiv_time=report.gen_equiv_time,
+        )
+    # At least one period always emits (generations >= 1 guarantees the
+    # clock crosses 1.0 or the run went extinct with a final partial
+    # period), so `report` is bound; the guard is belt-and-braces.
+    extinct = not dynamics.population
+    yield RunFinished(
+        mode="evolution",
+        completed=completed,
+        composition={} if extinct or report is None else report.composition,
+        mean_scores={} if extinct or report is None else report.mean_scores,
         total_scores=None,
     )
 

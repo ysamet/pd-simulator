@@ -6,7 +6,7 @@ loop over the same stream. Events are immutable values (frozen dataclasses,
 like the reports and specs elsewhere): a consumer can hold onto one forever
 and it will never change under its feet.
 
-Five event types, coarse to fine (DECISIONS #35):
+Five original event types, coarse to fine (DECISIONS #35):
 
 * :class:`RunFinished` — always emitted, exactly once, last.
 * :class:`GenerationFinished` (evolution) / :class:`CycleFinished`
@@ -16,8 +16,19 @@ Five event types, coarse to fine (DECISIONS #35):
 * :class:`MatchFinished` — one per match, at "match" granularity or finer.
 * :class:`RoundPlayed` — one per round, at "round" granularity only.
 
+Three more arrive with M10b's asynchronous event time (spec Design 7 — the
+explicit demographic events that DECISIONS #82 deferred to exactly this
+milestone, where per-event ordering is meaningful):
+
+* :class:`BirthEvent` / :class:`DeathEvent` / :class:`ImitationEvent` —
+  emitted ONLY in asynchronous runs, at every granularity (they are
+  period-level truth, like the period events themselves), buffered per
+  recording period and flushed in occurrence order immediately before that
+  period's ``GenerationFinished``. Synchronous runs emit none of them and
+  keep their payloads byte-identical to pre-M10b runs.
+
 A functional-programming note: ``Event`` below is a *union type* — "one of
-these five" — so consumers dispatch with ``isinstance`` (or
+these eight" — so consumers dispatch with ``isinstance`` (or
 ``match``/``case``) and type checkers know every case they must handle.
 """
 
@@ -92,6 +103,86 @@ class AgentSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class BirthEvent:
+    """One birth in an asynchronous run (M10b spec Design 7).
+
+    Attributes:
+        agent_id: The newborn's lifetime passport id — never reused.
+        parent_id: The parent's passport id.
+        strategy: The newborn's strategy machine name (after any μ-mutation).
+        energy: The newborn's starting balance (the offspring stake σ).
+        cause: ``"threshold"`` (variable_n: the parent cleared θ with a slot
+            free) or ``"moran"`` (fixed_n: the birth half of a replacement).
+        event_index: 0-based global index of the interaction event whose
+            demographic step produced this birth.
+        gen_equiv_time: The generation-equivalent clock after that event's
+            advance (spec Design 5).
+    """
+
+    agent_id: AgentId
+    parent_id: AgentId
+    strategy: str
+    energy: float
+    cause: str
+    event_index: int
+    gen_equiv_time: float
+
+
+@dataclass(frozen=True, slots=True)
+class DeathEvent:
+    """One death in an asynchronous run (M10b spec Design 7).
+
+    Attributes:
+        agent_id: The deceased's passport id.
+        cause: ``"insolvency"`` (energy strictly below 0), ``"age"`` (the
+            mortality trio), ``"replacement"`` (fixed_n birth_death: replaced
+            by an offspring), or ``"random_moran"`` (fixed_n death_birth: the
+            Moran death slot).
+        event_index: 0-based global index of the interaction event whose
+            demographic step produced this death.
+        gen_equiv_time: The generation-equivalent clock after that event's
+            advance.
+    """
+
+    agent_id: AgentId
+    cause: str
+    event_index: int
+    gen_equiv_time: float
+
+
+@dataclass(frozen=True, slots=True)
+class ImitationEvent:
+    """One strategy copy by the imitation overlay (M10b spec Design 4).
+
+    Cultural, not demographic: the agent keeps its identity, energy, age,
+    and histories — only its strategy changes. Emitted only when the copy
+    actually changes the strategy (a no-op copy draws its adoption coin but
+    is not an event).
+
+    Attributes:
+        agent_id: The adopter's passport id.
+        from_strategy: The strategy machine name it abandoned.
+        to_strategy: The strategy machine name it copied.
+        source_agent_id: The match opponent it copied from.
+        event_index: 0-based global index of the interaction event whose
+            match produced this copy.
+        gen_equiv_time: The generation-equivalent clock after that event's
+            advance.
+    """
+
+    agent_id: AgentId
+    from_strategy: str
+    to_strategy: str
+    source_agent_id: AgentId
+    event_index: int
+    gen_equiv_time: float
+
+
+DemographicEvent = BirthEvent | DeathEvent | ImitationEvent
+"""The explicit async-only events (M10b) — the union consumers buffer/flush."""
+
+
+@dataclass(frozen=True, slots=True)
 class GenerationFinished:
     """One completed generation (evolution mode only).
 
@@ -115,7 +206,14 @@ class GenerationFinished:
             — populated only in ``energy_economy`` mode; always empty under
             imitation, which keeps imitation payloads byte-identical to
             pre-M10a runs and the schema guard honest (a run has per-agent
-            data exactly when these are non-empty).
+            data exactly when these are non-empty). In asynchronous runs
+            (M10b) these snapshot the living population at the recording
+            point.
+        gen_equiv_time: The generation-equivalent clock at this recording
+            point (M10b spec Design 5) — ``None`` in synchronous runs, the
+            honest "this run has no event-time clock" (and the M10a
+            additive-field precedent: synchronous payloads stay
+            byte-identical).
     """
 
     index: int
@@ -124,6 +222,7 @@ class GenerationFinished:
     rounds_played: dict[str, int] = field(default_factory=dict)
     cooperation: dict[tuple[str, str], tuple[float, int]] = field(default_factory=dict)
     agents: tuple[AgentSnapshot, ...] = ()
+    gen_equiv_time: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,5 +279,14 @@ class RunFinished:
     total_scores: dict[str, float] | None
 
 
-Event = RoundPlayed | MatchFinished | GenerationFinished | CycleFinished | RunFinished
+Event = (
+    RoundPlayed
+    | MatchFinished
+    | BirthEvent
+    | DeathEvent
+    | ImitationEvent
+    | GenerationFinished
+    | CycleFinished
+    | RunFinished
+)
 """Anything the engine can yield — see the module docstring for the taxonomy."""

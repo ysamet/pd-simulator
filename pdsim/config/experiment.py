@@ -322,7 +322,17 @@ class DynamicsConfig(_RegistryBackedModel):
     """Evolutionary dynamics: selection, mutation, and the economy (§2.7/§2.10).
 
     Attributes:
-        generations: Number of generations to simulate.
+        generations: Number of generations to simulate. Under the
+            asynchronous time model (M10b) this is the run length in
+            generation-equivalents — same name, same scale, different
+            clock.
+        time_model: Which clock the run uses (M10b) — ``"synchronous"``
+            (the generational clock, all earlier behaviour unchanged) or
+            ``"asynchronous"`` (event time: one focal activation at a
+            time, births and deaths firing immediately; the M10b spec).
+            Under ``"asynchronous"``, ``reproduction_mode``, the selection
+            family, score accounting, and ``matching.matcher`` are ignored
+            (the DECISIONS #34 pattern).
         reproduction_mode: How the next generation comes to be —
             ``"imitation"`` (the classic fixed-N setting: selection rule +
             copying) or ``"energy_economy"`` (M10a birth-death dynamics:
@@ -379,6 +389,7 @@ class DynamicsConfig(_RegistryBackedModel):
     _registry_keys: ClassVar[dict[str, str]] = {
         "generations": "dynamics.generations",
         "reproduction_mode": "dynamics.reproduction_mode",
+        "time_model": "dynamics.time_model",
         "selection_rule": "dynamics.selection_rule",
         "selection_beta": "dynamics.selection_beta",
         "selection_tournament_k": "dynamics.selection_tournament_k",
@@ -403,6 +414,7 @@ class DynamicsConfig(_RegistryBackedModel):
 
     generations: int = _registry_field("dynamics.generations")
     reproduction_mode: str = _registry_field("dynamics.reproduction_mode")
+    time_model: str = _registry_field("dynamics.time_model")
     selection_rule: str = _registry_field("dynamics.selection_rule")
     selection_beta: float = _registry_field("dynamics.selection_beta")
     selection_tournament_k: int = _registry_field("dynamics.selection_tournament_k")
@@ -475,21 +487,22 @@ class DynamicsConfig(_RegistryBackedModel):
     def _check_stake_fits_threshold(self) -> Self:
         """Check σ ≤ θ: a parent must survive its own reproduction (M10a).
 
-        Runs only when the energy economy actually reads these parameters —
-        under ``"imitation"`` they are ignored, and ignored parameters are
-        never validation errors (DECISIONS #34).
+        Runs only when the parameters are actually read — under the
+        synchronous ``"energy_economy"`` mode, or under the asynchronous
+        time model (M10b), whose variable-N demographics consume θ and σ
+        the same way. Under synchronous ``"imitation"`` they are ignored,
+        and ignored parameters are never validation errors (DECISIONS #34).
 
         Returns:
             The model, unchanged.
 
         Raises:
             ValueError: If the offspring stake exceeds the reproduction
-                threshold in ``"energy_economy"`` mode.
+                threshold while the birth machinery consumes them.
         """
         if (
-            self.reproduction_mode == "energy_economy"
-            and self.offspring_stake > self.reproduction_threshold
-        ):
+            self.reproduction_mode == "energy_economy" or self.time_model == "asynchronous"
+        ) and self.offspring_stake > self.reproduction_threshold:
             raise ValueError(
                 f"dynamics.offspring_stake is {self.offspring_stake}, which is more "
                 f"than dynamics.reproduction_threshold ({self.reproduction_threshold}). "
@@ -563,16 +576,23 @@ class ExperimentConfig(_RegistryBackedModel):
         two config sections, so it lives here on the full experiment, where
         both are visible. Under ``"round_robin"`` the k value is ignored
         entirely (DECISIONS #34), so no check applies — configs can switch
-        matchers without surgery.
+        matchers without surgery. EXCEPT under the asynchronous time model
+        (M10b): there the matcher itself is ignored but k is always
+        consumed (each activation draws k partners), so the check applies
+        regardless of the matcher widget — validate exactly what is
+        consumed (#34).
 
         Returns:
             The model, unchanged.
 
         Raises:
-            ValueError: If the matcher is ``"random_k"`` and each agent would
-                need more distinct opponents than the population offers.
+            ValueError: If k is consumed and each agent would need more
+                distinct opponents than the population offers.
         """
-        if self.matching.matcher == "random_k":
+        # In tournament mode time_model itself is ignored (#34), so only the
+        # matcher widget can make k consumed there.
+        async_consumes_k = self.mode == "evolution" and self.dynamics.time_model == "asynchronous"
+        if self.matching.matcher == "random_k" or async_consumes_k:
             k = self.matching.opponents_per_agent
             available = self.population.size - 1
             if k > available:
@@ -619,21 +639,26 @@ class ExperimentConfig(_RegistryBackedModel):
         A cross-section check like ``_check_matching_fits_population`` — it
         spans dynamics and population, so it lives on the full experiment.
         Runs only when the carrying capacity is actually consumed: evolution
-        mode with ``"energy_economy"`` reproduction. Under imitation (or in
-        tournament mode) the capacity is ignored, and ignored parameters are
-        never validation errors (DECISIONS #34) — which also keeps every
-        pre-M10a config loading unchanged (hard rule 8).
+        mode with ``"energy_economy"`` reproduction, or with the
+        asynchronous time model (M10b), whose variable-N demographics gate
+        births on K the same way. Under synchronous imitation (or in
+        tournament mode) the capacity is ignored, and ignored parameters
+        are never validation errors (DECISIONS #34) — which also keeps
+        every pre-M10a config loading unchanged (hard rule 8).
 
         Returns:
             The model, unchanged.
 
         Raises:
             ValueError: If the starting population is bigger than the
-                carrying capacity in an energy-economy run.
+                carrying capacity while births are gated on it.
         """
         if (
             self.mode == "evolution"
-            and self.dynamics.reproduction_mode == "energy_economy"
+            and (
+                self.dynamics.reproduction_mode == "energy_economy"
+                or self.dynamics.time_model == "asynchronous"
+            )
             and self.dynamics.carrying_capacity < self.population.size
         ):
             raise ValueError(

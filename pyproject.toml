@@ -60,6 +60,12 @@ select = [
     "ANN", # flake8-annotations (type hints mandatory — hard rule 2)
     "RUF", # ruff's own rules
 ]
+# The ambiguous-unicode rules fight the project's deliberate notation: the
+# economy layer names its quantities σ, θ, μ, Δt, × and − in docstrings,
+# comments, and widget labels on purpose (matching docs/DESIGN.md and the
+# DECISIONS log). Silencing the rules keeps `ruff check .` green without
+# rewriting the house style into ASCII.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

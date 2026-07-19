@@ -1669,3 +1669,19 @@ strategies see, hence what `view_of` copies), and the Economy panel's
 memory-growth note (#79) is the user-facing warning. A measurement, not a
 refactor: the vectorization trigger stays **M18, review-at**; bench output
 remains environment-specific and uncommitted.
+
+**#92 — 2026-07-18 — Docs file-naming convention: spec files end
+`-spec.md`, explainers end `-explainer.md` (owner decision; supplements
+#62's naming rule).** The M10b spec and its companion explainer initially
+shared one basename (`M10b-async-event-time.md`), differing only by
+directory — ambiguous in editor tabs, project-knowledge uploads, and
+cross-references. Going forward, every new spec file name is
+`M<zero-padded milestone><letter>-<slug>-spec.md` and every explainer ends
+`-explainer.md` (already the de-facto explainer pattern, e.g.
+`M10-growth-economy-explainer.md`). Applied immediately to the M10b pair
+(`docs/specs/M10b-async-event-time-spec.md` /
+`docs/explainers/M10b-async-event-time-explainer.md`, cross-references
+updated). Files predating this entry keep their names — renaming shipped
+specs would churn every existing cross-reference for no knowledge gain.
+#62's other mechanics (status line, frozen intent, DOCS CHANGED ritual)
+are unchanged.

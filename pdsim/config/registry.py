@@ -603,6 +603,42 @@ register(
     )
 )
 
+# Registered right after dynamics.reproduction_mode on purpose (M10b): the
+# widget-order rule again — async-mode greying keys off this value, so it
+# must be gathered before the widgets it greys render (DECISIONS #34).
+register(
+    ParameterSpec(
+        key="dynamics.time_model",
+        kind="choice",
+        default="synchronous",
+        choices=("synchronous", "asynchronous"),
+        label="Time model",
+        section="Dynamics",
+        description=(
+            "The clock the simulation runs on. 'synchronous' is the classic "
+            "generational clock: everyone plays their matches, then the whole "
+            "population is updated at once at the generation boundary — exactly "
+            "the behaviour of every earlier version. 'asynchronous' dissolves "
+            "the generation: time advances one small event at a time — one "
+            "agent is activated, plays its matches, and any births or deaths "
+            "happen immediately, not at a boundary. The charts then count "
+            "'generation-equivalents': one activation per current member of "
+            "the population, on average, adds up to one generation's worth of "
+            "time, so the two clocks stay comparable. Under 'asynchronous' the "
+            "reproduction mode, selection rule, and score accounting settings "
+            "are ignored (an asynchronous run is always birth-death dynamics), "
+            "and the matching scheme is ignored too — partners are drawn one "
+            "activation at a time, using the opponents-per-agent count."
+        ),
+        learn_more=(
+            "Whether everyone updates at once or one at a time is a classic "
+            "modelling choice that can change outcomes (Huberman & Glance "
+            "1993). The asynchronous clock here follows the Moran-process "
+            "convention: N single-agent events make one generation."
+        ),
+    )
+)
+
 register(
     ParameterSpec(
         key="dynamics.selection_rule",
