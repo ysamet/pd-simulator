@@ -384,6 +384,27 @@ class DynamicsConfig(_RegistryBackedModel):
             at max_age" and is resolved to a plain number at validation time
             (see :func:`resolve_senescence_factor`).
         max_age: Hard age cap; 0 means no cap.
+        async_population: What happens to the population size under the
+            asynchronous time model (M10b) — ``"variable_n"`` (the energy
+            economy in event time: θ-births, insolvency/age deaths,
+            extinction) or ``"fixed_n"`` (textbook Moran: size pinned, one
+            death paired with one birth per event; ``carrying_capacity``,
+            the mortality trio, and the θ/σ birth gate are ignored). Only
+            read when ``time_model`` is ``"asynchronous"``.
+        moran_rule: The replacement order under ``"fixed_n"`` —
+            ``"death_birth"``, ``"birth_death"``, or ``"random"`` (a
+            weighted per-event roll between the two, using the weight pair
+            below). Ignored under ``"variable_n"``.
+        moran_weight_birth_death: Weight of the birth-death branch when
+            ``moran_rule`` is ``"random"``; normalised against the
+            death-birth weight at use. Ignored otherwise.
+        moran_weight_death_birth: Weight of the death-birth branch when
+            ``moran_rule`` is ``"random"``. The pair cannot both be zero
+            while consumed (checked at the experiment level).
+        fixed_n_death_rule: How the dying agent of a fixed-size replacement
+            is picked — ``"pure_random"`` (uniform, the textbook setting) or
+            ``"energy_decides"`` (the poorest candidate, deterministically;
+            ties to the lowest id). Ignored under ``"variable_n"``.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
@@ -410,6 +431,11 @@ class DynamicsConfig(_RegistryBackedModel):
         "base_hazard": "dynamics.base_hazard",
         "senescence_factor": "dynamics.senescence_factor",
         "max_age": "dynamics.max_age",
+        "async_population": "dynamics.async_population",
+        "moran_rule": "dynamics.moran_rule",
+        "moran_weight_birth_death": "dynamics.moran_weight_birth_death",
+        "moran_weight_death_birth": "dynamics.moran_weight_death_birth",
+        "fixed_n_death_rule": "dynamics.fixed_n_death_rule",
     }
 
     generations: int = _registry_field("dynamics.generations")
@@ -440,6 +466,11 @@ class DynamicsConfig(_RegistryBackedModel):
     base_hazard: float = _registry_field("dynamics.base_hazard")
     senescence_factor: float = _registry_field("dynamics.senescence_factor")
     max_age: int = _registry_field("dynamics.max_age")
+    async_population: str = _registry_field("dynamics.async_population")
+    moran_rule: str = _registry_field("dynamics.moran_rule")
+    moran_weight_birth_death: float = _registry_field("dynamics.moran_weight_birth_death")
+    moran_weight_death_birth: float = _registry_field("dynamics.moran_weight_death_birth")
+    fixed_n_death_rule: str = _registry_field("dynamics.fixed_n_death_rule")
 
     # New concept — `@model_validator(mode="before")`: unlike the "after"
     # hooks elsewhere in this module (which see the finished, FROZEN model
@@ -487,11 +518,14 @@ class DynamicsConfig(_RegistryBackedModel):
     def _check_stake_fits_threshold(self) -> Self:
         """Check σ ≤ θ: a parent must survive its own reproduction (M10a).
 
-        Runs only when the parameters are actually read — under the
-        synchronous ``"energy_economy"`` mode, or under the asynchronous
-        time model (M10b), whose variable-N demographics consume θ and σ
-        the same way. Under synchronous ``"imitation"`` they are ignored,
-        and ignored parameters are never validation errors (DECISIONS #34).
+        Runs only when θ actually gates births — under the synchronous
+        ``"energy_economy"`` mode, or under the asynchronous time model
+        with the ``"variable_n"`` population (M10b Phase B refinement:
+        ``"fixed_n"`` has no θ gate and explicitly allows a parent to be
+        driven negative by the stake, so nothing there consumes this pair
+        as a birth bar). Under synchronous ``"imitation"`` both are
+        ignored, and ignored parameters are never validation errors
+        (DECISIONS #34).
 
         Returns:
             The model, unchanged.
@@ -500,9 +534,10 @@ class DynamicsConfig(_RegistryBackedModel):
             ValueError: If the offspring stake exceeds the reproduction
                 threshold while the birth machinery consumes them.
         """
-        if (
-            self.reproduction_mode == "energy_economy" or self.time_model == "asynchronous"
-        ) and self.offspring_stake > self.reproduction_threshold:
+        consumed = (
+            self.time_model == "synchronous" and self.reproduction_mode == "energy_economy"
+        ) or (self.time_model == "asynchronous" and self.async_population == "variable_n")
+        if consumed and self.offspring_stake > self.reproduction_threshold:
             raise ValueError(
                 f"dynamics.offspring_stake is {self.offspring_stake}, which is more "
                 f"than dynamics.reproduction_threshold ({self.reproduction_threshold}). "
@@ -639,12 +674,13 @@ class ExperimentConfig(_RegistryBackedModel):
         A cross-section check like ``_check_matching_fits_population`` — it
         spans dynamics and population, so it lives on the full experiment.
         Runs only when the carrying capacity is actually consumed: evolution
-        mode with ``"energy_economy"`` reproduction, or with the
-        asynchronous time model (M10b), whose variable-N demographics gate
-        births on K the same way. Under synchronous imitation (or in
-        tournament mode) the capacity is ignored, and ignored parameters
-        are never validation errors (DECISIONS #34) — which also keeps
-        every pre-M10a config loading unchanged (hard rule 8).
+        mode with synchronous ``"energy_economy"`` reproduction, or with
+        the asynchronous time model's ``"variable_n"`` population (M10b
+        Phase B refinement: ``"fixed_n"`` pins the population at its
+        starting size and ignores K entirely). Under synchronous imitation
+        (or in tournament mode) the capacity is ignored, and ignored
+        parameters are never validation errors (DECISIONS #34) — which also
+        keeps every pre-M10a config loading unchanged (hard rule 8).
 
         Returns:
             The model, unchanged.
@@ -653,12 +689,16 @@ class ExperimentConfig(_RegistryBackedModel):
             ValueError: If the starting population is bigger than the
                 carrying capacity while births are gated on it.
         """
+        consumed = (
+            self.dynamics.time_model == "synchronous"
+            and self.dynamics.reproduction_mode == "energy_economy"
+        ) or (
+            self.dynamics.time_model == "asynchronous"
+            and self.dynamics.async_population == "variable_n"
+        )
         if (
             self.mode == "evolution"
-            and (
-                self.dynamics.reproduction_mode == "energy_economy"
-                or self.dynamics.time_model == "asynchronous"
-            )
+            and consumed
             and self.dynamics.carrying_capacity < self.population.size
         ):
             raise ValueError(
@@ -666,6 +706,44 @@ class ExperimentConfig(_RegistryBackedModel):
                 f"but the population starts with {self.population.size} agents — "
                 "generation 0 would already exceed capacity. Raise the carrying "
                 "capacity (or start with fewer agents)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_moran_weights(self) -> Self:
+        """Reject an all-zero Moran weight pair — but only when consumed (M10b).
+
+        The pair is normalised at use (``w_bd / (w_bd + w_db)``), so
+        both-zero would divide by zero — but only when the roll actually
+        happens: evolution mode, asynchronous time model, ``"fixed_n"``
+        population, ``"random"`` Moran rule. In every other configuration
+        the weights are ignored, and ignored parameters are never
+        validation errors (DECISIONS #34) — the same
+        validate-exactly-what-is-consumed discipline as the k and capacity
+        checks above.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If both weights are zero while the ``"random"``
+                Moran rule would roll between them.
+        """
+        dynamics = self.dynamics
+        if (
+            self.mode == "evolution"
+            and dynamics.time_model == "asynchronous"
+            and dynamics.async_population == "fixed_n"
+            and dynamics.moran_rule == "random"
+            and dynamics.moran_weight_birth_death == 0.0
+            and dynamics.moran_weight_death_birth == 0.0
+        ):
+            raise ValueError(
+                "dynamics.moran_weight_birth_death and "
+                "dynamics.moran_weight_death_birth are both 0, but the Moran "
+                "rule is 'random' — there would be nothing to roll between. "
+                "Give at least one branch a positive weight (or pick "
+                "'birth_death' / 'death_birth' directly)."
             )
         return self
 

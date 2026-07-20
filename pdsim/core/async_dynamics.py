@@ -13,12 +13,12 @@ generation-equivalent each agent is focal once on average and drawn ≈ k
 times — the same ≈ 2k interaction budget as a synchronous ``random_k``
 generation (spec Design 0).
 
-Phase A scope: the event loop, the clock, the event-time ledger, and
-``variable_n``'s deterministic demographic core (insolvency deaths and
-θ-births through the Option B seam — ``admit_births`` /
-``place_offspring``, DECISIONS #89b). The mortality trio, ``fixed_n``
-Moran replacement, and the imitation overlay arrive in later phases of the
-M10b spec.
+Phase A+B scope: the event loop, the clock, the event-time ledger, both
+demographic engines — ``variable_n`` (θ-births through the Option B seam
+``admit_births`` / ``place_offspring`` [DECISIONS #89b], insolvency
+deaths, and the mortality trio in event-time) and ``fixed_n`` (classic
+Moran replacement per spec Design 3). The imitation overlay arrives in
+Phase C of the M10b spec.
 
 RNG draw order per event (spec Design 8; the reproducibility contract —
 any change is a breaking change requiring a DECISIONS entry):
@@ -32,12 +32,32 @@ any change is a breaking change requiring a DECISIONS entry):
        order,
     3. per match, in partner order: the #23 per-round match draws,
        unchanged,
-    4. the accrual sweep and the demographic step — deterministic except
-       one μ-mutation draw per admitted parent, taken in ascending
-       PARENT-id order (the #80 two-orderings contract, verbatim:
-       ``admit_births`` decides *the set* by energy priority; id order is
-       the RNG contract),
-    5. clock arithmetic, recording, and period emission — no RNG (#35).
+    4. the accrual sweep — no RNG,
+    5. the demographic step, per ``dynamics.async_population``:
+
+       - ``variable_n``: (a) birthday hazard coins — only when
+         age-mortality is active (the #80 active-flag idiom), one
+         ``rng.random()`` per agent whose integer age crossed this event,
+         in ascending id order, unconditional even at p = 0 or 1;
+         (b) age-cap and insolvency deaths — deterministic, no RNG;
+         (c) births — ``admit_births`` (RNG-free, energy priority), then
+         one μ-mutation draw per admitted parent in ascending PARENT-id
+         order (the #80 two-orderings contract, verbatim: admission
+         decides *the set* by energy priority; id order is the RNG
+         contract).
+       - ``fixed_n``: (a) the rule roll — only when
+         ``moran_rule = "random"``: one ``rng.random()`` against the
+         normalised birth-death weight, the FIRST demographic draw of the
+         event; (b) per the selected rule — ``death_birth``: death draw
+         (one ``rng.integers`` over the living population — only under
+         ``pure_random``; ``energy_decides`` is deterministic and draws
+         nothing) → fitness-proportional breeder draw (one ``rng.choice``
+         over the remaining candidates, the #63 shift idiom) → μ-mutation
+         draw(s); ``birth_death``: fitness-proportional breeder draw over
+         everyone → victim draw (one ``rng.integers`` over the others —
+         only under ``pure_random``) → μ-mutation draw(s).
+
+    6. clock arithmetic, recording, and period emission — no RNG (#35).
 
 The ledger in event-time (spec Design 2a): match income and the per-match
 ``engagement_cost`` are applied at match completion; ``basic_living_cost``
@@ -48,6 +68,18 @@ per-event sweep over every living agent in ascending id order — ≈ L and
 1.0 time units since the parent's last birth (founders: since t = 0) — the
 event-time image of #80's one-birth-per-generation rule, keeping the
 dynastic channel in breeding frequency, not endowment.
+
+The mortality trio in event-time (spec Design 2a, Phase B): the sync
+per-boundary coin becomes one coin per agent per **integer birthday** —
+when an agent's age crosses k, one coin at ``mortality_probability(k−1)``,
+the same lifetime coin sequence p(0), p(1), … a synchronous agent draws.
+The ``max_age`` cap is deterministic in event-time: an agent whose age
+reaches the cap dies that event, no coin needed (deaths fire the moment
+their trigger evaluates — spec Design 0). Founder age staggering carries
+over via **negative birth_time** (a founder staggered to age s is "born"
+at t = −s), so a staggered population still starts at its demographic
+steady state; founders' breeding-refractory anchors stay at t = 0
+regardless.
 """
 
 from __future__ import annotations
@@ -63,7 +95,13 @@ from pdsim.core.agent import Agent
 # maintenance boundary); the underscore marks it internal to the engine, not
 # to this module.
 from pdsim.core.dynamics import GenerationReport, _CooperationTally, build_initial_population
-from pdsim.core.economy import admit_births, place_offspring
+from pdsim.core.economy import (
+    admit_births,
+    age_mortality_active,
+    mortality_probability,
+    place_offspring,
+    staggered_founder_ages,
+)
 from pdsim.core.events import AgentSnapshot, BirthEvent, DeathEvent, DemographicEvent
 from pdsim.core.game import PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
@@ -106,10 +144,23 @@ class AsyncDynamics:
         self._match = Match(PrisonersDilemma(config.game), config.match, rng)
         self._reproduction = StrategySwitchReproduction(config)
         self._k = config.matching.opponents_per_agent
+        # The demographic engine this run uses (spec Design 2), and whether
+        # the mortality trio's coins are drawn at all — the #80 active-flag
+        # idiom, scoped to variable_n (fixed_n has no age deaths).
+        self._fixed_n = self._dynamics.async_population == "fixed_n"
+        self._age_mortality = not self._fixed_n and age_mortality_active(self._dynamics)
         founders = build_initial_population(config)
-        for agent in founders:
+        # Founder age staggering (M10a, in event-time): a founder staggered
+        # to age s is "born" at t = -s, so its derived age starts at s and
+        # its birthdays land on the same schedule as a real s-year-old.
+        stagger = (
+            staggered_founder_ages(len(founders), self._dynamics.max_age)
+            if self._age_mortality
+            else [0] * len(founders)
+        )
+        for agent, age in zip(founders, stagger, strict=True):
             agent.energy = self._dynamics.initial_energy
-            agent.age = 0
+            agent.age = age
             agent.parent_id = None
         self._population = founders
         # Monotonic passport counter (M10a): ids are never reused.
@@ -118,11 +169,14 @@ class AsyncDynamics:
         self._time = 0.0
         self._event_index = 0
         # Per-agent event-time bookkeeping, keyed by passport id: when the
-        # agent was born (ages are derived: age = floor(now - birth_time))
-        # and the refractory anchor (birth, or last breeding). Founders
-        # anchor at t = 0 — first eligible from t ≥ 1, like a synchronous
+        # agent was born (ages are derived: age = floor(now - birth_time);
+        # staggered founders have negative birth times) and the refractory
+        # anchor (birth, or last breeding). Founders anchor at t = 0 even
+        # when staggered — first eligible from t ≥ 1, like a synchronous
         # founder at boundary 1.
-        self._birth_time: dict[int, float] = {a.agent_id: 0.0 for a in founders}
+        self._birth_time: dict[int, float] = {
+            agent.agent_id: -float(age) for agent, age in zip(founders, stagger, strict=True)
+        }
         self._breeding_anchor: dict[int, float] = {a.agent_id: 0.0 for a in founders}
         # Recording state: period index, next integer boundary (Phase A
         # emits at the per_generation_equivalent cadence), and the window
@@ -217,10 +271,16 @@ class AsyncDynamics:
                 if on_match is not None:
                     on_match(result)
 
-        # 4-5. Accrual sweep, then the demographic step (deaths, births).
-        self._accrue(1.0 / n)
-        self._insolvency_deaths()
-        self._births()
+        # 4-5. Accrual sweep, then the demographic step of whichever engine
+        # this run uses (spec Design 2): variable_n = mortality coins,
+        # age-cap/insolvency deaths, θ-births; fixed_n = one Moran
+        # replacement.
+        crossed = self._accrue(1.0 / n)
+        if self._fixed_n:
+            self._moran_step()
+        else:
+            self._variable_n_deaths(crossed)
+            self._births()
 
         self._event_index += 1
         self._window_events += 1
@@ -255,47 +315,91 @@ class AsyncDynamics:
             self._window_payoff[name] = self._window_payoff.get(name, 0.0) + payoff
             self._window_rounds[name] = self._window_rounds.get(name, 0) + result.n_rounds
 
-    def _accrue(self, dt: float) -> None:
+    def _accrue(self, dt: float) -> list[Agent]:
         """Apply the time-based ledger terms to every living agent.
 
         ``e ← e·(1+r)^Δt − L·Δt`` in ascending id order (deterministic, no
         RNG): capital returns compound to exactly (1+r) per
         generation-equivalent on a static balance, and the living cost
         integrates to ≈ L. Ages are refreshed here too — an agent's age is
-        the floor of its lifetime in generation-equivalents.
+        the floor of its lifetime in generation-equivalents — and agents
+        whose integer age just crossed (their "birthday") are collected for
+        the mortality step. Δt ≤ 1, so at most one birthday crosses per
+        agent per event.
 
         Args:
             dt: This event's clock advance (1/N at event start).
+
+        Returns:
+            The agents whose integer age crossed this event, in ascending
+            id order (the order the birthday coins are drawn in).
         """
         growth = (1.0 + self._dynamics.capital_return_rate) ** dt
         cost = self._dynamics.basic_living_cost * dt
+        crossed: list[Agent] = []
         for agent in self._population:
             agent.energy = agent.energy * growth - cost
-            agent.age = int(self._time - self._birth_time[agent.agent_id] + _EPS)
+            new_age = int(self._time - self._birth_time[agent.agent_id] + _EPS)
+            if new_age > agent.age:
+                crossed.append(agent)
+            agent.age = new_age
+        return crossed
 
-    def _insolvency_deaths(self) -> None:
-        """Remove every agent with strictly negative energy (#80 unchanged).
+    def _variable_n_deaths(self, birthday_crossers: list[Agent]) -> None:
+        """The variable_n death step: hazard coins, age cap, insolvency.
 
-        Deterministic, in ascending id order, emitting one
-        :class:`DeathEvent` per death into the period buffer. Strictly
-        ``< 0``: a parent that just paid σ can sit at exactly 0 and
-        survives empty-handed.
+        Spec Design 8 step 5 (variable_n), in order:
+
+        (a) **Birthday hazard coins** — only when age-mortality is active
+        (the #80 active-flag idiom): one ``rng.random()`` per agent whose
+        integer age crossed this event, in ascending id order,
+        unconditional even at p = 0 or 1, so the stream depends only on
+        the flag and the birthday schedule, never on hazard values. The
+        coin for crossing birthday k prices the year just lived —
+        ``mortality_probability(k − 1)``, the same lifetime sequence
+        p(0), p(1), … a synchronous agent draws (spec Design 2a).
+
+        (b) **Age-cap and insolvency deaths** — deterministic, no RNG, in
+        ascending id order. The cap fires the moment an agent's age
+        reaches ``max_age`` (async deaths fire when their trigger
+        evaluates, not at a boundary — so a coin-surviving agent at the
+        cap still dies this event). Insolvency stays strictly ``< 0``
+        (#80): a parent that just paid σ can sit at exactly 0 and
+        survives empty-handed. Age takes precedence over insolvency in
+        the recorded cause, mirroring the sync step order (#80 steps
+        4-5). One :class:`DeathEvent` per death, into the period buffer.
+
+        Args:
+            birthday_crossers: Agents whose integer age crossed this
+                event (from the accrual sweep), ascending id order.
         """
+        dynamics = self._dynamics
+        doomed: set[int] = set()
+        if self._age_mortality:
+            for agent in birthday_crossers:
+                hazard = mortality_probability(agent.age - 1, dynamics)
+                if self._rng.random() < hazard:
+                    doomed.add(agent.agent_id)
         survivors: list[Agent] = []
         for agent in self._population:
-            if agent.energy < 0:
-                self._pending.append(
-                    DeathEvent(
-                        agent_id=agent.agent_id,
-                        cause="insolvency",
-                        event_index=self._event_index,
-                        gen_equiv_time=self._time,
-                    )
-                )
-                del self._birth_time[agent.agent_id]
-                del self._breeding_anchor[agent.agent_id]
+            at_cap = dynamics.max_age > 0 and agent.age >= dynamics.max_age
+            if agent.agent_id in doomed or at_cap:
+                cause = "age"
+            elif agent.energy < 0:
+                cause = "insolvency"
             else:
                 survivors.append(agent)
+                continue
+            self._pending.append(
+                DeathEvent(
+                    agent_id=agent.agent_id,
+                    cause=cause,
+                    event_index=self._event_index,
+                    gen_equiv_time=self._time,
+                )
+            )
+            del self._birth_time[agent.agent_id]
+            del self._breeding_anchor[agent.agent_id]
         self._population = survivors
 
     def _births(self) -> None:
@@ -353,6 +457,160 @@ class AsyncDynamics:
         if newborns:
             # The invariant, enforced explicitly: ascending id order.
             self._population = sorted(self._population + newborns, key=lambda agent: agent.agent_id)
+
+    def _moran_step(self) -> None:
+        """One fixed_n Moran replacement: one death paired with one birth.
+
+        Spec Design 3, with the Design 8 within-event draw order. The rule
+        roll — only when ``moran_rule = "random"`` (the #80 active-flag
+        idiom) — is the FIRST demographic draw of the event: one
+        ``rng.random()`` against the normalised birth-death weight
+        ``w_bd / (w_bd + w_db)`` (the both-zero corner is rejected at
+        config time whenever this roll can happen). Then:
+
+        - ``death_birth``: the victim is selected from the whole living
+          population (per ``fixed_n_death_rule``) and dies with cause
+          ``"random_moran"`` (the cause names the Moran death SLOT, not
+          the selection rule); the remaining population competes
+          fitness-proportionally for the emptied seat.
+        - ``birth_death``: the breeder is drawn fitness-proportionally
+          from the whole population; its offspring replaces one of the
+          OTHER agents (per ``fixed_n_death_rule``), cause
+          ``"replacement"``.
+
+        In both orders the death precedes the birth in occurrence (the
+        seat empties, then fills), so the period buffer records death
+        then birth. The parent may be driven negative by the stake —
+        legal in fixed_n, where there is no insolvency death and the
+        fitness shift absorbs negative balances (spec Design 2).
+        """
+        dynamics = self._dynamics
+        rule = dynamics.moran_rule
+        if rule == "random":
+            weight_bd = dynamics.moran_weight_birth_death
+            weight_db = dynamics.moran_weight_death_birth
+            bd_share = weight_bd / (weight_bd + weight_db)
+            rule = "birth_death" if self._rng.random() < bd_share else "death_birth"
+        if rule == "death_birth":
+            victim = self._select_victim(self._population)
+            self._remove_agent(victim, cause="random_moran")
+            parent = self._proportional_parent(self._population)
+        else:
+            parent = self._proportional_parent(self._population)
+            others = [agent for agent in self._population if agent.agent_id != parent.agent_id]
+            victim = self._select_victim(others)
+            self._remove_agent(victim, cause="replacement")
+        self._moran_birth(parent)
+
+    def _select_victim(self, candidates: list[Agent]) -> Agent:
+        """Pick the dying agent per ``fixed_n_death_rule`` (spec Design 3).
+
+        ``pure_random``: one uniform ``rng.integers`` draw over the
+        candidates (textbook Moran — death blind to energy).
+        ``energy_decides``: the lowest-energy candidate, ties to the
+        lowest id — deterministic, no draw (the #80 active-flag idiom:
+        the draw exists only under the rule that needs it).
+
+        Args:
+            candidates: The agents at risk, in ascending id order (the
+                whole population under death_birth; the breeder's others
+                under birth_death).
+
+        Returns:
+            The agent to die.
+        """
+        if self._dynamics.fixed_n_death_rule == "pure_random":
+            return candidates[int(self._rng.integers(len(candidates)))]
+        return min(candidates, key=lambda agent: (agent.energy, agent.agent_id))
+
+    def _proportional_parent(self, candidates: list[Agent]) -> Agent:
+        """Draw the breeder fitness-proportionally — the #63 idiom, exactly.
+
+        Weights ``w_i = e_i − min(e)`` over the candidate set (energies can
+        be negative; roulette weights cannot — and a uniform per-capita
+        cost L shifts every balance equally, so L cancels out of selection
+        entirely). All weights zero → uniform fallback. Exactly one
+        ``rng.choice`` draw over the candidates in ascending id order.
+
+        Args:
+            candidates: The competing agents, in ascending id order.
+
+        Returns:
+            The agent that reproduces.
+        """
+        floor = min(agent.energy for agent in candidates)
+        weights = [agent.energy - floor for agent in candidates]
+        total = sum(weights)
+        probabilities = [weight / total for weight in weights] if total > 0 else None
+        return candidates[int(self._rng.choice(len(candidates), p=probabilities))]
+
+    def _remove_agent(self, victim: Agent, cause: str) -> None:
+        """Remove one agent from the population, recording its death.
+
+        Args:
+            victim: The agent to remove.
+            cause: The :class:`DeathEvent` cause (``"random_moran"`` or
+                ``"replacement"`` — the fixed_n taxonomy).
+        """
+        self._population = [
+            agent for agent in self._population if agent.agent_id != victim.agent_id
+        ]
+        del self._birth_time[victim.agent_id]
+        del self._breeding_anchor[victim.agent_id]
+        self._pending.append(
+            DeathEvent(
+                agent_id=victim.agent_id,
+                cause=cause,
+                event_index=self._event_index,
+                gen_equiv_time=self._time,
+            )
+        )
+
+    def _moran_birth(self, parent: Agent) -> None:
+        """Fill the emptied seat with the breeder's offspring (fixed_n).
+
+        The Option B seam holds in fixed_n too: the structural gate is
+        checked BEFORE σ leaves the parent (spec Design 9 — placement can
+        genuinely fail at M11, and pay-then-place would charge for a
+        child never born). Then the parent pays σ + overhead
+        unconditionally — even into a negative balance, legal here — and
+        the newborn starts at σ with a fresh passport id, ``parent_id``
+        set, empty histories, and the μ-mutation draw via the registry's
+        unchanged semantics (μ applies to economy newborns).
+
+        Args:
+            parent: The breeder selected by :meth:`_proportional_parent`.
+        """
+        dynamics = self._dynamics
+        if not place_offspring(self._population, parent):
+            return
+        parent.energy -= dynamics.offspring_stake + dynamics.reproduction_overhead
+        child_id = self._next_id
+        self._next_id += 1
+        strategy = self._reproduction.offspring_strategy(parent.strategy, self._rng)
+        newborn = Agent(
+            agent_id=child_id,
+            strategy=strategy,
+            memory_depth=self._config.population.memory_depth,
+            energy=dynamics.offspring_stake,
+            age=0,
+            parent_id=parent.agent_id,
+        )
+        self._birth_time[child_id] = self._time
+        self._breeding_anchor[child_id] = self._time
+        self._pending.append(
+            BirthEvent(
+                agent_id=child_id,
+                parent_id=parent.agent_id,
+                strategy=strategy_name_of(strategy),
+                energy=dynamics.offspring_stake,
+                cause="moran",
+                event_index=self._event_index,
+                gen_equiv_time=self._time,
+            )
+        )
+        # The invariant, enforced explicitly: ascending id order.
+        self._population = sorted([*self._population, newborn], key=lambda agent: agent.agent_id)
 
     def _emit_period(self) -> GenerationReport:
         """Build one period report from the window state, then reset it.

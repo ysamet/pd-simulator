@@ -346,6 +346,50 @@ How steeply the death chance climbs with age, in the energy economy: each genera
 
 A hard age cap, in the energy economy: an agent that reaches this age dies at the next generation boundary, no matter what. 0 means no cap. With a cap set and the senescence factor left blank, the death chance rises smoothly to certainty exactly at this age.
 
+#### `dynamics.async_population` — Async population mode
+
+- **Type:** choice
+- **Allowed values:** one of: `variable_n`, `fixed_n`
+- **Default:** `variable_n`
+
+What happens to the population size under the asynchronous time model. 'variable_n' carries the energy economy into event time: agents earn by playing, pay to stay alive, have a child the moment they can afford one (with a seat free under the carrying capacity), and die the moment their energy goes negative or old age catches them — the population grows, shrinks, and can go extinct, exactly as in the synchronous economy, just one event at a time. 'fixed_n' is the textbook Moran process: the population is pinned at its starting size and every activation ends with exactly one death paired with one birth, chosen by the Moran rule below — no insolvency deaths, no aging, no extinction, and the carrying capacity is ignored. Energy is still tracked in 'fixed_n', but it only matters as the birth half's fitness (richer agents reproduce more often) and, optionally, as the death rule's aim. Only read under the asynchronous time model.
+
+*Learn more:* The Moran process (Moran 1958) is population genetics' standard fixed-size birth-death model; 'variable_n' is this platform's energy economy running on the same event clock.
+
+#### `dynamics.moran_rule` — Moran rule
+
+- **Type:** choice
+- **Allowed values:** one of: `birth_death`, `death_birth`, `random`
+- **Default:** `death_birth`
+
+The order of the death half and the birth half of each fixed-size replacement. 'death_birth': one agent dies first (picked by the death rule below), then the whole remaining population competes to fill the empty seat with an offspring — an agent's chance is proportional to how far its energy sits above the poorest competitor's. 'birth_death': one agent is first picked to reproduce, energy-proportionally from everyone, and its offspring then replaces one of the OTHER agents (picked by the death rule below). 'random': every activation rolls afresh between the two, using the two weights below. The order sounds like bookkeeping, but it famously changes outcomes once a population has structure. Only read under 'fixed_n'.
+
+*Learn more:* Ohtsuki et al. 2006 (Nature): under death-birth updating on a network, cooperation is favoured when benefit/cost exceeds the number of neighbours (the b/c > k rule). The structure that makes this bite arrives with a later milestone — in today's well-mixed world the rules differ only mechanically.
+
+#### `dynamics.moran_weight_birth_death` — Moran weight: birth-death
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `0.5`
+
+How often the 'random' Moran rule fires a birth-death replacement, as a weight against the death-birth weight below. The two are normalised at use — 0.8 here against 0.2 there means birth-death fires 80% of the time. Only read when the Moran rule is 'random'; the two weights cannot both be zero (there would be nothing to roll between).
+
+#### `dynamics.moran_weight_death_birth` — Moran weight: death-birth
+
+- **Type:** number
+- **Allowed values:** at least 0
+- **Default:** `0.5`
+
+How often the 'random' Moran rule fires a death-birth replacement, as a weight against the birth-death weight above. The two are normalised at use — equal weights mean a fair coin each activation. Only read when the Moran rule is 'random'; the two weights cannot both be zero.
+
+#### `dynamics.fixed_n_death_rule` — Fixed-N death rule
+
+- **Type:** choice
+- **Allowed values:** one of: `pure_random`, `energy_decides`
+- **Default:** `energy_decides`
+
+How the dying agent of a fixed-size replacement is picked — the death half of whichever Moran rule fires (under 'death_birth', who dies; under 'birth_death', which other agent the offspring replaces). 'pure_random' picks uniformly at random, blind to energy — the textbook Moran process, and the setting for reproducing published results. 'energy_decides' always picks the poorest candidate (ties go to the lowest agent id): the population size stays pinned, but the economy still aims the reaper at whoever played worst. Only read under 'fixed_n'.
+
 ### Run
 
 #### `run.mode` — Run mode

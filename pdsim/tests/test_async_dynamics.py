@@ -1,10 +1,17 @@
-"""Tests for the M10b Phase A async engine core (spec Designs 0, 2a, 5, 8, 9).
+"""Tests for the M10b async engine (spec Designs 0, 2, 2a, 3, 5, 8, 9).
 
-Covers the V6 RNG golden-master (a fixed seed reproduces an async run
+Phase A: the V6 RNG golden-master (a fixed seed reproduces an async run
 byte-for-byte, plus a pinned trace so a mis-pinned draw order fails loudly),
 the V7 synchronous regression (sync streams gain nothing), the Option B
 seam contracts (two orderings, place-before-pay), the breeding refractory,
 the event-time ledger, and the #81 lone-survivor corner in event-time.
+
+Phase B: the fixed_n Moran engine (the moran-random golden master pinning
+the rule roll's first-draw position, the death-rule semantics, the #63
+fitness-shift idiom, place-before-pay in the fixed_n path, the legal
+negative parent), variable_n's mortality trio in event-time (birthday
+hazard coins, the deterministic age cap, founder staggering via negative
+birth_time), and the #34 validator gates the new parameters brought.
 """
 
 from __future__ import annotations
@@ -413,3 +420,432 @@ def test_async_consumes_stake_threshold_and_capacity() -> None:
             "dynamics": {"offspring_stake": 600.0, "reproduction_threshold": 500.0},
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase B — the fixed_n Moran engine (spec Design 3)
+# ---------------------------------------------------------------------------
+
+
+def _moran_config(**dynamics_overrides: object) -> ExperimentConfig:
+    """Build a small fixed_n Moran experiment (6 agents, k = 2, 4 rounds).
+
+    Args:
+        **dynamics_overrides: Dynamics field values to override.
+
+    Returns:
+        A validated async fixed_n config (seed 13) — the moran golden-master
+        fixture.
+    """
+    data: dict[str, object] = {
+        "generations": 2,
+        "time_model": "asynchronous",
+        "async_population": "fixed_n",
+        "offspring_stake": 50.0,
+        "reproduction_threshold": 60.0,
+        "initial_energy": 100.0,
+        "basic_living_cost": 10.0,
+        "mutation_rate": 0.0,
+    }
+    data.update(dynamics_overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 13,
+            "population": {
+                "size": 6,
+                "composition": {"tit_for_tat": 3, "always_defect": 3},
+            },
+            "matching": {"matcher": "random_k", "opponents_per_agent": 2},
+            "match": {"length_mode": "fixed", "rounds_per_match": 4},
+            "dynamics": data,
+        }
+    )
+
+
+def test_moran_random_golden_trace() -> None:
+    """The pinned moran-random master (V6, spec Design 8 fixed_n branch).
+
+    ``moran_rule = "random"`` with weights 0.8/0.2, ``pure_random`` deaths,
+    and μ = 0.1 — so the trace pins the rule roll's FIRST-draw position,
+    the death/breeder draw order of both branches, and the μ draw's place
+    at the tail. Values captured from the frozen Phase B contract; a
+    mis-pinned or reordered draw cannot reproduce them.
+    """
+    config = _moran_config(
+        moran_rule="random",
+        moran_weight_birth_death=0.8,
+        moran_weight_death_birth=0.2,
+        fixed_n_death_rule="pure_random",
+        mutation_rate=0.1,
+    )
+    expected_compositions = [
+        (0, {"tit_for_tat": 3, "always_defect": 3}, 1.0),
+        (1, {"tit_for_tat": 5, "always_defect": 1}, 2.0),
+    ]
+    expected_births = [
+        (6, 3, "always_defect", 0.166667),
+        (7, 4, "always_defect", 0.333333),
+        (8, 3, "always_defect", 0.5),
+        (9, 1, "tit_for_tat", 0.666667),
+        (10, 9, "tit_for_tat", 0.833333),
+        (11, 3, "always_defect", 1.0),
+        (12, 10, "generous_tit_for_tat", 1.166667),
+        (13, 10, "tit_for_tat", 1.333333),
+        (14, 7, "always_defect", 1.5),
+        (15, 2, "tit_for_tat", 1.666667),
+        (16, 2, "tit_for_tat", 1.833333),
+        (17, 16, "tit_for_tat", 2.0),
+    ]
+    expected_deaths = [
+        (5, "random_moran", 0.166667),
+        (0, "random_moran", 0.333333),
+        (6, "replacement", 0.5),
+        (8, "replacement", 0.666667),
+        (4, "replacement", 0.833333),
+        (1, "replacement", 1.0),
+        (11, "replacement", 1.166667),
+        (12, "replacement", 1.333333),
+        (10, "replacement", 1.5),
+        (14, "replacement", 1.666667),
+        (9, "replacement", 1.833333),
+        (3, "replacement", 2.0),
+    ]
+    compositions = []
+    births = []
+    deaths = []
+    final = None
+    for event in run(config):
+        if isinstance(event, GenerationFinished):
+            compositions.append(
+                (event.index, dict(event.composition), round(event.gen_equiv_time, 6))
+            )
+        elif isinstance(event, BirthEvent):
+            births.append(
+                (event.agent_id, event.parent_id, event.strategy, round(event.gen_equiv_time, 6))
+            )
+        elif isinstance(event, DeathEvent):
+            deaths.append((event.agent_id, event.cause, round(event.gen_equiv_time, 6)))
+        elif isinstance(event, RunFinished):
+            final = event
+    assert compositions == expected_compositions
+    assert births == expected_births
+    assert deaths == expected_deaths
+    assert final is not None
+    assert final.completed == 2
+    assert final.composition == {"tit_for_tat": 5, "always_defect": 1}
+    # And the stream reproduces byte-for-byte (hard rule 5).
+    assert list(run(config)) == list(run(config))
+
+
+@pytest.mark.parametrize(
+    ("moran_rule", "expected_cause"),
+    [("death_birth", "random_moran"), ("birth_death", "replacement")],
+)
+def test_fixed_n_pins_population_and_causes(moran_rule: str, expected_cause: str) -> None:
+    """N stays pinned, one replacement per event, causes name the slot.
+
+    Every period's composition sums to the starting size, every death
+    carries the rule's slot cause, every birth is ``"moran"``, and the run
+    completes its full horizon — no extinction in fixed_n (spec Design 2).
+    """
+    config = _moran_config(moran_rule=moran_rule)
+    births = 0
+    deaths = 0
+    final = None
+    for event in run(config):
+        if isinstance(event, GenerationFinished):
+            assert sum(event.composition.values()) == 6
+        elif isinstance(event, BirthEvent):
+            births += 1
+            assert event.cause == "moran"
+        elif isinstance(event, DeathEvent):
+            deaths += 1
+            assert event.cause == expected_cause
+        elif isinstance(event, RunFinished):
+            final = event
+    # 6 agents × 2 generation-equivalents = 12 events, one replacement each.
+    assert births == deaths == 12
+    assert final is not None
+    assert final.completed == 2
+    assert sum(final.composition.values()) == 6
+
+
+def test_rule_roll_first_and_only_when_random() -> None:
+    """The Design 8 fixed_n draw order, pinned by exact stream replay.
+
+    With equal energies (uniform breeder fallback), ``energy_decides``
+    deaths (no draw), and μ = 0, a ``death_birth`` step consumes exactly
+    one ``choice(N-1)`` — and flipping the rule to ``"random"`` prepends
+    exactly one ``random()`` roll (weights 0/1 make the roll always land
+    on death_birth, so the rest of the stream is identical).
+    """
+    for rule_overrides, replay_roll in [
+        ({"moran_rule": "death_birth"}, False),
+        (
+            {
+                "moran_rule": "random",
+                "moran_weight_birth_death": 0.0,
+                "moran_weight_death_birth": 1.0,
+            },
+            True,
+        ),
+    ]:
+        config = _moran_config(fixed_n_death_rule="energy_decides", **rule_overrides)
+        dynamics = AsyncDynamics(config, np.random.default_rng(21))
+        for agent in dynamics._population:
+            agent.energy = 100.0
+        state_before = dynamics._rng.bit_generator.state
+        dynamics._moran_step()
+        replay = np.random.default_rng(21)
+        replay.bit_generator.state = state_before
+        if replay_roll:
+            replay.random()  # the rule roll — the FIRST demographic draw
+        replay.choice(5)  # the breeder draw over the 5 remaining candidates
+        assert dynamics._rng.bit_generator.state == replay.bit_generator.state
+        # energy_decides on all-equal energies: tie to the lowest id.
+        deaths = [e for e in dynamics._pending if isinstance(e, DeathEvent)]
+        assert [(e.agent_id, e.cause) for e in deaths] == [(0, "random_moran")]
+
+
+def test_energy_decides_picks_poorest_tie_to_lowest_id() -> None:
+    """The deterministic death slot: lowest energy, ties to lowest id."""
+    dynamics = AsyncDynamics(
+        _moran_config(moran_rule="death_birth", fixed_n_death_rule="energy_decides"),
+        np.random.default_rng(0),
+    )
+    energies = [50.0, 20.0, 20.0, 90.0, 90.0, 90.0]
+    for agent, energy in zip(dynamics._population, energies, strict=True):
+        agent.energy = energy
+    dynamics._moran_step()
+    deaths = [e for e in dynamics._pending if isinstance(e, DeathEvent)]
+    assert [(e.agent_id, e.cause) for e in deaths] == [(1, "random_moran")]
+
+
+def test_proportional_parent_shift_and_fallback() -> None:
+    """The #63 fitness idiom: shifted weights, worst never drawn.
+
+    With two candidates the poorer one carries weight 0 and the richer is
+    drawn with certainty — including when both balances are negative (the
+    shift absorbs them). All-equal energies fall back to a uniform draw
+    that still lands on a candidate.
+    """
+    dynamics = AsyncDynamics(_moran_config(), np.random.default_rng(4))
+    poor, rich = dynamics._population[0], dynamics._population[1]
+    for energies in [(5.0, 10.0), (-10.0, -5.0)]:
+        poor.energy, rich.energy = energies
+        for _ in range(10):
+            assert dynamics._proportional_parent([poor, rich]) is rich
+    poor.energy = rich.energy = 7.0
+    assert dynamics._proportional_parent([poor, rich]) in (poor, rich)
+
+
+def test_fixed_n_place_before_pay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blocked placement never charges σ — the seam holds in fixed_n too."""
+    monkeypatch.setattr(async_module, "place_offspring", lambda population, parent: False)
+    dynamics = AsyncDynamics(
+        _moran_config(moran_rule="death_birth", fixed_n_death_rule="energy_decides"),
+        np.random.default_rng(0),
+    )
+    next_id_before = dynamics._next_id
+    dynamics._moran_step()
+    assert all(agent.energy == 100.0 for agent in dynamics._population)
+    assert not any(isinstance(e, BirthEvent) for e in dynamics._pending)
+    assert dynamics._next_id == next_id_before
+
+
+def test_fixed_n_parent_may_go_negative_and_relaxed_gates() -> None:
+    """A stake-driven negative balance is legal in fixed_n (spec Design 3).
+
+    σ > θ and K < N are both accepted under fixed_n (the Phase B validator
+    refinement — neither θ nor K is consumed), the parent that pays σ from
+    a smaller balance goes negative and SURVIVES (no insolvency death in
+    fixed_n), and every death in a full run carries a Moran slot cause.
+    """
+    config = ExperimentConfig.model_validate(
+        {
+            "seed": 2,
+            "population": {"size": 2, "composition": {"tit_for_tat": 1, "always_defect": 1}},
+            "matching": {"matcher": "random_k", "opponents_per_agent": 1},
+            "match": {"length_mode": "fixed", "rounds_per_match": 2},
+            "dynamics": {
+                "generations": 2,
+                "time_model": "asynchronous",
+                "async_population": "fixed_n",
+                "moran_rule": "birth_death",  # the breeder survives its stake
+                "offspring_stake": 500.0,
+                "reproduction_threshold": 100.0,  # σ > θ: legal in fixed_n
+                "carrying_capacity": 1,  # K < N: ignored in fixed_n
+                "initial_energy": 100.0,
+                "basic_living_cost": 0.0,
+                "mutation_rate": 0.0,
+            },
+        }
+    )
+    dynamics = AsyncDynamics(config, np.random.default_rng(config.seed))
+    dynamics._step_event(None)
+    # One replacement happened; whoever bred paid σ = 500 from ≈ 100 + match
+    # income and is still standing at a negative balance.
+    assert len(dynamics._population) == 2
+    assert any(agent.energy < 0 for agent in dynamics._population)
+    for event in run(config):
+        if isinstance(event, DeathEvent):
+            assert event.cause in ("random_moran", "replacement")
+
+
+# ---------------------------------------------------------------------------
+# Phase B — variable_n's mortality trio in event-time (spec Design 2a)
+# ---------------------------------------------------------------------------
+
+
+def _mortality_config(**dynamics_overrides: object) -> ExperimentConfig:
+    """Build a small variable_n config with births/insolvency switched off.
+
+    Four tit-for-tat founders, k = 1, zero living cost, unreachable θ — so
+    the only demographics left are whatever mortality settings the
+    overrides switch on.
+
+    Args:
+        **dynamics_overrides: Dynamics field values to override.
+
+    Returns:
+        A validated async variable_n config (seed 5).
+    """
+    data: dict[str, object] = {
+        "generations": 5,
+        "time_model": "asynchronous",
+        "reproduction_threshold": 1e9,
+        "offspring_stake": 0.0,
+        "basic_living_cost": 0.0,
+        "carrying_capacity": 100,
+        "mutation_rate": 0.0,
+    }
+    data.update(dynamics_overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 5,
+            "population": {"size": 4, "composition": {"tit_for_tat": 4}},
+            "matching": {"matcher": "random_k", "opponents_per_agent": 1},
+            "match": {"length_mode": "fixed", "rounds_per_match": 2},
+            "dynamics": data,
+        }
+    )
+
+
+def test_birthday_hazard_certain_death() -> None:
+    """At base_hazard = 1, every founder dies at its first birthday.
+
+    The birthday-coin conversion: the coin for crossing birthday 1 prices
+    p(0) = 1, so all four founders (unstaggered — no age cap) die at the
+    event that crosses t = 1, cause ``"age"``, and the run goes extinct.
+    """
+    config = _mortality_config(base_hazard=1.0)
+    deaths = []
+    final = None
+    for event in run(config):
+        if isinstance(event, DeathEvent):
+            deaths.append((event.agent_id, event.cause, round(event.gen_equiv_time, 6)))
+        elif isinstance(event, RunFinished):
+            final = event
+    assert deaths == [(i, "age", 1.0) for i in range(4)]
+    assert final is not None
+    assert final.composition == {}
+
+
+def test_age_cap_deterministic_with_staggered_founders() -> None:
+    """The max_age cap fires the moment an age reaches it — no coin needed.
+
+    With base_hazard = 0 and max_age = 3, the hazard coins are drawn (the
+    active flag is on) but never kill; founders are staggered to ages
+    [0, 1, 2, 0] via negative birth times, so they die of the cap in
+    stagger order at exactly t = 3 − s each — including id 2, which
+    survives its p(2) = 0 birthday coin at t = 1 and dies of the cap in
+    the same event.
+    """
+    config = _mortality_config(max_age=3)
+    deaths = []
+    for event in run(config):
+        if isinstance(event, DeathEvent):
+            deaths.append((event.agent_id, event.cause, round(event.gen_equiv_time, 6)))
+    assert deaths == [
+        (2, "age", 1.0),
+        (1, "age", 2.0),
+        (0, "age", 3.0),
+        (3, "age", 3.0),
+    ]
+
+
+def test_birthday_coin_consumed_even_at_p_zero() -> None:
+    """The #80 active-flag idiom in event-time: the coin is unconditional.
+
+    A lone survivor's event draws nothing for matches (N = 1), but with
+    age-mortality active its birthday crossing costs exactly one
+    ``rng.random()`` — even at hazard 0, where the coin cannot kill.
+    """
+    dynamics = AsyncDynamics(_config(max_age=50), np.random.default_rng(0))
+    survivor = dynamics._population[0]  # stagger 0: birth_time 0, age 0
+    dynamics._population = [survivor]
+    for agent_id in list(dynamics._birth_time):
+        if agent_id != survivor.agent_id:
+            del dynamics._birth_time[agent_id]
+            del dynamics._breeding_anchor[agent_id]
+    survivor.energy = 40.0  # below θ = 60: no birth muddies the count
+    state_before = dynamics._rng.bit_generator.state
+    dynamics._step_event(None)
+    replay = np.random.default_rng(0)
+    replay.bit_generator.state = state_before
+    replay.random()  # the one birthday coin (crossing age 1, p(0) = 0)
+    assert dynamics._rng.bit_generator.state == replay.bit_generator.state
+    assert dynamics._population == [survivor]  # the coin spared it
+
+
+def test_founder_staggering_only_when_mortality_active() -> None:
+    """Staggering keys off the active flag, and anchors stay at t = 0.
+
+    With max_age set, founder birth times go negative in stagger order
+    (ages start at the demographic steady state); with mortality off they
+    all start at 0 — the Phase A behaviour, untouched. Breeding-refractory
+    anchors stay at 0 either way (staggering is an AGE construct).
+    """
+    staggered = AsyncDynamics(_mortality_config(max_age=3), np.random.default_rng(0))
+    birth_times = [staggered._birth_time[a.agent_id] for a in staggered._population]
+    assert birth_times == [0.0, -1.0, -2.0, 0.0]
+    assert [a.age for a in staggered._population] == [0, 1, 2, 0]
+    assert all(anchor == 0.0 for anchor in staggered._breeding_anchor.values())
+    plain = AsyncDynamics(_mortality_config(), np.random.default_rng(0))
+    assert all(t == 0.0 for t in plain._birth_time.values())
+    assert [a.age for a in plain._population] == [0, 0, 0, 0]
+
+
+# ---------------------------------------------------------------------------
+# Phase B — the new validator gates (#34: validate exactly what is consumed)
+# ---------------------------------------------------------------------------
+
+
+def test_moran_weights_both_zero_rejected_only_when_consumed() -> None:
+    """The weight pair rejects both-zero exactly when the roll can happen."""
+
+    def build(**settings: object) -> dict[str, object]:
+        dynamics: dict[str, object] = {
+            "time_model": "asynchronous",
+            "async_population": "fixed_n",
+            "moran_rule": "random",
+            "moran_weight_birth_death": 0.0,
+            "moran_weight_death_birth": 0.0,
+        }
+        mode = settings.pop("mode", "evolution")
+        dynamics.update(settings)
+        return {
+            "mode": mode,
+            "population": {"size": 4, "composition": {"tit_for_tat": 4}},
+            "matching": {"matcher": "random_k", "opponents_per_agent": 2},
+            "dynamics": dynamics,
+        }
+
+    with pytest.raises(ValidationError, match="nothing to roll"):
+        ExperimentConfig.model_validate(build())
+    # Not consumed: a fixed rule, the variable_n engine, the synchronous
+    # clock, or tournament mode — all valid (#34).
+    ExperimentConfig.model_validate(build(moran_rule="death_birth"))
+    ExperimentConfig.model_validate(build(async_population="variable_n"))
+    ExperimentConfig.model_validate(build(time_model="synchronous"))
+    ExperimentConfig.model_validate(build(mode="tournament"))

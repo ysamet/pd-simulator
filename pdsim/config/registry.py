@@ -1049,6 +1049,136 @@ register(
     )
 )
 
+# --- The asynchronous-mode knobs (M10b Phase B). All are read ONLY when
+# dynamics.time_model is "asynchronous" — valid but ignored under the
+# synchronous clock (the DECISIONS #34 pattern). Registered at the end of the
+# Dynamics block, after the M10a economy params (the M10b spec's placement).
+
+register(
+    ParameterSpec(
+        key="dynamics.async_population",
+        kind="choice",
+        default="variable_n",
+        choices=("variable_n", "fixed_n"),
+        label="Async population mode",
+        section="Dynamics",
+        description=(
+            "What happens to the population size under the asynchronous time "
+            "model. 'variable_n' carries the energy economy into event time: "
+            "agents earn by playing, pay to stay alive, have a child the "
+            "moment they can afford one (with a seat free under the carrying "
+            "capacity), and die the moment their energy goes negative or old "
+            "age catches them — the population grows, shrinks, and can go "
+            "extinct, exactly as in the synchronous economy, just one event "
+            "at a time. 'fixed_n' is the textbook Moran process: the "
+            "population is pinned at its starting size and every activation "
+            "ends with exactly one death paired with one birth, chosen by "
+            "the Moran rule below — no insolvency deaths, no aging, no "
+            "extinction, and the carrying capacity is ignored. Energy is "
+            "still tracked in 'fixed_n', but it only matters as the birth "
+            "half's fitness (richer agents reproduce more often) and, "
+            "optionally, as the death rule's aim. Only read under the "
+            "asynchronous time model."
+        ),
+        learn_more=(
+            "The Moran process (Moran 1958) is population genetics' standard "
+            "fixed-size birth-death model; 'variable_n' is this platform's "
+            "energy economy running on the same event clock."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.moran_rule",
+        kind="choice",
+        default="death_birth",
+        choices=("birth_death", "death_birth", "random"),
+        label="Moran rule",
+        section="Dynamics",
+        description=(
+            "The order of the death half and the birth half of each "
+            "fixed-size replacement. 'death_birth': one agent dies first "
+            "(picked by the death rule below), then the whole remaining "
+            "population competes to fill the empty seat with an offspring — "
+            "an agent's chance is proportional to how far its energy sits "
+            "above the poorest competitor's. 'birth_death': one agent is "
+            "first picked to reproduce, energy-proportionally from everyone, "
+            "and its offspring then replaces one of the OTHER agents (picked "
+            "by the death rule below). 'random': every activation rolls "
+            "afresh between the two, using the two weights below. The order "
+            "sounds like bookkeeping, but it famously changes outcomes once "
+            "a population has structure. Only read under 'fixed_n'."
+        ),
+        learn_more=(
+            "Ohtsuki et al. 2006 (Nature): under death-birth updating on a "
+            "network, cooperation is favoured when benefit/cost exceeds the "
+            "number of neighbours (the b/c > k rule). The structure that "
+            "makes this bite arrives with a later milestone — in today's "
+            "well-mixed world the rules differ only mechanically."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.moran_weight_birth_death",
+        kind="float",
+        default=0.5,
+        minimum=0.0,
+        label="Moran weight: birth-death",
+        section="Dynamics",
+        description=(
+            "How often the 'random' Moran rule fires a birth-death "
+            "replacement, as a weight against the death-birth weight below. "
+            "The two are normalised at use — 0.8 here against 0.2 there "
+            "means birth-death fires 80% of the time. Only read when the "
+            "Moran rule is 'random'; the two weights cannot both be zero "
+            "(there would be nothing to roll between)."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.moran_weight_death_birth",
+        kind="float",
+        default=0.5,
+        minimum=0.0,
+        label="Moran weight: death-birth",
+        section="Dynamics",
+        description=(
+            "How often the 'random' Moran rule fires a death-birth "
+            "replacement, as a weight against the birth-death weight above. "
+            "The two are normalised at use — equal weights mean a fair coin "
+            "each activation. Only read when the Moran rule is 'random'; "
+            "the two weights cannot both be zero."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="dynamics.fixed_n_death_rule",
+        kind="choice",
+        default="energy_decides",
+        choices=("pure_random", "energy_decides"),
+        label="Fixed-N death rule",
+        section="Dynamics",
+        description=(
+            "How the dying agent of a fixed-size replacement is picked — the "
+            "death half of whichever Moran rule fires (under 'death_birth', "
+            "who dies; under 'birth_death', which other agent the offspring "
+            "replaces). 'pure_random' picks uniformly at random, blind to "
+            "energy — the textbook Moran process, and the setting for "
+            "reproducing published results. 'energy_decides' always picks "
+            "the poorest candidate (ties go to the lowest agent id): the "
+            "population size stays pinned, but the economy still aims the "
+            "reaper at whoever played worst. Only read under 'fixed_n'."
+        ),
+    )
+)
+
 # ---------------------------------------------------------------------------
 # Run control (docs/DESIGN.md §2.8)
 # ---------------------------------------------------------------------------
