@@ -12,6 +12,12 @@ fitness-shift idiom, place-before-pay in the fixed_n path, the legal
 negative parent), variable_n's mortality trio in event-time (birthday
 hazard coins, the deterministic age cap, founder staggering via negative
 birth_time), and the #34 validator gates the new parameters brought.
+
+Phase C: the imitation overlay (spec Design 4) — the unconditional
+per-match coin and its Design 8 step-3 position, the no-event-on-no-op
+rule, the lower-total (then lower-id) adopter, immediacy inside a bundle,
+the cultural/demographic split V2 makes visible, and the overlay's
+off-by-default silence that keeps both golden masters valid.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from pydantic import ValidationError
 
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core import async_dynamics as async_module
+from pdsim.core.agent import Agent
 from pdsim.core.async_dynamics import AsyncDynamics
 from pdsim.core.engine import run
 from pdsim.core.events import (
@@ -33,6 +40,8 @@ from pdsim.core.events import (
     ImitationEvent,
     RunFinished,
 )
+from pdsim.core.match import MatchResult
+from pdsim.core.strategies import create_strategy, strategy_name_of
 from pdsim.core.timeseries import RunTimeseries
 
 
@@ -849,3 +858,268 @@ def test_moran_weights_both_zero_rejected_only_when_consumed() -> None:
     ExperimentConfig.model_validate(build(async_population="variable_n"))
     ExperimentConfig.model_validate(build(time_model="synchronous"))
     ExperimentConfig.model_validate(build(mode="tournament"))
+
+
+# ---------------------------------------------------------------------------
+# Phase C — the imitation overlay (spec Design 4, draw order Design 8 step 3)
+# ---------------------------------------------------------------------------
+
+
+def _imitation_config(
+    composition: dict[str, int] | None = None, **dynamics_overrides: object
+) -> ExperimentConfig:
+    """Build an async config whose ONLY dynamics is the imitation overlay.
+
+    Six agents, k = 2, 4 fixed rounds, no noise — and demographics switched
+    off from every side (unreachable θ, zero living cost, mortality off, K
+    far above N), so nobody is born and nobody dies. What remains is the
+    cultural channel alone: the V2 configuration, in test form.
+
+    Args:
+        composition: Starting strategy mix; defaults to six tit-for-tats
+            (a homogeneous population, where every copy is a no-op).
+        **dynamics_overrides: Dynamics field values to override.
+
+    Returns:
+        A validated async config with the overlay ON (seed 11).
+    """
+    data: dict[str, object] = {
+        "generations": 3,
+        "time_model": "asynchronous",
+        "imitation_overlay": True,
+        "reproduction_threshold": 1e9,
+        "offspring_stake": 0.0,
+        "basic_living_cost": 0.0,
+        "carrying_capacity": 100,
+        "mutation_rate": 0.0,
+    }
+    data.update(dynamics_overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 11,
+            "population": {"size": 6, "composition": composition or {"tit_for_tat": 6}},
+            "matching": {"matcher": "random_k", "opponents_per_agent": 2},
+            "match": {"length_mode": "fixed", "rounds_per_match": 4},
+            "dynamics": data,
+        }
+    )
+
+
+def _tied_match(agent_a: Agent, agent_b: Agent) -> MatchResult:
+    """Fabricate a finished match both participants tied in.
+
+    Args:
+        agent_a: One participant.
+        agent_b: The other.
+
+    Returns:
+        A transcript-free :class:`MatchResult` with equal totals — the
+        exact-tie corner the lower-id tie-break governs.
+    """
+    return MatchResult(
+        agent_ids=(agent_a.agent_id, agent_b.agent_id),
+        total_payoffs={agent_a.agent_id: 12.0, agent_b.agent_id: 12.0},
+        rounds=(),
+    )
+
+
+def test_imitation_coin_is_one_unconditional_draw_per_match() -> None:
+    """Design 8 step 3, pinned by exact stream replay.
+
+    A homogeneous population makes every copy a no-op — and the coins are
+    drawn anyway (the #80 active-flag idiom: the stream depends on the
+    flag and the match schedule, never on strategy states). With
+    deterministic strategies, no noise, fixed rounds and no demographics,
+    one event's ENTIRE draw list is: the focal draw, the partner draw, and
+    exactly k adoption coins, in that order.
+    """
+    dynamics = AsyncDynamics(_imitation_config(), np.random.default_rng(3))
+    state_before = dynamics._rng.bit_generator.state
+    dynamics._step_event(None)
+    replay = np.random.default_rng(3)
+    replay.bit_generator.state = state_before
+    replay.integers(6)  # the focal draw
+    replay.choice(5, size=2, replace=False)  # the partner draw (k = 2)
+    replay.random()  # match 1's adoption coin
+    replay.random()  # match 2's adoption coin
+    assert dynamics._rng.bit_generator.state == replay.bit_generator.state
+    # Every copy was a no-op, so the coins produced no events at all.
+    assert dynamics._pending == []
+
+
+def test_overlay_off_draws_no_coin() -> None:
+    """Off by default, silent by default — what keeps the masters valid.
+
+    The same event with the overlay off consumes the focal and partner
+    draws and nothing else, so the Phase A and Phase B golden traces
+    (which run with the overlay off) cannot shift.
+    """
+    dynamics = AsyncDynamics(_imitation_config(imitation_overlay=False), np.random.default_rng(3))
+    state_before = dynamics._rng.bit_generator.state
+    dynamics._step_event(None)
+    replay = np.random.default_rng(3)
+    replay.bit_generator.state = state_before
+    replay.integers(6)
+    replay.choice(5, size=2, replace=False)
+    assert dynamics._rng.bit_generator.state == replay.bit_generator.state
+
+
+def test_adopter_is_the_lower_scorer_not_the_lower_id() -> None:
+    """Score, not identity, decides who considers switching.
+
+    The lower-id agent wins the match by a wide margin, so at a high β the
+    coin lands with near-certainty on the HIGHER-id agent adopting — the
+    reverse of what an id-based rule would produce.
+    """
+    dynamics = AsyncDynamics(
+        _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=10.0),
+        np.random.default_rng(0),
+    )
+    winner = dynamics._population[0]
+    loser = dynamics._population[5]
+    winner.strategy = create_strategy("always_defect")
+    loser.strategy = create_strategy("tit_for_tat")
+    result = MatchResult(
+        agent_ids=(winner.agent_id, loser.agent_id),
+        total_payoffs={winner.agent_id: 20.0, loser.agent_id: 1.0},
+        rounds=(),
+    )
+    dynamics._imitate(result, winner, loser)
+    assert strategy_name_of(loser.strategy) == "always_defect"
+    assert strategy_name_of(winner.strategy) == "always_defect"  # untouched
+    events = [e for e in dynamics._pending if isinstance(e, ImitationEvent)]
+    assert [(e.agent_id, e.from_strategy, e.to_strategy, e.source_agent_id) for e in events] == [
+        (5, "tit_for_tat", "always_defect", 0)
+    ]
+
+
+def test_exact_tie_makes_the_lower_id_the_adopter() -> None:
+    """The tie-break is deterministic (principle 5), never a second draw.
+
+    On an exact score tie the gap is 0, so the coin is a fair one — but
+    only ever for the LOWER-id agent: over many tied matches the higher-id
+    agent never changes strategy, whichever argument position it occupies.
+    """
+    dynamics = AsyncDynamics(
+        _imitation_config({"tit_for_tat": 3, "always_defect": 3}),
+        np.random.default_rng(1),
+    )
+    low, high = dynamics._population[0], dynamics._population[5]
+    result = _tied_match(low, high)
+    adoptions = 0
+    for _ in range(50):
+        low.strategy = create_strategy("tit_for_tat")
+        high.strategy = create_strategy("always_defect")
+        # Argument order deliberately reversed: the rule reads totals and
+        # ids, not who was focal.
+        dynamics._imitate(result, high, low)
+        assert strategy_name_of(high.strategy) == "always_defect"
+        if strategy_name_of(low.strategy) == "always_defect":
+            adoptions += 1
+    # A fair coin at gap 0: both outcomes occur (and the count is pinned by
+    # the seed, so this is deterministic, not flaky).
+    assert 0 < adoptions < 50
+
+
+def test_no_event_when_the_copy_changes_nothing() -> None:
+    """The coin is the RNG contract; the event is not (spec Design 4).
+
+    Two agents already playing the same strategy still spend a coin, and
+    still emit nothing — a no-op copy is not an :class:`ImitationEvent`.
+    """
+    dynamics = AsyncDynamics(_imitation_config(selection_beta=10.0), np.random.default_rng(2))
+    first, second = dynamics._population[0], dynamics._population[1]
+    result = MatchResult(
+        agent_ids=(first.agent_id, second.agent_id),
+        total_payoffs={first.agent_id: 20.0, second.agent_id: 1.0},
+        rounds=(),
+    )
+    state_before = dynamics._rng.bit_generator.state
+    dynamics._imitate(result, first, second)
+    replay = np.random.default_rng(2)
+    replay.bit_generator.state = state_before
+    replay.random()  # the coin was spent even though the copy is a no-op
+    assert dynamics._rng.bit_generator.state == replay.bit_generator.state
+    assert dynamics._pending == []
+
+
+def test_adopted_strategy_plays_in_the_next_match_of_the_bundle() -> None:
+    """Immediacy — what asynchrony means (spec Design 0).
+
+    A strategy copied after one match is what plays in the next match of
+    the same focal bundle: the cooperator adopts always-defect after
+    losing match 1, and match 2 against a second defector is therefore
+    mutual defection, not exploitation.
+    """
+    dynamics = AsyncDynamics(
+        _imitation_config(
+            {"always_cooperate": 1, "always_defect": 5},
+            selection_beta=10.0,
+        ),
+        np.random.default_rng(0),
+    )
+    focal = dynamics._population[0]
+    first, second = dynamics._population[1], dynamics._population[2]
+    assert strategy_name_of(focal.strategy) == "always_cooperate"
+    result = dynamics._match.play(focal, first)
+    dynamics._imitate(result, focal, first)
+    assert strategy_name_of(focal.strategy) == "always_defect"
+    # The very next match of the bundle is played by the NEW strategy.
+    second_result = dynamics._match.play(focal, second)
+    assert second_result.total_payoffs[focal.agent_id] == pytest.approx(
+        second_result.total_payoffs[second.agent_id]
+    )
+    assert all(record.actions[focal.agent_id].name == "DEFECT" for record in second_result.rounds)
+
+
+def test_v2_shares_move_while_the_population_stays_flat() -> None:
+    """V2's cultural/demographic split, in engine terms.
+
+    With demographics switched off entirely, an overlay run changes WHAT
+    the population plays without changing WHO it is: strategy shares move,
+    the head-count never does, and not a single birth or death event is
+    emitted (so a run's ``total_agents_born`` stays at the founder count).
+    """
+    config = _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=5.0)
+    compositions = []
+    imitations = 0
+    for event in run(config):
+        if isinstance(event, GenerationFinished):
+            compositions.append(dict(event.composition))
+        elif isinstance(event, ImitationEvent):
+            imitations += 1
+            assert event.from_strategy != event.to_strategy
+        elif isinstance(event, (BirthEvent, DeathEvent)):
+            pytest.fail(f"the overlay is not demographic, but emitted {event!r}")
+    assert imitations > 0
+    assert all(sum(c.values()) == 6 for c in compositions)
+    # The mix actually moved off its starting 3/3 at some point.
+    assert any(c != {"tit_for_tat": 3, "always_defect": 3} for c in compositions)
+
+
+def test_overlay_layers_on_fixed_n_too() -> None:
+    """Both channels at once: Moran demography plus cultural copying.
+
+    The overlay is not a fourth Moran rule — it rides on top of one, so a
+    fixed_n run emits its replacements AND its imitations, with N pinned
+    throughout (spec Design 4).
+    """
+    config = _moran_config(imitation_overlay=True, selection_beta=5.0, moran_rule="death_birth")
+    births = deaths = imitations = 0
+    for event in run(config):
+        if isinstance(event, GenerationFinished):
+            assert sum(event.composition.values()) == 6
+        elif isinstance(event, BirthEvent):
+            births += 1
+        elif isinstance(event, DeathEvent):
+            deaths += 1
+        elif isinstance(event, ImitationEvent):
+            imitations += 1
+    assert births == deaths == 12
+    assert imitations > 0
+
+
+def test_overlay_run_is_reproducible() -> None:
+    """Same config + seed → byte-identical streams, overlay included."""
+    config = _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=5.0)
+    assert list(run(config)) == list(run(config))

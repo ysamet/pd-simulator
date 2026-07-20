@@ -390,6 +390,16 @@ How often the 'random' Moran rule fires a death-birth replacement, as a weight a
 
 How the dying agent of a fixed-size replacement is picked — the death half of whichever Moran rule fires (under 'death_birth', who dies; under 'birth_death', which other agent the offspring replaces). 'pure_random' picks uniformly at random, blind to energy — the textbook Moran process, and the setting for reproducing published results. 'energy_decides' always picks the poorest candidate (ties go to the lowest agent id): the population size stays pinned, but the economy still aims the reaper at whoever played worst. Only read under 'fixed_n'.
 
+#### `dynamics.imitation_overlay` — Imitation overlay
+
+- **Type:** true/false
+- **Allowed values:** true or false
+- **Default:** `false`
+
+Let agents copy each other's strategies on top of whatever the population is already doing. When on, every finished match ends with the worse-scoring of the two players considering a switch to the better-scoring one's strategy — the bigger the score gap, the likelier the switch, tuned by the same selection intensity the Fermi rule uses. Nothing else changes hands: nobody is born or dies, no energy moves, and the copier keeps its own identity, age, and memory of past opponents — only its playing style changes, and immediately, so a strategy picked up mid-activation is already in use for the next match. This is CULTURAL spread (who imitates whom) running alongside the DEMOGRAPHIC spread (who is born and who dies), and it can be layered on either async population mode. Only read under the asynchronous time model.
+
+*Learn more:* Pairwise-comparison imitation is the standard cultural-evolution counterpart to birth-death dynamics: strategies spread by being copied by the living rather than by out-reproducing the dead.
+
 ### Run
 
 #### `run.mode` — Run mode

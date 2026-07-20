@@ -405,6 +405,13 @@ class DynamicsConfig(_RegistryBackedModel):
             is picked — ``"pure_random"`` (uniform, the textbook setting) or
             ``"energy_decides"`` (the poorest candidate, deterministically;
             ties to the lowest id). Ignored under ``"variable_n"``.
+        imitation_overlay: Whether the cultural imitation channel runs on top
+            of the async demographics (M10b spec Design 4): after every
+            finished match the lower-scoring participant considers copying
+            the higher scorer's strategy, with the Fermi probability that
+            ``selection_beta`` tunes. Strategy-copy only — no birth, death,
+            energy transfer, or identity change. Layerable on BOTH async
+            population modes; ignored under the synchronous clock.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
@@ -436,6 +443,7 @@ class DynamicsConfig(_RegistryBackedModel):
         "moran_weight_birth_death": "dynamics.moran_weight_birth_death",
         "moran_weight_death_birth": "dynamics.moran_weight_death_birth",
         "fixed_n_death_rule": "dynamics.fixed_n_death_rule",
+        "imitation_overlay": "dynamics.imitation_overlay",
     }
 
     generations: int = _registry_field("dynamics.generations")
@@ -471,6 +479,7 @@ class DynamicsConfig(_RegistryBackedModel):
     moran_weight_birth_death: float = _registry_field("dynamics.moran_weight_birth_death")
     moran_weight_death_birth: float = _registry_field("dynamics.moran_weight_death_birth")
     fixed_n_death_rule: str = _registry_field("dynamics.fixed_n_death_rule")
+    imitation_overlay: bool = _registry_field("dynamics.imitation_overlay")
 
     # New concept — `@model_validator(mode="before")`: unlike the "after"
     # hooks elsewhere in this module (which see the finished, FROZEN model

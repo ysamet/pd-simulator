@@ -13,12 +13,16 @@ generation-equivalent each agent is focal once on average and drawn ≈ k
 times — the same ≈ 2k interaction budget as a synchronous ``random_k``
 generation (spec Design 0).
 
-Phase A+B scope: the event loop, the clock, the event-time ledger, both
+Phase A-C scope: the event loop, the clock, the event-time ledger, both
 demographic engines — ``variable_n`` (θ-births through the Option B seam
 ``admit_births`` / ``place_offspring`` [DECISIONS #89b], insolvency
 deaths, and the mortality trio in event-time) and ``fixed_n`` (classic
-Moran replacement per spec Design 3). The imitation overlay arrives in
-Phase C of the M10b spec.
+Moran replacement per spec Design 3) — plus the **imitation overlay**
+(spec Design 4): an optional CULTURAL channel, layerable on either
+demographic mode, in which the loser of each finished match may copy the
+winner's strategy. Demography answers *who exists*; imitation answers
+*what the living play* — different triggers, different ontological
+layers, so they are separate channels rather than one rule.
 
 RNG draw order per event (spec Design 8; the reproducibility contract —
 any change is a breaking change requiring a DECISIONS entry):
@@ -30,8 +34,10 @@ any change is a breaking change requiring a DECISIONS entry):
        replace=False)`` over the focal's others (the RandomK idiom + #81
        clamp), skip-mapped around the focal; partners are met in drawn
        order,
-    3. per match, in partner order: the #23 per-round match draws,
-       unchanged,
+    3. per match, in partner order: the #23 per-round match draws
+       (unchanged), then — only when the imitation overlay is on — exactly
+       one adoption coin ``rng.random()`` per completed match,
+       unconditional even when both participants already share a strategy,
     4. the accrual sweep — no RNG,
     5. the demographic step, per ``dynamics.async_population``:
 
@@ -102,10 +108,22 @@ from pdsim.core.economy import (
     place_offspring,
     staggered_founder_ages,
 )
-from pdsim.core.events import AgentSnapshot, BirthEvent, DeathEvent, DemographicEvent
+from pdsim.core.events import (
+    AgentSnapshot,
+    BirthEvent,
+    DeathEvent,
+    DemographicEvent,
+    ImitationEvent,
+)
 from pdsim.core.game import PrisonersDilemma
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.reproduction import StrategySwitchReproduction
+
+# Intra-package reuse again (as with _CooperationTally above): the imitation
+# overlay IS the Fermi rule on a match score gap, so it borrows the very same
+# numerically-stable logistic FermiSelection uses rather than growing a second
+# copy that could drift from it.
+from pdsim.core.selection import _logistic
 from pdsim.core.strategies import strategy_name_of
 
 _EPS = 1e-9
@@ -149,6 +167,12 @@ class AsyncDynamics:
         # idiom, scoped to variable_n (fixed_n has no age deaths).
         self._fixed_n = self._dynamics.async_population == "fixed_n"
         self._age_mortality = not self._fixed_n and age_mortality_active(self._dynamics)
+        # The cultural channel (spec Design 4), layerable on either mode —
+        # off by default, and its coin exists only when it is on (the #80
+        # active-flag idiom, which is what keeps the Phase A/B golden
+        # masters valid).
+        self._imitation = self._dynamics.imitation_overlay
+        self._beta = self._dynamics.selection_beta
         founders = build_initial_population(config)
         # Founder age staggering (M10a, in event-time): a founder staggered
         # to age s is "born" at t = -s, so its derived age starts at s and
@@ -268,6 +292,7 @@ class AsyncDynamics:
                 partner = self._population[partner_index]
                 result = self._match.play(focal, partner)
                 self._record_match(result, focal, partner)
+                self._imitate(result, focal, partner)
                 if on_match is not None:
                     on_match(result)
 
@@ -314,6 +339,76 @@ class AsyncDynamics:
             name = names[agent.agent_id]
             self._window_payoff[name] = self._window_payoff.get(name, 0.0) + payoff
             self._window_rounds[name] = self._window_rounds.get(name, 0) + result.n_rounds
+
+    def _imitate(self, result: MatchResult, focal: Agent, partner: Agent) -> None:
+        """Roll one Fermi adoption coin for a finished match (spec Design 4).
+
+        The overlay is CULTURAL, not demographic: it changes what an
+        existing agent plays, never who exists. The potential adopter is
+        the participant with the LOWER total for THIS match (an exact tie
+        goes to the lower agent id — deterministic, never a draw, per the
+        spec's defining principle 5), and it copies the other's strategy
+        with the Fermi probability ``logistic(β·(winner − loser))``, reusing
+        the existing ``dynamics.selection_beta``: the semantics — selection
+        intensity on a score difference — are genuinely the Fermi rule's,
+        so no second β is introduced.
+
+        Two contracts worth stating plainly:
+
+        * **The coin, not the event, is the RNG contract.** Whenever the
+          overlay is on, exactly one ``rng.random()`` is drawn per completed
+          match, unconditionally — even when both participants already play
+          the same strategy, where the copy is a visible no-op. That keeps
+          the random stream a function of the flag and the match schedule
+          alone, never of the strategy states (the #80 active-flag idiom).
+          A no-op copy emits NO :class:`ImitationEvent`.
+        * **The change is immediate**, which is what asynchrony means: a
+          strategy adopted after match 2 of the focal's bundle is what
+          plays in match 3.
+
+        Nothing else moves: no energy is charged or transferred, no birth
+        or death fires, and identity, age, ``parent_id``, and every
+        per-opponent history stay exactly as they were. Strategies are
+        stateless (#21), so the adopter can safely share the source's very
+        instance — the same flyweight copy reproduction does.
+
+        Args:
+            result: The finished match's transcript (its per-agent totals
+                are the score gap the Fermi rule reads).
+            focal: The initiating participant.
+            partner: The drawn participant.
+        """
+        if not self._imitation:
+            return
+        focal_total = result.total_payoffs[focal.agent_id]
+        partner_total = result.total_payoffs[partner.agent_id]
+        if focal_total != partner_total:
+            adopter, source = (focal, partner) if focal_total < partner_total else (partner, focal)
+        else:
+            # Exact tie: the lower id is the potential adopter (and the gap
+            # is 0, so the coin is a fair one either way).
+            adopter, source = (
+                (focal, partner) if focal.agent_id < partner.agent_id else (partner, focal)
+            )
+        gap = result.total_payoffs[source.agent_id] - result.total_payoffs[adopter.agent_id]
+        adopt = _logistic(self._beta * gap)
+        if self._rng.random() >= adopt:
+            return
+        from_strategy = strategy_name_of(adopter.strategy)
+        to_strategy = strategy_name_of(source.strategy)
+        if from_strategy == to_strategy:
+            return  # the coin was spent; the copy changes nothing
+        adopter.strategy = source.strategy
+        self._pending.append(
+            ImitationEvent(
+                agent_id=adopter.agent_id,
+                from_strategy=from_strategy,
+                to_strategy=to_strategy,
+                source_agent_id=source.agent_id,
+                event_index=self._event_index,
+                gen_equiv_time=self._time,
+            )
+        )
 
     def _accrue(self, dt: float) -> list[Agent]:
         """Apply the time-based ledger terms to every living agent.
