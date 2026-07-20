@@ -18,6 +18,12 @@ per-match coin and its Design 8 step-3 position, the no-event-on-no-op
 rule, the lower-total (then lower-id) adopter, immediacy inside a bundle,
 the cultural/demographic split V2 makes visible, and the overlay's
 off-by-default silence that keeps both golden masters valid.
+
+Phase D: the recording cadence (spec Design 6) — observer-only (the same
+seed produces the identical simulation history at every cadence), the
+exact period arithmetic of ``every_m_events`` including the tail period,
+and the #34 silence of the Output section under the synchronous clock.
+The schema-4 persistence tests live in ``test_results.py``.
 """
 
 from __future__ import annotations
@@ -1123,3 +1129,89 @@ def test_overlay_run_is_reproducible() -> None:
     """Same config + seed → byte-identical streams, overlay included."""
     config = _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=5.0)
     assert list(run(config)) == list(run(config))
+
+
+# ---------------------------------------------------------------------------
+# Phase D — the recording cadence (spec Design 6)
+# ---------------------------------------------------------------------------
+
+
+def _with_cadence(config: ExperimentConfig, cadence: str, m: int = 1) -> ExperimentConfig:
+    """Return a copy of a config with a different recording cadence.
+
+    Args:
+        config: The base config.
+        cadence: The ``output.recording_cadence`` value.
+        m: The ``output.recording_cadence_m`` value.
+
+    Returns:
+        The re-validated copy.
+    """
+    data = config.model_dump()
+    data["output"] = {"recording_cadence": cadence, "recording_cadence_m": m}
+    return ExperimentConfig.model_validate(data)
+
+
+def test_cadence_is_observer_only() -> None:
+    """Spec Design 6's pin: the cadence never touches the simulation.
+
+    The same config + seed at all three cadences must produce the
+    identical simulation history — every demographic event (each stamped
+    with its event index and clock), the same final population snapshot —
+    while only the NUMBER of period reports changes.
+    """
+    base = _config()
+    histories = {}
+    period_counts = {}
+    for cadence, m in [("per_generation_equivalent", 1), ("per_event", 1), ("every_m_events", 3)]:
+        events = list(run(_with_cadence(base, cadence, m)))
+        demographic = [e for e in events if isinstance(e, (BirthEvent, DeathEvent, ImitationEvent))]
+        periods = [e for e in events if isinstance(e, GenerationFinished)]
+        histories[cadence] = (demographic, periods[-1].composition, periods[-1].agents)
+        period_counts[cadence] = len(periods)
+    assert histories["per_event"] == histories["per_generation_equivalent"]
+    assert histories["every_m_events"] == histories["per_generation_equivalent"]
+    assert (
+        period_counts["per_event"]
+        > period_counts["every_m_events"]
+        > period_counts["per_generation_equivalent"]
+    )
+
+
+def test_every_m_events_period_arithmetic() -> None:
+    """The cadence's period count is exact, tail period included.
+
+    A fixed_n run pins N, so 2 generation-equivalents are exactly 12
+    events (N = 6): ``per_event`` records 12 periods, ``every_m_events``
+    with m = 5 records 2 full windows plus the final partial one (the
+    record never drops a tail), and the default boundary cadence records
+    one period per generation-equivalent.
+    """
+    base = _moran_config()
+    for cadence, m, expected in [
+        ("per_event", 1, 12),
+        ("every_m_events", 5, 3),
+        ("per_generation_equivalent", 1, 2),
+    ]:
+        events = list(run(_with_cadence(base, cadence, m)))
+        periods = [e for e in events if isinstance(e, GenerationFinished)]
+        assert len(periods) == expected, cadence
+        final = next(e for e in events if isinstance(e, RunFinished))
+        assert final.completed == expected
+
+
+def test_sync_runs_ignore_the_output_section() -> None:
+    """#34 for the Output parameters: valid but inert under synchronous.
+
+    A synchronous stream must be byte-identical whatever the cadence says
+    — the regression that keeps pre-M10b recordings reproducible.
+    """
+    sync = ExperimentConfig.model_validate(
+        {
+            "seed": 11,
+            "population": {"size": 6, "composition": {"tit_for_tat": 3, "always_defect": 3}},
+            "match": {"length_mode": "fixed", "rounds_per_match": 4},
+            "dynamics": {"generations": 3, "mutation_rate": 0.2},
+        }
+    )
+    assert list(run(sync)) == list(run(_with_cadence(sync, "per_event")))

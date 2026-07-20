@@ -39,6 +39,7 @@ __all__ = [
     "GameConfig",
     "MatchConfig",
     "MatchingConfig",
+    "OutputConfig",
     "PopulationConfig",
     "load_config",
     "resolve_initial_energy",
@@ -557,6 +558,37 @@ class DynamicsConfig(_RegistryBackedModel):
         return self
 
 
+class OutputConfig(_RegistryBackedModel):
+    """What the run records — never what it simulates (M10b spec Design 6).
+
+    The recording cadence sits in the config, unlike the engine's
+    ``granularity`` argument, because it decides what the persisted record
+    CONTAINS — and what a run recorded is part of reproducing it (hard
+    rule 8). Like granularity it is an observer control (DECISIONS #35):
+    the same config + seed produces the identical simulation history at
+    every cadence; only the number of recorded data points changes.
+
+    Attributes:
+        recording_cadence: When an asynchronous run emits a period record —
+            ``"per_generation_equivalent"`` (at each integer crossing of
+            the event-time clock, comparable to a synchronous run),
+            ``"per_event"`` (after every event; maximum resolution,
+            largest files), or ``"every_m_events"`` (after every m-th
+            event). Ignored by synchronous runs, which always record once
+            per generation (the DECISIONS #34 pattern).
+        recording_cadence_m: The m for ``"every_m_events"``; ignored under
+            the other cadences (#34).
+    """
+
+    _registry_keys: ClassVar[dict[str, str]] = {
+        "recording_cadence": "output.recording_cadence",
+        "recording_cadence_m": "output.recording_cadence_m",
+    }
+
+    recording_cadence: str = _registry_field("output.recording_cadence")
+    recording_cadence_m: int = _registry_field("output.recording_cadence_m")
+
+
 class ExperimentConfig(_RegistryBackedModel):
     """The complete, validated description of one simulation run.
 
@@ -580,6 +612,8 @@ class ExperimentConfig(_RegistryBackedModel):
         match: Match length mode and noise.
         population: Size, memory constraint, and initial strategy mix.
         dynamics: Selection and mutation settings.
+        output: Recording cadence — what the run records, never what it
+            simulates (M10b; consumed by asynchronous runs only, #34).
         strategy_params: Optional per-run strategy parameter overrides, as a
             mapping of strategy machine name → ``{parameter: value}``, e.g.
             ``{"random": {"cooperation_probability": 0.9}}``. Omitted
@@ -610,6 +644,7 @@ class ExperimentConfig(_RegistryBackedModel):
     match: MatchConfig = Field(default_factory=MatchConfig)
     population: PopulationConfig
     dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
     strategy_params: dict[str, dict[str, registry.ParamValue]] = Field(default_factory=dict)
 
     @model_validator(mode="after")

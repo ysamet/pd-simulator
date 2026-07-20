@@ -1211,6 +1211,57 @@ register(
 )
 
 # ---------------------------------------------------------------------------
+# Output — what the run RECORDS, never what it simulates (M10b spec Design 6)
+# ---------------------------------------------------------------------------
+
+register(
+    ParameterSpec(
+        key="output.recording_cadence",
+        kind="choice",
+        default="per_generation_equivalent",
+        choices=("per_generation_equivalent", "per_event", "every_m_events"),
+        label="Recording cadence",
+        section="Output",
+        description=(
+            "How often an asynchronous run writes a data point (a 'recording "
+            "period') to its charts and saved files. This is purely an "
+            "observer control: it changes what gets RECORDED, never what "
+            "happens in the simulation — the same seed produces the exact "
+            "same history at every cadence. 'per_generation_equivalent' "
+            "records once each time the event-time clock crosses a whole "
+            "number — one point per generation-equivalent, directly "
+            "comparable to a synchronous run and the sanest file size. "
+            "'per_event' records after every single event — maximum "
+            "resolution, but files and charts grow with every event played, "
+            "so expect large outputs on long runs. 'every_m_events' records "
+            "after every m-th event (m is the parameter below) — the "
+            "middle ground. Only read under the asynchronous time model; "
+            "synchronous runs always record once per generation."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="output.recording_cadence_m",
+        kind="int",
+        default=1,
+        minimum=1,
+        maximum=1_000_000,
+        label="Events per recording (m)",
+        section="Output",
+        description=(
+            "How many events pass between recordings when the recording "
+            "cadence is 'every_m_events': a data point is written after "
+            "every m-th event. At 1 this is the same as recording per "
+            "event; larger values thin the record out — with N agents, "
+            "m = N lands close to one point per generation-equivalent. "
+            "Only read when the cadence is 'every_m_events'."
+        ),
+    )
+)
+
+# ---------------------------------------------------------------------------
 # Run control (docs/DESIGN.md §2.8)
 # ---------------------------------------------------------------------------
 

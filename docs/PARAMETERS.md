@@ -400,6 +400,24 @@ Let agents copy each other's strategies on top of whatever the population is alr
 
 *Learn more:* Pairwise-comparison imitation is the standard cultural-evolution counterpart to birth-death dynamics: strategies spread by being copied by the living rather than by out-reproducing the dead.
 
+### Output
+
+#### `output.recording_cadence` — Recording cadence
+
+- **Type:** choice
+- **Allowed values:** one of: `per_generation_equivalent`, `per_event`, `every_m_events`
+- **Default:** `per_generation_equivalent`
+
+How often an asynchronous run writes a data point (a 'recording period') to its charts and saved files. This is purely an observer control: it changes what gets RECORDED, never what happens in the simulation — the same seed produces the exact same history at every cadence. 'per_generation_equivalent' records once each time the event-time clock crosses a whole number — one point per generation-equivalent, directly comparable to a synchronous run and the sanest file size. 'per_event' records after every single event — maximum resolution, but files and charts grow with every event played, so expect large outputs on long runs. 'every_m_events' records after every m-th event (m is the parameter below) — the middle ground. Only read under the asynchronous time model; synchronous runs always record once per generation.
+
+#### `output.recording_cadence_m` — Events per recording (m)
+
+- **Type:** whole number
+- **Allowed values:** 1 to 1e+06
+- **Default:** `1`
+
+How many events pass between recordings when the recording cadence is 'every_m_events': a data point is written after every m-th event. At 1 this is the same as recording per event; larger values thin the record out — with N agents, m = N lands close to one point per generation-equivalent. Only read when the cadence is 'every_m_events'.
+
 ### Run
 
 #### `run.mode` — Run mode

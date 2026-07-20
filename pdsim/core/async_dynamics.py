@@ -13,7 +13,9 @@ generation-equivalent each agent is focal once on average and drawn ≈ k
 times — the same ≈ 2k interaction budget as a synchronous ``random_k``
 generation (spec Design 0).
 
-Phase A-C scope: the event loop, the clock, the event-time ledger, both
+Phase A-D scope: the event loop, the clock, the event-time ledger, the
+recording cadence (``output.recording_cadence`` — spec Design 6, an
+observer control deciding when period reports are emitted), and both
 demographic engines — ``variable_n`` (θ-births through the Option B seam
 ``admit_births`` / ``place_offspring`` [DECISIONS #89b], insolvency
 deaths, and the mortality trio in event-time) and ``fixed_n`` (classic
@@ -202,9 +204,15 @@ class AsyncDynamics:
             agent.agent_id: -float(age) for agent, age in zip(founders, stagger, strict=True)
         }
         self._breeding_anchor: dict[int, float] = {a.agent_id: 0.0 for a in founders}
-        # Recording state: period index, next integer boundary (Phase A
-        # emits at the per_generation_equivalent cadence), and the window
-        # accumulators the period report is built from.
+        # Recording state (spec Design 6): the cadence decides when a
+        # period report is emitted — an OBSERVER control (#35): it consumes
+        # no RNG and never touches the simulation, but it lives in the
+        # config because it decides what the persisted record contains.
+        # `_next_boundary` is the next integer clock crossing (used only
+        # under per_generation_equivalent); the window accumulators below
+        # are what each period report is built from.
+        self._cadence = config.output.recording_cadence
+        self._cadence_m = config.output.recording_cadence_m
         self._period = 0
         self._next_boundary = 1.0
         self._window_payoff: dict[str, float] = {}
@@ -269,8 +277,8 @@ class AsyncDynamics:
             on_match: Optional read-only match observer.
 
         Returns:
-            A period report if this event crossed a recording boundary,
-            else ``None``.
+            A period report if this event reached a recording point under
+            ``output.recording_cadence`` (spec Design 6), else ``None``.
         """
         n = len(self._population)
         # Clock first (spec Design 5): Δt uses N at event start — the event
@@ -310,6 +318,12 @@ class AsyncDynamics:
         self._event_index += 1
         self._window_events += 1
 
+        # 6. Period emission per the recording cadence (spec Design 6) —
+        # observer-only (#35): no RNG, no influence on the simulation.
+        if self._cadence == "per_event":
+            return self._emit_period()
+        if self._cadence == "every_m_events":
+            return self._emit_period() if self._window_events >= self._cadence_m else None
         if self._time >= self._next_boundary - _EPS:
             self._next_boundary += 1.0
             return self._emit_period()

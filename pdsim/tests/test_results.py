@@ -20,6 +20,7 @@ from pdsim.config.experiment import ExperimentConfig, load_config
 from pdsim.core import engine
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import (
+    PER_AGENT_SCHEMA_VERSION,
     PER_STRATEGY_SCHEMA_VERSION,
     SCHEMA_VERSION,
     RunRecorder,
@@ -142,8 +143,8 @@ class TestSchemaGuards:
         """The run card fields and the schema stamp are all present.
 
         An imitation run has no per-agent data, so it writes schema 2 —
-        byte-identical to pre-M10a recordings (M10a principle 2); only
-        energy-economy runs write ``SCHEMA_VERSION`` (3).
+        byte-identical to pre-M10a recordings (M10a principle 2); economy
+        runs write 3, and only async runs write ``SCHEMA_VERSION`` (4).
         """
         folder, _ = _record(_config(), tmp_path, scenario="my_scenario")
         summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
@@ -340,11 +341,16 @@ class TestEconomyPersistence:
     """M10a schema 3: agents.parquet, the summary fields, and the loader."""
 
     def test_economy_run_writes_schema_3_with_agents_parquet(self, tmp_path: Path) -> None:
-        """The per-agent sibling table and the honest version stamp."""
+        """The per-agent sibling table and the honest version stamp.
+
+        A SYNCHRONOUS economy run has per-agent data but no event-time
+        data, so it keeps writing 3 under M10b code — byte-identical to
+        M10a recordings (the honest-presence rule, #83).
+        """
         folder, live = _record(_economy_config(), tmp_path)
         assert (folder / "agents.parquet").is_file()
         summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
-        assert summary["schema_version"] == SCHEMA_VERSION
+        assert summary["schema_version"] == PER_AGENT_SCHEMA_VERSION
         assert summary["population_final"] == len(live.agent_snapshots[-1])
         max_id = max(s.agent_id for snapshot in live.agent_snapshots for s in snapshot)
         assert summary["total_agents_born"] == max_id + 1
@@ -403,3 +409,179 @@ class TestEconomyPersistence:
         assert get_metric("final_share").compute(loaded, strategy="tit_for_tat") is not None
         assert get_metric("fixation_flag").compute(loaded, strategy="tit_for_tat") is not None
         assert get_metric("final_cooperation").compute(loaded) is not None
+
+
+def _async_config(
+    output_overrides: dict[str, object] | None = None, **dynamics_overrides: object
+) -> ExperimentConfig:
+    """Build a small asynchronous config for persistence tests (M10b).
+
+    The defaults (variable_n economy, imitation overlay on, unpayable
+    living cost off) produce births, insolvency deaths, AND imitation
+    copies within 4 generation-equivalents, so all three explicit-event
+    channels have rows to persist.
+
+    Args:
+        output_overrides: Optional ``output`` section fields (the
+            recording cadence under test).
+        **dynamics_overrides: Extra dynamics fields.
+
+    Returns:
+        A validated async config (seed 7).
+    """
+    dynamics: dict[str, object] = {
+        "generations": 4,
+        "time_model": "asynchronous",
+        "imitation_overlay": True,
+        "reproduction_threshold": 60.0,
+        "offspring_stake": 50.0,
+        "basic_living_cost": 25.0,
+        "carrying_capacity": 30,
+        "mutation_rate": 0.0,
+    }
+    dynamics.update(dynamics_overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 7,
+            "population": {
+                "size": 10,
+                "composition": {"tit_for_tat": 5, "always_defect": 5},
+            },
+            "matching": {"matcher": "random_k", "opponents_per_agent": 2},
+            "match": {"length_mode": "fixed", "rounds_per_match": 4},
+            "dynamics": dynamics,
+            "output": output_overrides or {},
+        }
+    )
+
+
+class TestAsyncPersistence:
+    """M10b schema 4: the event-time sibling tables and the loader (#83)."""
+
+    def test_async_run_writes_schema_4_with_event_tables(self, tmp_path: Path) -> None:
+        """The honest version stamp and the sibling tables that have rows."""
+        folder, live = _record(_async_config(), tmp_path)
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == SCHEMA_VERSION
+        assert "# schema_version: 4" in (folder / "config.yaml").read_text(encoding="utf-8")
+        assert (folder / "periods.parquet").is_file()
+        # The seed-7 fixture fires all three channels (verified below), so
+        # all three tables exist.
+        flat = [event for events in live.demographic_events for event in events]
+        assert {type(event).__name__ for event in flat} == {
+            "BirthEvent",
+            "DeathEvent",
+            "ImitationEvent",
+        }
+        assert (folder / "births.parquet").is_file()
+        assert (folder / "deaths.parquet").is_file()
+        assert (folder / "imitations.parquet").is_file()
+
+    def test_async_round_trip_reconstructs_event_time_series(self, tmp_path: Path) -> None:
+        """Loading refeeds the same code the live run used (#47/#65).
+
+        The demographic events compare as full tuples per period, so this
+        also pins the loader's re-interleaving of the three tables back
+        into occurrence order (imitation < death < birth within an event).
+        """
+        folder, live = _record(_async_config(), tmp_path)
+        loaded = load_run(folder).timeseries
+        assert loaded.periods == live.periods
+        assert loaded.gen_equiv_times == live.gen_equiv_times
+        assert loaded.demographic_events == live.demographic_events
+        assert loaded.agent_snapshots == live.agent_snapshots
+        assert loaded.composition == live.composition
+        assert loaded.mean_scores == live.mean_scores
+        assert loaded.cooperation_pairs == live.cooperation_pairs
+        assert loaded.final == live.final
+
+    def test_moran_round_trip_preserves_death_before_birth(self, tmp_path: Path) -> None:
+        """fixed_n pairs one death with one birth at the SAME event index.
+
+        The two land in different parquet files, so this is the sharpest
+        test of the loader's occurrence-order merge: every replacement
+        must come back as death-then-birth, exactly as emitted.
+        """
+        folder, live = _record(
+            _async_config(
+                imitation_overlay=False,
+                async_population="fixed_n",
+                moran_rule="death_birth",
+                fixed_n_death_rule="pure_random",
+            ),
+            tmp_path,
+        )
+        loaded = load_run(folder).timeseries
+        assert loaded.demographic_events == live.demographic_events
+        flat = [event for events in loaded.demographic_events for event in events]
+        assert flat, "the Moran engine replaces every event — events expected"
+        pairs = list(zip(flat[::2], flat[1::2], strict=True))
+        for death, birth in pairs:
+            assert death.event_index == birth.event_index
+            assert type(death).__name__ == "DeathEvent"
+            assert type(birth).__name__ == "BirthEvent"
+
+    def test_extinct_async_run_round_trips_with_closing_deaths(self, tmp_path: Path) -> None:
+        """Extinction's final partial period survives the round trip.
+
+        That period has NO per-strategy rows (its population is empty at
+        the recording point) — the loader's union-of-periods path must
+        still deliver its closing deaths and clock stamp.
+        """
+        folder, live = _record(
+            _async_config(imitation_overlay=False, basic_living_cost=60.0), tmp_path
+        )
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["population_final"] == 0
+        assert "extinct" in summary["headline"]
+        assert live.demographic_events[-1], "extinction's closing deaths reach the stream"
+        loaded = load_run(folder).timeseries
+        assert loaded.periods == live.periods
+        assert loaded.gen_equiv_times == live.gen_equiv_times
+        assert loaded.demographic_events == live.demographic_events
+        assert loaded.agent_snapshots == live.agent_snapshots
+        assert loaded.final == live.final
+
+    def test_sync_folders_gain_no_event_time_files(self, tmp_path: Path) -> None:
+        """The honest-presence rule (#83) protects sync byte-identity.
+
+        Synchronous output must be byte-identical to pre-M10b recordings,
+        so no event-time sibling table may appear in a synchronous folder.
+        """
+        for config in (_config(), _economy_config()):
+            folder, _ = _record(config, tmp_path)
+            for name in ("births", "deaths", "imitations", "periods"):
+                assert not (folder / f"{name}.parquet").exists()
+
+    def test_schema_3_folder_loads_without_async_views(self, tmp_path: Path) -> None:
+        """Missing sibling files read as the empty shape (#65).
+
+        A sync economy folder loads with no clock stamps and no
+        demographic events — it simply renders without the async views.
+        """
+        folder, _ = _record(_economy_config(), tmp_path)
+        loaded = load_run(folder).timeseries
+        assert loaded.gen_equiv_times == [None] * len(loaded.periods)
+        assert loaded.demographic_events == [()] * len(loaded.periods)
+
+    def test_per_event_cadence_persists_more_periods(self, tmp_path: Path) -> None:
+        """V4's headless counterpart: density changes, content does not.
+
+        The cadence changes how often the record samples the run, never
+        the run itself — the same seed reaches the same final population
+        however often it is sampled.
+        """
+        coarse_folder, coarse = _record(_async_config(), tmp_path)
+        fine_folder, fine = _record(
+            _async_config(output_overrides={"recording_cadence": "per_event"}), tmp_path
+        )
+        assert len(fine.periods) > len(coarse.periods)
+        # RunFinished.completed and the last window's mean scores follow
+        # the cadence grain (documented in the spec); the simulation
+        # itself — who is alive at the end — does not.
+        assert fine.final is not None and coarse.final is not None
+        assert fine.final.composition == coarse.final.composition
+        assert fine.agent_snapshots[-1] == coarse.agent_snapshots[-1]
+        # Both folders load back exactly (the round-trip is cadence-blind).
+        assert load_run(coarse_folder).timeseries.periods == coarse.periods
+        assert load_run(fine_folder).timeseries.periods == fine.periods

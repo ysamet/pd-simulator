@@ -27,7 +27,7 @@ from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
 # its parameters live at the top level of the config (DECISIONS #34).
-_SECTIONS = ("game", "matching", "match", "population", "dynamics")
+_SECTIONS = ("game", "matching", "match", "population", "dynamics", "output")
 
 IGNORED_IN_TOURNAMENT = (
     "dynamics.generations",

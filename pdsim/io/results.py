@@ -22,6 +22,15 @@ code — chart HTML export is driven by the CLI/UI layers through
                             run produced snapshots (energy-economy runs);
                             births/deaths are reconstructed by diff, so no
                             born/died flags (raw-not-derived, #47)
+        births.parquet      RAW explicit birth rows (schema 4 — M10b);
+        deaths.parquet      likewise deaths;
+        imitations.parquet  likewise imitation-overlay strategy copies.
+                            Async runs only, each written only when it has
+                            rows — the exact intra-period timing and causes
+                            that snapshots diff away (spec Design 7)
+        periods.parquet     the period -> generation-equivalent-clock
+                            mapping (schema 4; async runs only) — the
+                            x-axis of every event-time chart
         summary.json        schema_version, mode, final standings, and
                             everything a run card needs without opening
                             the parquet
@@ -29,17 +38,20 @@ code — chart HTML export is driven by the CLI/UI layers through
 
 plus one appended row in ``runs/index.csv`` cataloguing every run.
 
-Schema guard (DESIGN §8, DECISIONS #46/#47/#65): ``summary.json`` carries
-``schema_version``. Loaders accept 1, 2, AND 3 — a schema-1 folder simply
-has no cooperation data and renders without the cooperation chart, a
+Schema guard (DESIGN §8, DECISIONS #46/#47/#65/#83): ``summary.json``
+carries ``schema_version``. Loaders accept 1 THROUGH 4 — a schema-1 folder
+simply has no cooperation data and renders without the cooperation chart, a
 schema-1/2 folder has no per-agent data and renders without the economy
-charts; versions above 3 are rejected. The version tracks the presence of
-per-agent data: an imitation run under M10a code still writes schema 2 (and
-no ``agents.parquet``), so pre-M10a recordings and new imitation recordings
-are indistinguishable — which is exactly the byte-identity promise. The
-per-strategy table is named ``timeseries.parquet`` so sibling tables can sit
-alongside without a breaking migration — exactly how ``cooperation.parquet``
-arrived in schema 2 and ``agents.parquet`` in schema 3.
+charts, a schema ≤ 3 folder has no event-time data and renders without the
+async views; versions above 4 are rejected. The version tracks the
+presence of data (the honest-presence rule, #83): only an asynchronous run
+produces event-time data and writes 4; a synchronous energy-economy run
+still writes 3 and a synchronous imitation run still writes 2, each
+byte-identical to what earlier code recorded. The per-strategy table is
+named ``timeseries.parquet`` so sibling tables can sit alongside without a
+breaking migration — exactly how ``cooperation.parquet`` arrived in schema
+2, ``agents.parquet`` in schema 3, and the four event-time tables in
+schema 4.
 
 Concurrency note: appending to ``runs/index.csv`` is not guarded against
 concurrent writers; simultaneous recording from multiple processes may
@@ -64,23 +76,44 @@ import pandas as pd
 
 import pdsim
 from pdsim.config.experiment import ExperimentConfig, load_config, save_config
-from pdsim.core.events import AgentSnapshot, CycleFinished, Event, GenerationFinished, RunFinished
+from pdsim.core.events import (
+    AgentSnapshot,
+    BirthEvent,
+    CycleFinished,
+    DeathEvent,
+    DemographicEvent,
+    Event,
+    GenerationFinished,
+    ImitationEvent,
+    RunFinished,
+)
 from pdsim.core.timeseries import RunTimeseries
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 """Bump on any breaking change to the folder layout or file schemas.
 
 History: 1 = M7 original; 2 = M9b adds ``cooperation.parquet`` and the
 ``final_cooperation_rate`` summary field (DECISIONS #65); 3 = M10a adds
-``agents.parquet``, ``total_agents_born``, and ``population_final``.
+``agents.parquet``, ``total_agents_born``, and ``population_final``;
+4 = M10b adds the four event-time tables (``births.parquet``,
+``deaths.parquet``, ``imitations.parquet``, ``periods.parquet``).
+"""
+
+PER_AGENT_SCHEMA_VERSION = 3
+"""What a run with per-agent data but NO event-time data writes.
+
+Synchronous energy-economy runs under M10b code: they produce snapshots
+(``agents.parquet``) but no event-time clock or explicit demographic
+events, so they keep declaring schema 3, byte-identical to M10a
+recordings (the honest-presence rule, #83).
 """
 
 PER_STRATEGY_SCHEMA_VERSION = 2
-"""What a run WITHOUT per-agent data writes (imitation runs under M10a code).
+"""What a run WITHOUT per-agent data writes (synchronous imitation runs).
 
-The schema version tracks the presence of per-agent data: only runs that
-produced snapshots (energy-economy runs) write ``agents.parquet`` and
-declare schema 3; everything else keeps writing 2, byte-identical to
+The schema version tracks the presence of data: only runs that produced
+snapshots (energy-economy runs) write ``agents.parquet`` and declare
+schema 3 or higher; everything else keeps writing 2, byte-identical to
 pre-M10a recordings.
 """
 
@@ -108,6 +141,48 @@ AGENTS_COLUMNS = (
 not G−1 was born at G, any id present at G−1 but not G died during G, so
 the birth/death record is derivable by diff (raw-not-derived, #47).
 """
+
+BIRTHS_COLUMNS = (
+    "period",
+    "event_index",
+    "gen_equiv_time",
+    "agent_id",
+    "parent_id",
+    "strategy",
+    "energy",
+    "cause",
+)
+"""Columns of ``births.parquet``, one row per explicit birth (schema 4).
+
+``parent_id`` is stored as a nullable integer (pandas ``Int64``) like its
+``agents.parquet`` counterpart, though every recorded birth has a parent.
+"""
+
+DEATHS_COLUMNS = (
+    "period",
+    "event_index",
+    "gen_equiv_time",
+    "agent_id",
+    "cause",
+)
+"""Columns of ``deaths.parquet``, one row per explicit death (schema 4)."""
+
+IMITATIONS_COLUMNS = (
+    "period",
+    "event_index",
+    "gen_equiv_time",
+    "agent_id",
+    "source_agent_id",
+    "from_strategy",
+    "to_strategy",
+)
+"""Columns of ``imitations.parquet``, one row per strategy copy (schema 4)."""
+
+PERIODS_COLUMNS = (
+    "period",
+    "gen_equiv_time",
+)
+"""Columns of ``periods.parquet``: the period -> event-time clock mapping."""
 
 INDEX_COLUMNS = (
     "run_id",
@@ -249,15 +324,18 @@ class RunRecorder:
         config_path = save_config(config, self.folder / "config.yaml")
         # The header comment anticipates the schema from the config (the
         # comment is written up front, before any event arrives): only an
-        # energy-economy evolution run produces per-agent data and schema 3;
-        # everything else keeps writing 2, so imitation configs stay
-        # byte-identical to pre-M10a recordings. summary.json's version is
-        # decided at finalize time from the data actually recorded.
-        anticipated = (
-            SCHEMA_VERSION
-            if config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy"
-            else PER_STRATEGY_SCHEMA_VERSION
-        )
+        # asynchronous evolution run produces event-time data and schema 4;
+        # only a synchronous energy-economy evolution run produces per-agent
+        # data (and no event-time data) and schema 3; everything else keeps
+        # writing 2, so imitation configs stay byte-identical to pre-M10a
+        # recordings. summary.json's version is decided at finalize time
+        # from the data actually recorded (the honest-presence rule, #83).
+        if config.mode == "evolution" and config.dynamics.time_model == "asynchronous":
+            anticipated = SCHEMA_VERSION
+        elif config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy":
+            anticipated = PER_AGENT_SCHEMA_VERSION
+        else:
+            anticipated = PER_STRATEGY_SCHEMA_VERSION
         # YAML comments carry the code version without breaking load_config
         # (extra *keys* would be rejected by the strict schema — comments
         # are invisible to the parser; DECISIONS #47).
@@ -308,6 +386,8 @@ class RunRecorder:
         self._write_parquet()
         self._write_cooperation_parquet()
         self._write_agents_parquet()
+        self._write_demographic_parquets()
+        self._write_periods_parquet()
         summary = self._write_summary()
         if self._append_index:
             self._append_index_row(summary)
@@ -322,6 +402,19 @@ class RunRecorder:
             version, and the economy summary fields.
         """
         return any(self.timeseries.agent_snapshots)
+
+    def _has_event_time_data(self) -> bool:
+        """Whether this run produced event-time data (M10b, schema 4).
+
+        Returns:
+            True if any period carries a generation-equivalent clock stamp
+            — only asynchronous runs do (synchronous ones leave the stamp
+            ``None``, the honest "this run has no event-time clock"). The
+            single predicate behind ``periods.parquet`` and the schema-4
+            version (the honest-presence rule, #83); the three demographic
+            tables are additionally gated on having rows at all.
+        """
+        return any(t is not None for t in self.timeseries.gen_equiv_times)
 
     def _write_parquet(self) -> None:
         """Write the raw per-period, per-strategy table (DECISIONS #47).
@@ -349,7 +442,13 @@ class RunRecorder:
                         "rounds_played": series.rounds_played[name][i],
                     }
                 )
-        pd.DataFrame(rows).to_parquet(self.folder / "timeseries.parquet", index=False)
+        # Explicit columns so even a run with NO per-strategy rows (an async
+        # run extinct within its first recording period) writes a well-formed
+        # empty table the loader can still group by period.
+        columns = ["period", "strategy", "agents", "mean_score", "total_score", "rounds_played"]
+        pd.DataFrame(rows, columns=columns).to_parquet(
+            self.folder / "timeseries.parquet", index=False
+        )
 
     def _write_cooperation_parquet(self) -> None:
         """Write the raw per-period, per-pair cooperation table (schema 2).
@@ -410,6 +509,77 @@ class RunRecorder:
         frame["parent_id"] = frame["parent_id"].astype("Int64")
         frame.to_parquet(self.folder / "agents.parquet", index=False)
 
+    def _write_demographic_parquets(self) -> None:
+        """Write the raw explicit-event tables (schema 4, spec Design 10).
+
+        One row per birth/death/imitation, in occurrence order within each
+        period (the stored row order IS the occurrence order — the loader
+        relies on it when re-interleaving the three files). Each table is
+        written only when it has rows, so a synchronous run — or an async
+        run in which that channel never fired — adds no files, and the
+        missing file reads back as the empty shape (#65).
+        """
+        series = self.timeseries
+        births, deaths, imitations = [], [], []
+        for period, events in zip(series.periods, series.demographic_events, strict=True):
+            for event in events:
+                stamp = {
+                    "period": period,
+                    "event_index": event.event_index,
+                    "gen_equiv_time": event.gen_equiv_time,
+                    "agent_id": event.agent_id,
+                }
+                if isinstance(event, BirthEvent):
+                    births.append(
+                        stamp
+                        | {
+                            "parent_id": event.parent_id,
+                            "strategy": event.strategy,
+                            "energy": event.energy,
+                            "cause": event.cause,
+                        }
+                    )
+                elif isinstance(event, DeathEvent):
+                    deaths.append(stamp | {"cause": event.cause})
+                else:
+                    imitations.append(
+                        stamp
+                        | {
+                            "source_agent_id": event.source_agent_id,
+                            "from_strategy": event.from_strategy,
+                            "to_strategy": event.to_strategy,
+                        }
+                    )
+        if births:
+            frame = pd.DataFrame(births, columns=list(BIRTHS_COLUMNS))
+            # Nullable integer dtype, mirroring agents.parquet's parent_id.
+            frame["parent_id"] = frame["parent_id"].astype("Int64")
+            frame.to_parquet(self.folder / "births.parquet", index=False)
+        if deaths:
+            frame = pd.DataFrame(deaths, columns=list(DEATHS_COLUMNS))
+            frame.to_parquet(self.folder / "deaths.parquet", index=False)
+        if imitations:
+            frame = pd.DataFrame(imitations, columns=list(IMITATIONS_COLUMNS))
+            frame.to_parquet(self.folder / "imitations.parquet", index=False)
+
+    def _write_periods_parquet(self) -> None:
+        """Write the period -> event-time clock mapping (schema 4).
+
+        One row per recording period; the x-axis every event-time chart
+        needs. Written only when the run produced event-time data —
+        asynchronous runs stamp every period, synchronous runs none, so
+        this is all-or-nothing per run (the honest-presence rule, #83).
+        """
+        if not self._has_event_time_data():
+            return
+        series = self.timeseries
+        rows = [
+            {"period": period, "gen_equiv_time": stamp}
+            for period, stamp in zip(series.periods, series.gen_equiv_times, strict=True)
+        ]
+        frame = pd.DataFrame(rows, columns=list(PERIODS_COLUMNS))
+        frame.to_parquet(self.folder / "periods.parquet", index=False)
+
     def _write_summary(self) -> dict[str, object]:
         """Write summary.json — everything a run card needs.
 
@@ -427,10 +597,18 @@ class RunRecorder:
         assert final is not None  # guarded by finalize()
         has_agents = self._has_agent_data()
         snapshots = self.timeseries.agent_snapshots
+        # The version tracks the presence of data (the honest-presence
+        # rule, #83): event-time data -> 4 (async runs), per-agent data
+        # only -> 3 (sync economy runs, byte-identical to M10a), neither
+        # -> 2 (sync imitation runs, byte-identical to pre-M10a).
+        if self._has_event_time_data():
+            version = SCHEMA_VERSION
+        elif has_agents:
+            version = PER_AGENT_SCHEMA_VERSION
+        else:
+            version = PER_STRATEGY_SCHEMA_VERSION
         summary: dict[str, object] = {
-            # The version tracks the presence of per-agent data (M10a):
-            # imitation runs keep writing 2, byte-identical to pre-M10a.
-            "schema_version": SCHEMA_VERSION if has_agents else PER_STRATEGY_SCHEMA_VERSION,
+            "schema_version": version,
             "run_id": self.folder.name,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "code_version": self._version,
@@ -515,7 +693,9 @@ def load_run(folder: Path | str) -> LoadedRun:
     """Load a recorded run folder back into memory.
 
     Rebuilds the period events from the raw parquet rows and refeeds a
-    fresh :class:`RunTimeseries`, so every derived view (per-round means,
+    fresh :class:`RunTimeseries` — demographic events first, in occurrence
+    order, then each period's ``GenerationFinished`` (the live stream's
+    order, spec Design 7) — so every derived view (per-round means,
     whole-game running averages) is recomputed by the exact same code the
     live run used.
 
@@ -529,7 +709,8 @@ def load_run(folder: Path | str) -> LoadedRun:
         FileNotFoundError: If the folder or a required file is missing.
         ValueError: If the summary's schema version is newer than this
             code understands (older versions load fine — a schema-1 folder
-            simply has no cooperation data, DECISIONS #65).
+            simply has no cooperation data, a schema ≤ 3 folder no
+            event-time data, DECISIONS #65).
     """
     folder = Path(folder)
     summary: dict[str, object] = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
@@ -542,13 +723,14 @@ def load_run(folder: Path | str) -> LoadedRun:
     frame = pd.read_parquet(folder / "timeseries.parquet")
     cooperation_by_period = _read_cooperation(folder)
     agents_by_period = _read_agents(folder)
+    events_by_period = _read_demographic_events(folder)
+    period_times = _read_period_times(folder)
     timeseries = RunTimeseries(mode=str(summary["mode"]))
-    for period, group in frame.groupby("period", sort=True):
-        composition = dict(zip(group["strategy"], group["agents"].astype(int), strict=True))
-        mean_scores = dict(zip(group["strategy"], group["mean_score"], strict=True))
-        rounds = dict(zip(group["strategy"], group["rounds_played"].astype(int), strict=True))
-        cooperation = cooperation_by_period.get(int(period), {})
-        if timeseries.mode == "tournament":
+    if timeseries.mode == "tournament":
+        for period, group in frame.groupby("period", sort=True):
+            composition = dict(zip(group["strategy"], group["agents"].astype(int), strict=True))
+            mean_scores = dict(zip(group["strategy"], group["mean_score"], strict=True))
+            rounds = dict(zip(group["strategy"], group["rounds_played"].astype(int), strict=True))
             totals = dict(zip(group["strategy"], group["total_score"], strict=True))
             timeseries.add(
                 CycleFinished(
@@ -557,18 +739,39 @@ def load_run(folder: Path | str) -> LoadedRun:
                     total_scores=totals,
                     mean_scores=mean_scores,
                     rounds_played=rounds,
-                    cooperation=cooperation,
+                    cooperation=cooperation_by_period.get(int(period), {}),
                 )
             )
-        else:
+    else:
+        # The per-strategy table has no rows for a period whose population
+        # was extinct, but the schema-4 sibling tables can still know it
+        # (its closing deaths, its clock stamp) — so evolution periods are
+        # the UNION of what the tables mention. For sync folders the union
+        # is exactly the per-strategy periods, as before.
+        groups = {int(period): group for period, group in frame.groupby("period", sort=True)}
+        for period in sorted(set(groups) | set(period_times) | set(events_by_period)):
+            group = groups.get(period)
+            if group is None:  # extinct at this recording point: no rows
+                composition, mean_scores, rounds = {}, {}, {}
+            else:
+                composition = dict(zip(group["strategy"], group["agents"].astype(int), strict=True))
+                mean_scores = dict(zip(group["strategy"], group["mean_score"], strict=True))
+                rounds = dict(
+                    zip(group["strategy"], group["rounds_played"].astype(int), strict=True)
+                )
+            # Demographic events precede their period's closing event in
+            # the live stream (spec Design 7); refeed in the same order.
+            for event in events_by_period.get(period, ()):
+                timeseries.add(event)
             timeseries.add(
                 GenerationFinished(
-                    index=int(period),
+                    index=period,
                     composition=composition,
                     mean_scores=mean_scores,
                     rounds_played=rounds,
-                    cooperation=cooperation,
-                    agents=agents_by_period.get(int(period), ()),
+                    cooperation=cooperation_by_period.get(period, {}),
+                    agents=agents_by_period.get(period, ()),
+                    gen_equiv_time=period_times.get(period),
                 )
             )
     timeseries.add(
@@ -640,6 +843,106 @@ def _read_agents(folder: Path) -> dict[int, tuple[AgentSnapshot, ...]]:
             )
         )
     return {period: tuple(snapshots) for period, snapshots in by_period.items()}
+
+
+def _read_demographic_events(folder: Path) -> dict[int, tuple[DemographicEvent, ...]]:
+    """Read a run folder's explicit-event tables, if it has any (schema 4).
+
+    The three tables are re-interleaved into each period's occurrence
+    order. Within one interaction event, imitations happen during the
+    match bundle, deaths during the demographic step, births last (both
+    engines empty seats before filling them) — so a stable sort by
+    ``(event_index, kind)`` with kind ordered imitation < death < birth,
+    over rows appended in stored (occurrence) order per table, restores
+    the live stream's order exactly.
+
+    Args:
+        folder: The run folder.
+
+    Returns:
+        Per period: the demographic events in occurrence order. Empty for
+        schema ≤ 3 folders — the loader's compatibility path (#65): those
+        runs simply render without the async views. Each missing table
+        likewise reads as "that channel never fired".
+    """
+    by_period: dict[int, list[tuple[int, int, DemographicEvent]]] = {}
+
+    def collect(row_period: int, event_index: int, kind: int, event: DemographicEvent) -> None:
+        by_period.setdefault(row_period, []).append((event_index, kind, event))
+
+    path = folder / "imitations.parquet"
+    if path.is_file():
+        for row in pd.read_parquet(path).itertuples(index=False):
+            collect(
+                int(row.period),
+                int(row.event_index),
+                0,
+                ImitationEvent(
+                    agent_id=int(row.agent_id),
+                    from_strategy=str(row.from_strategy),
+                    to_strategy=str(row.to_strategy),
+                    source_agent_id=int(row.source_agent_id),
+                    event_index=int(row.event_index),
+                    gen_equiv_time=float(row.gen_equiv_time),
+                ),
+            )
+    path = folder / "deaths.parquet"
+    if path.is_file():
+        for row in pd.read_parquet(path).itertuples(index=False):
+            collect(
+                int(row.period),
+                int(row.event_index),
+                1,
+                DeathEvent(
+                    agent_id=int(row.agent_id),
+                    cause=str(row.cause),
+                    event_index=int(row.event_index),
+                    gen_equiv_time=float(row.gen_equiv_time),
+                ),
+            )
+    path = folder / "births.parquet"
+    if path.is_file():
+        for row in pd.read_parquet(path).itertuples(index=False):
+            collect(
+                int(row.period),
+                int(row.event_index),
+                2,
+                BirthEvent(
+                    agent_id=int(row.agent_id),
+                    parent_id=int(row.parent_id),
+                    strategy=str(row.strategy),
+                    energy=float(row.energy),
+                    cause=str(row.cause),
+                    event_index=int(row.event_index),
+                    gen_equiv_time=float(row.gen_equiv_time),
+                ),
+            )
+    return {
+        # sorted() is stable, so equal (event_index, kind) keys keep their
+        # per-table row order — which is the occurrence order they were
+        # written in.
+        period: tuple(event for _index, _kind, event in sorted(items, key=lambda t: t[:2]))
+        for period, items in by_period.items()
+    }
+
+
+def _read_period_times(folder: Path) -> dict[int, float]:
+    """Read a run folder's period -> clock mapping, if it has one (schema 4).
+
+    Args:
+        folder: The run folder.
+
+    Returns:
+        Per period: the generation-equivalent clock at that recording
+        point. Empty for schema ≤ 3 folders (synchronous runs have no
+        event-time clock) — the loader then stamps ``None``, exactly what
+        the live synchronous stream carried.
+    """
+    path = folder / "periods.parquet"
+    if not path.is_file():
+        return {}
+    frame = pd.read_parquet(path)
+    return {int(row.period): float(row.gen_equiv_time) for row in frame.itertuples(index=False)}
 
 
 def list_runs(out_dir: Path | str = "runs") -> list[dict[str, object]]:

@@ -9,12 +9,24 @@ imports, so the headless recorder may use it without violating hard rule 4.
 Only *period-level* events change the series: ``GenerationFinished`` and
 ``CycleFinished`` each append one column; ``RunFinished`` is kept for the
 final summary; ``RoundPlayed``/``MatchFinished`` are ignored here (consumers
-use them for progress display, not for time series).
+use them for progress display, not for time series). The explicit
+demographic events of an asynchronous run (M10b) are period-level truth
+too: they arrive immediately before their period's ``GenerationFinished``
+(spec Design 7), so they are buffered here and attached to the period that
+closes them — the raw rows the recorder persists as the schema-4 sibling
+tables.
 """
 
 from __future__ import annotations
 
-from pdsim.core.events import AgentSnapshot, CycleFinished, Event, GenerationFinished, RunFinished
+from pdsim.core.events import (
+    AgentSnapshot,
+    CycleFinished,
+    DemographicEvent,
+    Event,
+    GenerationFinished,
+    RunFinished,
+)
 
 
 class RunTimeseries:
@@ -67,6 +79,16 @@ class RunTimeseries:
             pre-schema-3 recordings, which is how charts know to skip the
             economy figures; once an economy run has recorded data, an
             EMPTY tuple for a later period is meaningful (extinction).
+        gen_equiv_times: The generation-equivalent clock at each recording
+            point, one value per period (M10b) — ``None`` throughout for
+            synchronous runs, which have no event-time clock. "Any value
+            non-None" is the single predicate behind the schema-4 sibling
+            tables and version (the honest-presence rule, #83).
+        demographic_events: The explicit birth/death/imitation events of
+            each period, one tuple per period in occurrence order (M10b) —
+            raw data the recorder persists as ``births.parquet`` /
+            ``deaths.parquet`` / ``imitations.parquet``. Always empty
+            tuples for synchronous runs, which emit none of these.
         mean_energy: Mean carried-forward energy per strategy, one value
             per period — a derived view over the snapshots (#47).
         mean_age: Mean entering age per strategy, one value per period —
@@ -95,6 +117,8 @@ class RunTimeseries:
         self.cooperation_by_strategy: dict[str, list[float | None]] = {}
         self.cooperation_overall: list[float | None] = []
         self.agent_snapshots: list[tuple[AgentSnapshot, ...]] = []
+        self.gen_equiv_times: list[float | None] = []
+        self.demographic_events: list[tuple[DemographicEvent, ...]] = []
         self.mean_energy: dict[str, list[float | None]] = {}
         self.mean_age: dict[str, list[float | None]] = {}
         self.final: RunFinished | None = None
@@ -102,6 +126,9 @@ class RunTimeseries:
         self._cumulative_scores: dict[str, float] = {}
         self._cumulative_agents: dict[str, int] = {}
         self._cumulative_rounds: dict[str, int] = {}
+        # Demographic events arrive BEFORE their period's closing event
+        # (spec Design 7), so they wait here until it lands.
+        self._pending_demographic: list[DemographicEvent] = []
 
     def add(self, event: Event) -> None:
         """Fold one event into the series (ignores fine-grained events).
@@ -110,8 +137,15 @@ class RunTimeseries:
             event: Any engine event; only period events and ``RunFinished``
                 have an effect.
         """
-        if isinstance(event, GenerationFinished):
+        if isinstance(event, DemographicEvent):
+            # isinstance accepts a union type directly (3.10+) — one check
+            # covers BirthEvent, DeathEvent, and ImitationEvent.
+            self._pending_demographic.append(event)
+        elif isinstance(event, GenerationFinished):
             self.periods.append(event.index)
+            self.gen_equiv_times.append(event.gen_equiv_time)
+            self.demographic_events.append(tuple(self._pending_demographic))
+            self._pending_demographic = []
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)
@@ -154,6 +188,11 @@ class RunTimeseries:
             self._fold_agents(event.agents)
         elif isinstance(event, CycleFinished):
             self.periods.append(event.index)
+            # Tournaments have no event-time clock and no demographic
+            # events; the aligned fills keep every per-period list the
+            # same length as `periods`, whatever the mode.
+            self.gen_equiv_times.append(None)
+            self.demographic_events.append(())
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)
