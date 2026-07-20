@@ -510,33 +510,33 @@ def _draw_charts(
         left_figure = charts.total_score_chart(timeseries)
     else:
         left_figure = charts.composition_chart(timeseries)
-    left.plotly_chart(left_figure, use_container_width=True, key=f"{key_prefix}_left_{draw_id}")
+    left.plotly_chart(left_figure, width="stretch", key=f"{key_prefix}_left_{draw_id}")
     right.plotly_chart(
         charts.mean_score_chart(timeseries, per_round=per_round, whole_game=whole_game),
-        use_container_width=True,
+        width="stretch",
         key=f"{key_prefix}_right_{draw_id}",
     )
     if timeseries.cooperation_overall:
         cooperation.plotly_chart(
             charts.cooperation_chart(timeseries),
-            use_container_width=True,
+            width="stretch",
             key=f"{key_prefix}_coop_{draw_id}",
         )
     if economy is not None and any(timeseries.agent_snapshots):
         population, energy, age = economy
         population.plotly_chart(
             charts.population_chart(timeseries, carrying_capacity),
-            use_container_width=True,
+            width="stretch",
             key=f"{key_prefix}_population_{draw_id}",
         )
         energy.plotly_chart(
             charts.mean_energy_chart(timeseries),
-            use_container_width=True,
+            width="stretch",
             key=f"{key_prefix}_energy_{draw_id}",
         )
         age.plotly_chart(
             charts.mean_age_chart(timeseries),
-            use_container_width=True,
+            width="stretch",
             key=f"{key_prefix}_age_{draw_id}",
         )
 
@@ -549,14 +549,14 @@ def _final_summary_area(timeseries: RunTimeseries) -> None:
     """
     if timeseries.final is None:
         return
-    st.dataframe(charts.final_summary_rows(timeseries.final), use_container_width=True)
+    st.dataframe(charts.final_summary_rows(timeseries.final), width="stretch")
     pair_rows = charts.cooperation_pair_rows(timeseries)
     if pair_rows:
         st.caption(
             "Cooperation by strategy pair (final period; actor's rate against "
             "that opponent — the M12 in-group/out-group diagnostic in table form)."
         )
-        st.dataframe(pair_rows, use_container_width=True)
+        st.dataframe(pair_rows, width="stretch")
 
 
 def _run_live(
@@ -752,7 +752,7 @@ def _results_browser() -> None:
             "record one headlessly: `python -m pdsim.run --scenario classic_tournament`."
         )
         return
-    st.dataframe(rows, use_container_width=True)
+    st.dataframe(rows, width="stretch")
     run_ids = [str(row["run_id"]) for row in rows]
     # A widget's own key may only be written BEFORE the widget exists in a
     # script run, so delete/rename stage the next selection under
@@ -1464,7 +1464,7 @@ def _sweep_monitor_area() -> None:
         )
         rows = sweep_helpers.status_rows(status)
         if rows:
-            st.dataframe(rows, use_container_width=True)
+            st.dataframe(rows, width="stretch")
     log_path = sweep_helpers.launch_log_path(SWEEPS_DIR, name)
     if log_path.is_file():
         with st.expander("Launch log"):
@@ -1504,7 +1504,7 @@ def _sweep_monitor_area() -> None:
                 labels = sweep_helpers.metric_display_labels(meta)
                 st.plotly_chart(
                     charts.sweep_metric_chart(frame, axis, metric, metric_label=labels.get(metric)),
-                    use_container_width=True,
+                    width="stretch",
                     key=f"monitor_chart#{name}",
                 )
     else:
