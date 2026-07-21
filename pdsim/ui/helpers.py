@@ -346,3 +346,34 @@ def validation_messages(error: ValidationError) -> list[str]:
             message = message.removeprefix(prefix)
         messages.append(message)
     return messages
+
+
+def should_redraw(now: float, last_redraw: float, delay: float, floor: float) -> bool:
+    """Decide whether the live view redraws its charts on this period.
+
+    The live loop accumulates data on EVERY period event, but redrawing is
+    throttled to wall clock (DECISIONS #94): each redraw tears down and
+    re-mounts every chart component in the browser (Streamlit requires a
+    fresh element key per redraw within one script run), and fast runs —
+    async event time especially — can finish periods far quicker than the
+    browser can paint them, leaving the charts blank between flashes.
+    Skipping a redraw leaves the PREVIOUS frame on screen untouched, which
+    is exactly the smooth behavior wanted; the skipped periods' data all
+    appear at the next redraw.
+
+    Args:
+        now: The current ``time.monotonic()`` reading.
+        last_redraw: The ``time.monotonic()`` reading taken right after the
+            previous redraw (0.0 before the first — so the first period
+            always draws).
+        delay: The playback-delay slider value in seconds; a larger delay
+            means the owner wants a slower slideshow, so it stretches the
+            throttle window too.
+        floor: The minimum seconds between redraws regardless of the
+            slider (the app's ``LIVE_REDRAW_MIN_SECONDS``).
+
+    Returns:
+        True when at least ``max(delay, floor)`` seconds have passed since
+        the previous redraw.
+    """
+    return now - last_redraw >= max(delay, floor)

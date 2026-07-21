@@ -13,11 +13,13 @@ negative parent), variable_n's mortality trio in event-time (birthday
 hazard coins, the deterministic age cap, founder staggering via negative
 birth_time), and the #34 validator gates the new parameters brought.
 
-Phase C: the imitation overlay (spec Design 4) — the unconditional
-per-match coin and its Design 8 step-3 position, the no-event-on-no-op
-rule, the lower-total (then lower-id) adopter, immediacy inside a bundle,
-the cultural/demographic split V2 makes visible, and the overlay's
-off-by-default silence that keeps both golden masters valid.
+Phase C: the imitation overlay (spec Design 4, adopter rule reconciled to
+symmetric in Phase E — DECISIONS #93) — the two unconditional per-match
+coins and their Design 8 step-3 positions, the no-event-on-no-op rule, the
+symmetric fair-coin adopter (downhill copies possible; β = 0 is true
+neutral drift), immediacy inside a bundle, the cultural/demographic split
+V2 makes visible, and the overlay's off-by-default silence that keeps
+both golden masters valid.
 
 Phase D: the recording cadence (spec Design 6) — observer-only (the same
 seed produces the identical simulation history at every cadence), the
@@ -911,33 +913,38 @@ def _imitation_config(
     )
 
 
-def _tied_match(agent_a: Agent, agent_b: Agent) -> MatchResult:
-    """Fabricate a finished match both participants tied in.
+def _lopsided_match(winner: Agent, loser: Agent, gap: float = 19.0) -> MatchResult:
+    """Fabricate a finished match one participant clearly won.
 
     Args:
-        agent_a: One participant.
-        agent_b: The other.
+        winner: The participant handed a total of 20.0.
+        loser: The participant handed a total of 20.0 − ``gap``.
+        gap: The score gap between the two totals (a negative gap hands
+            the "loser" the HIGHER total — useful for score-blindness
+            tests).
 
     Returns:
-        A transcript-free :class:`MatchResult` with equal totals — the
-        exact-tie corner the lower-id tie-break governs.
+        A transcript-free :class:`MatchResult` with unequal totals — the
+        score asymmetry the symmetric adopter rule must NOT read when
+        choosing the adopter (DECISIONS #93).
     """
     return MatchResult(
-        agent_ids=(agent_a.agent_id, agent_b.agent_id),
-        total_payoffs={agent_a.agent_id: 12.0, agent_b.agent_id: 12.0},
+        agent_ids=(winner.agent_id, loser.agent_id),
+        total_payoffs={winner.agent_id: 20.0, loser.agent_id: 20.0 - gap},
         rounds=(),
     )
 
 
-def test_imitation_coin_is_one_unconditional_draw_per_match() -> None:
-    """Design 8 step 3, pinned by exact stream replay.
+def test_imitation_coins_are_two_unconditional_draws_per_match() -> None:
+    """Design 8 step 3 as re-pinned by #93, pinned by exact stream replay.
 
     A homogeneous population makes every copy a no-op — and the coins are
     drawn anyway (the #80 active-flag idiom: the stream depends on the
-    flag and the match schedule, never on strategy states). With
+    flag and the match schedule, never on strategy states or scores). With
     deterministic strategies, no noise, fixed rounds and no demographics,
     one event's ENTIRE draw list is: the focal draw, the partner draw, and
-    exactly k adoption coins, in that order.
+    exactly two coins per match — the adopter-choice coin, then the
+    adoption coin — in that order.
     """
     dynamics = AsyncDynamics(_imitation_config(), np.random.default_rng(3))
     state_before = dynamics._rng.bit_generator.state
@@ -946,7 +953,9 @@ def test_imitation_coin_is_one_unconditional_draw_per_match() -> None:
     replay.bit_generator.state = state_before
     replay.integers(6)  # the focal draw
     replay.choice(5, size=2, replace=False)  # the partner draw (k = 2)
+    replay.random()  # match 1's adopter-choice coin
     replay.random()  # match 1's adoption coin
+    replay.random()  # match 2's adopter-choice coin
     replay.random()  # match 2's adoption coin
     assert dynamics._rng.bit_generator.state == replay.bit_generator.state
     # Every copy was a no-op, so the coins produced no events at all.
@@ -970,12 +979,16 @@ def test_overlay_off_draws_no_coin() -> None:
     assert dynamics._rng.bit_generator.state == replay.bit_generator.state
 
 
-def test_adopter_is_the_lower_scorer_not_the_lower_id() -> None:
-    """Score, not identity, decides who considers switching.
+def test_adopter_is_a_fair_coin_of_the_pair_not_the_loser() -> None:
+    """The adopter is DRAWN, never forced onto the loser (DECISIONS #93).
 
-    The lower-id agent wins the match by a wide margin, so at a high β the
-    coin lands with near-certainty on the HIGHER-id agent adopting — the
-    reverse of what an id-based rule would produce.
+    The lopsided match is replayed many times at a high β. Under the old
+    asymmetric rule the loser would adopt every single time; under the
+    symmetric rule the loser adopts only when the fair coin picks it as
+    the adopter (≈ half the replays), and when the coin picks the WINNER
+    instead, the downhill copy at β = 10 is vanishingly unlikely — so the
+    winner keeps its strategy throughout. Counts are pinned by the seed:
+    deterministic, not flaky.
     """
     dynamics = AsyncDynamics(
         _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=10.0),
@@ -983,68 +996,107 @@ def test_adopter_is_the_lower_scorer_not_the_lower_id() -> None:
     )
     winner = dynamics._population[0]
     loser = dynamics._population[5]
-    winner.strategy = create_strategy("always_defect")
-    loser.strategy = create_strategy("tit_for_tat")
-    result = MatchResult(
-        agent_ids=(winner.agent_id, loser.agent_id),
-        total_payoffs={winner.agent_id: 20.0, loser.agent_id: 1.0},
-        rounds=(),
-    )
-    dynamics._imitate(result, winner, loser)
-    assert strategy_name_of(loser.strategy) == "always_defect"
-    assert strategy_name_of(winner.strategy) == "always_defect"  # untouched
+    result = _lopsided_match(winner, loser)
+    loser_adoptions = 0
+    for _ in range(50):
+        winner.strategy = create_strategy("always_defect")
+        loser.strategy = create_strategy("tit_for_tat")
+        dynamics._imitate(result, winner, loser)
+        assert strategy_name_of(winner.strategy) == "always_defect"  # never downhill at β = 10
+        if strategy_name_of(loser.strategy) == "always_defect":
+            loser_adoptions += 1
+    # The loser adopts iff the choice coin picked it: strictly between
+    # never (the coin sometimes picks it, and uphill at β = 10 is near-
+    # certain) and always (the coin sometimes picks the winner instead).
+    assert 0 < loser_adoptions < 50
     events = [e for e in dynamics._pending if isinstance(e, ImitationEvent)]
-    assert [(e.agent_id, e.from_strategy, e.to_strategy, e.source_agent_id) for e in events] == [
-        (5, "tit_for_tat", "always_defect", 0)
-    ]
+    assert len(events) == loser_adoptions
+    assert all(
+        (e.agent_id, e.from_strategy, e.to_strategy, e.source_agent_id)
+        == (5, "tit_for_tat", "always_defect", 0)
+        for e in events
+    )
 
 
-def test_exact_tie_makes_the_lower_id_the_adopter() -> None:
-    """The tie-break is deterministic (principle 5), never a second draw.
+def test_downhill_copies_are_possible() -> None:
+    """A lower-scoring model CAN be copied — at probability < ½ (#93).
 
-    On an exact score tie the gap is 0, so the coin is a fair one — but
-    only ever for the LOWER-id agent: over many tied matches the higher-id
-    agent never changes strategy, whichever argument position it occupies.
+    At a small β the downhill probability ``logistic(−β·gap)`` is well
+    above zero, so over many replays the WINNER sometimes adopts the
+    loser's strategy — the flow the asymmetric rule hardwired to zero.
+    Both directions must occur (the seed pins the counts: deterministic).
     """
     dynamics = AsyncDynamics(
-        _imitation_config({"tit_for_tat": 3, "always_defect": 3}),
+        _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=0.1),
         np.random.default_rng(1),
     )
-    low, high = dynamics._population[0], dynamics._population[5]
-    result = _tied_match(low, high)
-    adoptions = 0
+    winner = dynamics._population[0]
+    loser = dynamics._population[5]
+    result = _lopsided_match(winner, loser, gap=5.0)
+    downhill = uphill = 0
     for _ in range(50):
-        low.strategy = create_strategy("tit_for_tat")
-        high.strategy = create_strategy("always_defect")
-        # Argument order deliberately reversed: the rule reads totals and
-        # ids, not who was focal.
-        dynamics._imitate(result, high, low)
-        assert strategy_name_of(high.strategy) == "always_defect"
-        if strategy_name_of(low.strategy) == "always_defect":
-            adoptions += 1
-    # A fair coin at gap 0: both outcomes occur (and the count is pinned by
-    # the seed, so this is deterministic, not flaky).
-    assert 0 < adoptions < 50
+        winner.strategy = create_strategy("always_defect")
+        loser.strategy = create_strategy("tit_for_tat")
+        dynamics._imitate(result, winner, loser)
+        if strategy_name_of(winner.strategy) == "tit_for_tat":
+            downhill += 1
+        if strategy_name_of(loser.strategy) == "always_defect":
+            uphill += 1
+    assert downhill > 0
+    assert uphill > 0
+
+
+def test_beta_zero_is_true_neutral_drift() -> None:
+    """β = 0 is a pure coin flip with NO score dependence at all (#93).
+
+    Two dynamics share a seed and β = 0 but see wildly different score
+    gaps — and produce the IDENTICAL adoption sequence, because at β = 0
+    neither the adopter choice nor the adoption coin reads the scores.
+    Both agents adopt at least once along the way: drift flows in both
+    directions, which is what the asymmetric rule could not do at any β.
+    """
+    outcomes: list[list[str | None]] = []
+    for gap in (19.0, -280.0):
+        dynamics = AsyncDynamics(
+            _imitation_config({"tit_for_tat": 3, "always_defect": 3}, selection_beta=0.0),
+            np.random.default_rng(5),
+        )
+        first = dynamics._population[0]
+        second = dynamics._population[5]
+        result = _lopsided_match(first, second, gap=gap)
+        sequence: list[str | None] = []
+        for _ in range(40):
+            first.strategy = create_strategy("tit_for_tat")
+            second.strategy = create_strategy("always_defect")
+            dynamics._imitate(result, first, second)
+            if strategy_name_of(first.strategy) == "always_defect":
+                sequence.append("first")
+            elif strategy_name_of(second.strategy) == "tit_for_tat":
+                sequence.append("second")
+            else:
+                sequence.append(None)
+        outcomes.append(sequence)
+    assert outcomes[0] == outcomes[1]
+    assert "first" in outcomes[0]
+    assert "second" in outcomes[0]
 
 
 def test_no_event_when_the_copy_changes_nothing() -> None:
-    """The coin is the RNG contract; the event is not (spec Design 4).
+    """The coins are the RNG contract; the event is not (spec Design 4).
 
-    Two agents already playing the same strategy still spend a coin, and
-    still emit nothing — a no-op copy is not an :class:`ImitationEvent`.
+    Two agents already playing the same strategy still spend both coins,
+    and still emit nothing — a no-op copy is not an
+    :class:`ImitationEvent`.
     """
     dynamics = AsyncDynamics(_imitation_config(selection_beta=10.0), np.random.default_rng(2))
     first, second = dynamics._population[0], dynamics._population[1]
-    result = MatchResult(
-        agent_ids=(first.agent_id, second.agent_id),
-        total_payoffs={first.agent_id: 20.0, second.agent_id: 1.0},
-        rounds=(),
-    )
+    result = _lopsided_match(first, second)
     state_before = dynamics._rng.bit_generator.state
     dynamics._imitate(result, first, second)
     replay = np.random.default_rng(2)
     replay.bit_generator.state = state_before
-    replay.random()  # the coin was spent even though the copy is a no-op
+    replay.random()  # the adopter-choice coin was spent...
+    replay.random()  # ...and the adoption coin too, though the copy is a no-op
     assert dynamics._rng.bit_generator.state == replay.bit_generator.state
     assert dynamics._pending == []
 
@@ -1055,14 +1107,17 @@ def test_adopted_strategy_plays_in_the_next_match_of_the_bundle() -> None:
     A strategy copied after one match is what plays in the next match of
     the same focal bundle: the cooperator adopts always-defect after
     losing match 1, and match 2 against a second defector is therefore
-    mutual defection, not exploitation.
+    mutual defection, not exploitation. Seed 2 is chosen so the
+    adopter-choice coin (first draw, 0.26 < ½) picks the FOCAL as the
+    adopter and the adoption coin (0.30) lands under the near-1 uphill
+    probability at β = 10.
     """
     dynamics = AsyncDynamics(
         _imitation_config(
             {"always_cooperate": 1, "always_defect": 5},
             selection_beta=10.0,
         ),
-        np.random.default_rng(0),
+        np.random.default_rng(2),
     )
     focal = dynamics._population[0]
     first, second = dynamics._population[1], dynamics._population[2]

@@ -117,6 +117,19 @@ run data exists.
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
   Axelrod ethnocentrism — richer with the v3 spatial layer). Built
   variable-N-aware on top of M10. See DESIGN §6.5, DECISIONS #46/#58.
+- **Imitation adopter rule — asymmetric "imitate-better" option
+  (review-at M12).** The imitation mechanism currently uses the symmetric
+  adopter rule in both time models (a random adopter of the pair; β = 0 is
+  neutral drift; DECISIONS #93). The asymmetric "imitate-better" variant —
+  the lower-scorer always the adopter, every copy uphill — is a genuine
+  studied dynamic, to be exposed later as a labeled option
+  (dynamics.imitation_adopter ∈ {symmetric, imitate_better}, default
+  symmetric) governing both modes. Deferred out of M10b because it also
+  touches the stable sync selection path. Review checkpoint at M12 scoping:
+  ethnocentrism spreads strategies between in-group and out-group, where
+  symmetric vs imitate-better can differ, so examine there whether M12 needs
+  the option as a comparison (full rationale: DECISIONS #93). Not triggered
+  ⇒ roll the checkpoint to the next imitation-touching milestone.
 - **M13 — Sweep browser.** Member-run drilldown from a sweep's summary,
   multi-sweep interactive browsing, multi-curve overlays, summary-table
   filtering, side-by-side member comparison — the affordances deferred out

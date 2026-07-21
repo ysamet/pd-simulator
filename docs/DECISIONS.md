@@ -1685,3 +1685,108 @@ updated). Files predating this entry keep their names — renaming shipped
 specs would churn every existing cross-reference for no knowledge gain.
 #62's other mechanics (status line, frozen intent, DOCS CHANGED ritual)
 are unchanged.
+
+**#93 — 2026-07-20 — Async imitation overlay reconciled to the
+symmetric (sync-matching) adopter rule; asymmetric "imitate-better"
+variant backlogged with a review checkpoint at M12 scoping**
+
+Background. The Fermi imitation mechanism copies one agent's strategy onto
+another with probability logistic(β · score_gap), where β = selection_beta
+is the selection intensity. There are two ways to choose WHICH agent is the
+potential adopter, and they behave differently:
+  - Symmetric (the sync rule, selection.py): the adopter is chosen
+    independently of score (in sync, a uniformly drawn incumbent). A
+    higher-scoring model is copied at probability > ½ and a lower-scoring
+    model at probability < ½ — downhill copies are possible. At β = 0 the
+    copy is a pure coin flip with no score dependence at all: true neutral
+    drift. β is a clean selection-intensity dial from drift (β = 0) to
+    deterministic imitation (β → ∞).
+  - Asymmetric / "imitate-better": the adopter is forced to be the
+    lower-scorer, so every copy is uphill (probability ≥ ½), and the
+    higher-scorer never adopts. At β = 0 the loser still copies the winner
+    half the time with no reverse flow — fitness-blind in intensity but
+    still fitness-DIRECTED. Neutral drift is unreachable by any β, because
+    the loser-adopts direction is hardwired.
+
+What happened. M10b Phase C shipped the async imitation overlay using the
+ASYMMETRIC rule (frozen in spec Design 4), while sync imitation uses the
+SYMMETRIC rule. Because the overlay reuses the same selection_beta, the
+identical parameter meant two different things across the two time models —
+most visibly at β = 0 (neutral in sync, residually selective in async).
+Since a central purpose of having both a synchronous and an asynchronous
+clock is to COMPARE them, a β sweep under each clock would have compared two
+different rules under one label and misread part of a rule artifact as a
+time-model effect. Root cause was an imprecise M10b prompt that both said
+"the existing Fermi rule" (implying: match sync) and "the loser may copy the
+winner" (implying: asymmetric); Phase C reasonably resolved toward
+asymmetric.
+
+Decision (A), implemented in Phase E. The async overlay is reconciled to the
+symmetric rule, made match-local: of the two participants who just played,
+one is chosen at random as the adopter and the other as the model, and the
+adopter copies with logistic(β · (model_score − adopter_score)), downhill
+copies possible. β = 0 is now true neutral drift in BOTH clocks, and
+selection_beta means one thing everywhere. This SUPERSEDES spec Design 4's
+asymmetric pin (Design 4 carries a forward-pointer to this entry; the spec
+is not retro-edited — the deviation is recorded here, per the frozen-spec
+ritual).
+
+Decision (B), backlogged with a review checkpoint. The asymmetric
+"imitate-better" rule is a legitimate, studied imitation dynamic (imitate
+whoever did better than you), not a discarded mistake — a genuine scientific
+fork against the symmetric rule. It is deferred, not dropped: the intended
+shape is a labeled parameter, e.g. dynamics.imitation_adopter ∈ {symmetric,
+imitate_better}, default symmetric, governing BOTH time models. It was
+deferred rather than built now because exposing it also touches the stable
+sync selection path (selection.py), scope we chose not to reopen mid-M10b.
+
+  REVIEW CHECKPOINT — M12 scoping. Examine whether to pull this trigger when
+  scoping M12 (tags + Hammond–Axelrod ethnocentrism). M12 is the first
+  milestone where the distinction may be load-bearing: ethnocentrism is
+  about how strategies spread between in-group and out-group, and
+  imitate-the-better vs symmetric drift-plus-selection can push
+  in-group/out-group cooperation differently. The M12 spec-creating prompt
+  must surface this entry as an explicit early step and ask whether M12
+  needs the imitate_better option as a labeled comparison. A "no, not yet"
+  outcome is fine and expected — the checkpoint only guarantees the question
+  is asked on schedule rather than by chance. If not triggered at M12, the
+  checkpoint rolls forward to the next milestone whose research question
+  touches imitation dynamics.
+
+**#94 — 2026-07-20 — Live chart redraws are wall-clock throttled (extends
+#39's batching); data still accumulates every period.** Owner-reported
+during async validation: an async evolution run showed a mostly-black
+chart area with brief flashes of results. Root cause, two Streamlit facts
+compounding: (1) a reused element key within one script run raises
+`StreamlitDuplicateElementKey` (verified against Streamlit 1.58), so the
+live loop must give every redraw a fresh key — and a fresh key makes the
+frontend tear down the old chart component and mount a new one, which is
+BLANK until plotly.js finishes painting; (2) fast runs emit periods
+quicker than the browser paints — async event time especially, where a
+small-N generation-equivalent computes in milliseconds, so with the
+default 0.05 s playback delay the loop replaced up to six growing figures
+many times per second and the browser never finished painting before the
+next teardown. Decision: `_run_live` still adds EVERY period to the
+timeseries and the recorder, but redraws at most once per
+`max(playback_delay, LIVE_REDRAW_MIN_SECONDS)` seconds
+(`LIVE_REDRAW_MIN_SECONDS = 0.5`, an app constant like #39's
+`PROGRESS_EVERY` — deliberately not a registry parameter: it is pure
+presentation, an observer control in #35's sense, and it never changes
+what a run computes or records). Between redraws nothing touches the DOM,
+so the previous frame stays fully visible; skipped periods appear in bulk
+at the next redraw; the playback sleep now happens only after an actual
+redraw (its documented meaning — "pause after each chart REFRESH"); the
+final draw after the loop is unconditional, so the finished charts are
+always complete. A slider delay above the floor stretches the window, so
+slideshow-style watching (delay 0.5-1.0 s) still redraws every period.
+The predicate lives in `helpers.should_redraw` (Streamlit-free, #38) with
+unit tests. Alternatives considered: per-period redraw with a larger
+default delay (still floods at small N, and punishes slow runs);
+downsampling live figures (changes what the owner sees; the #10 ceiling
+is a separate concern); moving the engine to a background thread and
+redrawing from an `st.fragment(run_every=...)` with STABLE keys — the
+only route to fully flicker-free in-place plotly updates, because stable
+keys are legal across reruns and let the frontend update the component
+without remounting, but it would rework the #53/#54/#55 kill-and-discard
+semantics around a thread lifecycle; deferred until the residual
+per-redraw blink (~100 ms, at most twice a second) proves bothersome.

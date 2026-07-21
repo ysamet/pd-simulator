@@ -285,3 +285,28 @@ class TestDerivedDefaultWidgetValues:
         values = helpers.widget_values_from_config(config)
         rebuilt = helpers.build_config(values, dict(config.population.composition))
         assert rebuilt == config
+
+
+class TestShouldRedraw:
+    """The live view's wall-clock redraw throttle (DECISIONS #94)."""
+
+    def test_first_period_always_draws(self) -> None:
+        """last_redraw = 0.0 is the sentinel: any real clock clears it."""
+        assert helpers.should_redraw(now=1000.0, last_redraw=0.0, delay=0.05, floor=0.5)
+
+    def test_below_the_floor_skips(self) -> None:
+        """Inside the window nothing is redrawn — the old frame stays up."""
+        assert not helpers.should_redraw(now=1000.3, last_redraw=1000.0, delay=0.05, floor=0.5)
+
+    def test_at_the_floor_draws(self) -> None:
+        """The boundary itself redraws (>=, not >)."""
+        assert helpers.should_redraw(now=1000.5, last_redraw=1000.0, delay=0.05, floor=0.5)
+
+    def test_a_large_delay_stretches_the_window(self) -> None:
+        """Slideshow mode: the slider governs once it exceeds the floor."""
+        assert not helpers.should_redraw(now=1000.7, last_redraw=1000.0, delay=1.0, floor=0.5)
+        assert helpers.should_redraw(now=1001.0, last_redraw=1000.0, delay=1.0, floor=0.5)
+
+    def test_zero_delay_still_honors_the_floor(self) -> None:
+        """A zero delay must not mean redraw-every-period — that is the flood."""
+        assert not helpers.should_redraw(now=1000.1, last_redraw=1000.0, delay=0.0, floor=0.5)

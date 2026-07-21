@@ -20,9 +20,11 @@ demographic engines — ``variable_n`` (θ-births through the Option B seam
 ``admit_births`` / ``place_offspring`` [DECISIONS #89b], insolvency
 deaths, and the mortality trio in event-time) and ``fixed_n`` (classic
 Moran replacement per spec Design 3) — plus the **imitation overlay**
-(spec Design 4): an optional CULTURAL channel, layerable on either
-demographic mode, in which the loser of each finished match may copy the
-winner's strategy. Demography answers *who exists*; imitation answers
+(spec Design 4, adopter rule amended by DECISIONS #93): an optional
+CULTURAL channel, layerable on either demographic mode, in which one of
+the two participants of each finished match — chosen by a fair coin,
+blind to score — may copy the other's strategy under the symmetric Fermi
+rule sync selection uses. Demography answers *who exists*; imitation answers
 *what the living play* — different triggers, different ontological
 layers, so they are separate channels rather than one rule.
 
@@ -38,8 +40,10 @@ any change is a breaking change requiring a DECISIONS entry):
        order,
     3. per match, in partner order: the #23 per-round match draws
        (unchanged), then — only when the imitation overlay is on — exactly
-       one adoption coin ``rng.random()`` per completed match,
-       unconditional even when both participants already share a strategy,
+       two ``rng.random()`` draws per completed match in fixed order (#93):
+       the adopter-choice coin (< ½ → the focal is the potential adopter,
+       else the partner), then the adoption coin — both unconditional even
+       when both participants already share a strategy,
     4. the accrual sweep — no RNG,
     5. the demographic step, per ``dynamics.async_population``:
 
@@ -355,27 +359,37 @@ class AsyncDynamics:
             self._window_rounds[name] = self._window_rounds.get(name, 0) + result.n_rounds
 
     def _imitate(self, result: MatchResult, focal: Agent, partner: Agent) -> None:
-        """Roll one Fermi adoption coin for a finished match (spec Design 4).
+        """Run one symmetric Fermi adoption for a finished match (Design 4).
 
-        The overlay is CULTURAL, not demographic: it changes what an
-        existing agent plays, never who exists. The potential adopter is
-        the participant with the LOWER total for THIS match (an exact tie
-        goes to the lower agent id — deterministic, never a draw, per the
-        spec's defining principle 5), and it copies the other's strategy
-        with the Fermi probability ``logistic(β·(winner − loser))``, reusing
+        Spec Design 4's adopter rule as amended by DECISIONS #93. The
+        overlay is CULTURAL, not demographic: it changes what an
+        existing agent plays, never who exists. The adopter rule is the
+        SYMMETRIC one synchronous Fermi selection uses (#93), made
+        match-local: one of the two participants is chosen by a fair coin
+        as the potential ADOPTER — independent of score — and the other is
+        the MODEL; the adopter copies the model's strategy with the Fermi
+        probability ``logistic(β·(model_total − adopter_total))``, reusing
         the existing ``dynamics.selection_beta``: the semantics — selection
         intensity on a score difference — are genuinely the Fermi rule's,
-        so no second β is introduced.
+        so no second β is introduced. Downhill copies (a lower-scoring
+        model) happen at probability < ½, and at β = 0 the copy is a pure
+        coin flip with no score dependence at all — true neutral drift,
+        exactly as in sync, so selection_beta means one thing in both time
+        models.
 
         Two contracts worth stating plainly:
 
-        * **The coin, not the event, is the RNG contract.** Whenever the
-          overlay is on, exactly one ``rng.random()`` is drawn per completed
-          match, unconditionally — even when both participants already play
-          the same strategy, where the copy is a visible no-op. That keeps
-          the random stream a function of the flag and the match schedule
-          alone, never of the strategy states (the #80 active-flag idiom).
-          A no-op copy emits NO :class:`ImitationEvent`.
+        * **The coins, not the event, are the RNG contract.** Whenever the
+          overlay is on, exactly two ``rng.random()`` draws happen per
+          completed match, in fixed order (Design 8 step 3, re-pinned by
+          #93): the adopter-choice coin (< ½ → the focal is the potential
+          adopter, else the partner), then the adoption coin — both
+          unconditional, even when both participants already play the same
+          strategy, where the copy is a visible no-op. That keeps the
+          random stream a function of the flag and the match schedule
+          alone, never of the strategy states or the scores (the #80
+          active-flag idiom). A no-op copy emits NO
+          :class:`ImitationEvent`.
         * **The change is immediate**, which is what asynchrony means: a
           strategy adopted after match 2 of the focal's bundle is what
           plays in match 3.
@@ -394,31 +408,27 @@ class AsyncDynamics:
         """
         if not self._imitation:
             return
-        focal_total = result.total_payoffs[focal.agent_id]
-        partner_total = result.total_payoffs[partner.agent_id]
-        if focal_total != partner_total:
-            adopter, source = (focal, partner) if focal_total < partner_total else (partner, focal)
+        # The adopter-choice coin: a fair flip over the pair, blind to the
+        # scores (< ½ → the focal is the potential adopter).
+        if self._rng.random() < 0.5:
+            adopter, model = focal, partner
         else:
-            # Exact tie: the lower id is the potential adopter (and the gap
-            # is 0, so the coin is a fair one either way).
-            adopter, source = (
-                (focal, partner) if focal.agent_id < partner.agent_id else (partner, focal)
-            )
-        gap = result.total_payoffs[source.agent_id] - result.total_payoffs[adopter.agent_id]
+            adopter, model = partner, focal
+        gap = result.total_payoffs[model.agent_id] - result.total_payoffs[adopter.agent_id]
         adopt = _logistic(self._beta * gap)
         if self._rng.random() >= adopt:
             return
         from_strategy = strategy_name_of(adopter.strategy)
-        to_strategy = strategy_name_of(source.strategy)
+        to_strategy = strategy_name_of(model.strategy)
         if from_strategy == to_strategy:
-            return  # the coin was spent; the copy changes nothing
-        adopter.strategy = source.strategy
+            return  # both coins were spent; the copy changes nothing
+        adopter.strategy = model.strategy
         self._pending.append(
             ImitationEvent(
                 agent_id=adopter.agent_id,
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
-                source_agent_id=source.agent_id,
+                source_agent_id=model.agent_id,
                 event_index=self._event_index,
                 gen_equiv_time=self._time,
             )

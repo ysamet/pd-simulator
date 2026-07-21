@@ -55,6 +55,21 @@ CUSTOM = "Custom"
 PROGRESS_EVERY = 200
 """Fine-grained events between progress-line refreshes (DECISIONS #39)."""
 
+LIVE_REDRAW_MIN_SECONDS = 0.5
+"""Wall-clock floor between live chart redraws (DECISIONS #94).
+
+Each redraw replaces every chart element (a reused element key within one
+script run raises ``StreamlitDuplicateElementKey``, so each redraw carries
+a fresh key — and a fresh key means the browser tears the old chart down
+and builds the new one from scratch, blank until plotly finishes
+painting). Fast runs — async event time especially, where a small-N
+generation-equivalent computes in milliseconds — can emit periods far
+faster than the browser can paint them, leaving the charts mostly blank
+between flashes. So the live loop accumulates data on every period but
+redraws at most twice a second: between redraws nothing touches the
+screen and the previous frame stays fully visible.
+"""
+
 RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
 """Where recordings go; the env override exists for tests (DECISIONS #49)."""
 
@@ -572,7 +587,11 @@ def _run_live(
 
     Batching (DECISIONS #39): charts are rebuilt only on period events —
     fine-grained events advance a progress line at most every
-    ``PROGRESS_EVERY`` events, never a figure. The finished (or stopped)
+    ``PROGRESS_EVERY`` events, never a figure. Period redraws are further
+    wall-clock throttled (DECISIONS #94): at most one redraw per
+    ``max(delay, LIVE_REDRAW_MIN_SECONDS)``, with every period's data
+    still accumulated — fast runs would otherwise replace the charts
+    faster than the browser can paint them. The finished (or stopped)
     run is kept in session state so the results survive later interactions
     — e.g. flipping the score view re-renders without re-running (#44).
 
@@ -612,6 +631,7 @@ def _run_live(
         period_label = "cycle" if config.mode == "tournament" else "generation"
         fine_events = 0
         draws = 0
+        last_redraw = 0.0  # monotonic clock; 0.0 makes the first period draw
         stopped = False
         for event in engine.run(config, granularity):
             if st.session_state.get("stop_requested"):
@@ -625,6 +645,14 @@ def _run_live(
                 if fine_events % PROGRESS_EVERY == 0:
                     progress.caption(f"... {fine_events} match/round events so far")
             elif isinstance(event, GenerationFinished | CycleFinished):
+                # Redraws are wall-clock throttled (#94): every period's
+                # data lands in the timeseries above, but the screen is
+                # only touched when the browser has had time to paint the
+                # previous frame — which stays visible in between.
+                if not helpers.should_redraw(
+                    time.monotonic(), last_redraw, delay, LIVE_REDRAW_MIN_SECONDS
+                ):
+                    continue
                 draws += 1
                 _draw_charts(
                     timeseries,
@@ -638,6 +666,7 @@ def _run_live(
                     carrying_capacity=capacity,
                 )
                 progress.caption(f"{period_label} {event.index + 1} finished")
+                last_redraw = time.monotonic()
                 if delay > 0:
                     time.sleep(delay)
         _draw_charts(

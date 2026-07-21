@@ -281,6 +281,9 @@ charged, histories untouched. An `ImitationEvent` is emitted only when the
 strategy actually changes (a no-op copy is not an event; the coin, not the
 event, is the RNG contract).
 
+> **ADDENDUM (frozen-spec ritual, #62):** Superseded during Phase E — the
+> async overlay uses the symmetric adopter rule; see DECISIONS #93.
+
 ## Design 5 — event-time clock and comparability (fixed convention, NOT a knob)
 
 The x-axis for async runs is **generation-equivalents**: the clock advances
