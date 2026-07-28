@@ -67,6 +67,30 @@ def _period_label(mode: str) -> str:
     return "Cycle" if mode == "tournament" else "Generation"
 
 
+def _x_axis(timeseries: RunTimeseries) -> tuple[list[float | int | None], str]:
+    """Return the shared x-axis values and label for a run's charts (M10b).
+
+    An event-time (asynchronous) run stamps every period with its
+    generation-equivalent clock reading, and those stamps ARE the honest
+    x-axis: under ``per_event`` or ``every_m_events`` recording cadences
+    the periods are NOT equally spaced in time, so plotting against the
+    period index would distort every trajectory. Synchronous and
+    tournament runs carry no clock (all stamps ``None`` — spec Design 5)
+    and keep the period index with the classic label.
+
+    Args:
+        timeseries: The run's accumulated series.
+
+    Returns:
+        ``(x_values, x_label)`` — clock stamps and the
+        generation-equivalents label for event-time runs; period indices
+        and Generation/Cycle otherwise.
+    """
+    if any(t is not None for t in timeseries.gen_equiv_times):
+        return list(timeseries.gen_equiv_times), "Generation-equivalents (event time)"
+    return list(timeseries.periods), _period_label(timeseries.mode)
+
+
 def _line_chart(
     timeseries: RunTimeseries,
     series: dict[str, list[float | None]],
@@ -85,11 +109,12 @@ def _line_chart(
         One line trace per strategy, colored stably.
     """
     colors = strategy_colors()
+    x, x_label = _x_axis(timeseries)
     figure = go.Figure()
     for name, values in series.items():
         figure.add_trace(
             go.Scatter(
-                x=timeseries.periods,
+                x=x,
                 y=values,
                 mode="lines",
                 name=_display_name(name),
@@ -98,7 +123,7 @@ def _line_chart(
         )
     figure.update_layout(
         title=title,
-        xaxis_title=_period_label(timeseries.mode),
+        xaxis_title=x_label,
         yaxis_title=y_title,
         margin={"t": 40, "b": 40},
     )
@@ -115,11 +140,12 @@ def composition_chart(timeseries: RunTimeseries) -> go.Figure:
         One stacked area trace per strategy; y sums to the population size.
     """
     colors = strategy_colors()
+    x, x_label = _x_axis(timeseries)
     figure = go.Figure()
     for name, counts in timeseries.composition.items():
         figure.add_trace(
             go.Scatter(
-                x=timeseries.periods,
+                x=x,
                 y=counts,
                 mode="lines",
                 stackgroup="population",  # plotly stacks traces sharing a group
@@ -129,7 +155,7 @@ def composition_chart(timeseries: RunTimeseries) -> go.Figure:
         )
     figure.update_layout(
         title="Population composition",
-        xaxis_title=_period_label(timeseries.mode),
+        xaxis_title=x_label,
         yaxis_title="Agents",
         margin={"t": 40, "b": 40},
     )
@@ -203,11 +229,12 @@ def cooperation_chart(timeseries: RunTimeseries) -> go.Figure:
         One line per actor strategy plus the population line.
     """
     colors = strategy_colors()
+    x, x_label = _x_axis(timeseries)
     figure = go.Figure()
     for name, values in timeseries.cooperation_by_strategy.items():
         figure.add_trace(
             go.Scatter(
-                x=timeseries.periods,
+                x=x,
                 y=values,
                 mode="lines",
                 name=_display_name(name),
@@ -216,7 +243,7 @@ def cooperation_chart(timeseries: RunTimeseries) -> go.Figure:
         )
     figure.add_trace(
         go.Scatter(
-            x=timeseries.periods,
+            x=x,
             y=timeseries.cooperation_overall,
             mode="lines",
             name="Population",
@@ -226,7 +253,7 @@ def cooperation_chart(timeseries: RunTimeseries) -> go.Figure:
     cumulative = " (cumulative)" if timeseries.mode == "tournament" else ""
     figure.update_layout(
         title=f"Cooperation rate{cumulative}",
-        xaxis_title=_period_label(timeseries.mode),
+        xaxis_title=x_label,
         yaxis_title="Cooperation rate",
         yaxis={"range": [0, 1]},
         margin={"t": 40, "b": 40},
@@ -288,10 +315,11 @@ def population_chart(
     Returns:
         A single population line, plus the dashed K line when provided.
     """
+    x, x_label = _x_axis(timeseries)
     figure = go.Figure()
     figure.add_trace(
         go.Scatter(
-            x=timeseries.periods,
+            x=x,
             y=timeseries.population_size,
             mode="lines",
             name="Population",
@@ -308,7 +336,7 @@ def population_chart(
         )
     figure.update_layout(
         title="Population size",
-        xaxis_title=_period_label(timeseries.mode),
+        xaxis_title=x_label,
         yaxis_title="Agents",
         margin={"t": 40, "b": 40},
     )

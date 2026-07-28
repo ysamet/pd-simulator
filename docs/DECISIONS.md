@@ -1790,3 +1790,206 @@ keys are legal across reruns and let the frontend update the component
 without remounting, but it would rework the #53/#54/#55 kill-and-discard
 semantics around a thread lifecycle; deferred until the residual
 per-redraw blink (~100 ms, at most twice a second) proves bothersome.
+
+**#95 — 2026-07-20 — M10b LANDED: the asynchronous / Moran-style event
+time-model (spec `M10b-async-event-time-spec.md`, Phases A-E; this entry
+opens the milestone-close batch #95-#102).** The generation is dissolved
+as the unit of time: `dynamics.time_model = "asynchronous"` (evolution
+mode only) routes to `AsyncDynamics`, where time advances one focal
+activation at a time — a focal agent drawn uniformly plays k =
+`matching.opponents_per_agent` matches against uniformly drawn distinct
+partners (the k-match bundle, chosen so one generation-equivalent carries
+the same ≈ 2k per-agent interaction budget as a synchronous `random_k`
+generation — comparable in INCOME, not just time), and every consequence
+fires immediately. The clock advances Δt = 1/N(t) per event (N read at
+event start); `dynamics.generations` keeps its name as run length in
+generation-equivalents. Two demographic engines
+(`dynamics.async_population`): `variable_n` = the M10a energy economy in
+event-time; `fixed_n` = classic Moran (one death paired with one
+fitness-proportional birth per event). Both run through the Option B seam
+— the loop delegates every birth to `admit_births()` /
+`place_offspring()` and never assumes the aspatial admission policy, so
+M11 swaps implementations without reopening the loop (the seam dilemma
+and rationale are frozen in the spec). The synchronous path is
+byte-identical throughout (pinned by regression); the seed-7 variable_n
+and seed-13 moran-random golden masters pin the async streams. Landed
+across commits `V2-Milestone10b-PhaseA` through `-PhaseE`; 722 tests
+green at close.
+
+**#96 — 2026-07-20 — variable_n demography in event-time: the M10a → M10b
+conversion choices (spec Design 2a, implementation-refined).** (a) The
+**breeding refractory** of 1.0 time units (founders anchored at t = 0) is
+the event-time image of #80's one-birth-per-generation rule — without it
+a parent at e ≥ 2θ burst-breeds within one generation-equivalent,
+rerouting dynasty through stock size, exactly what #80 rejected. (b) The
+**mortality trio converts to birthday coins**: one coin per agent per
+INTEGER birthday, priced at `mortality_probability(k−1)` — the same
+lifetime coin sequence a synchronous agent draws; the `max_age` cap is
+DETERMINISTIC in event-time (deaths fire when their trigger evaluates —
+a coin-surviving agent at the cap still dies that event), and the
+recorded cause `"age"` covers both the hazard coin and the cap, mirroring
+the sync taxonomy. (c) **Founder staggering carries over via negative
+birth_time** (a founder staggered to age s is "born" at t = −s), so a
+staggered population starts at its demographic steady state; breeding
+anchors stay at t = 0 regardless. (d) The **accrual sweep** applies
+`e ← e·(1+r)^Δt − L·Δt` to every living agent per event, ascending id, no
+RNG — compounding to exactly (1+r) and ≈ L per generation-equivalent.
+Named honestly: sync applies (1+r) once per boundary, async compounds
+over income arriving mid-period, so the two clocks agree exactly ONLY on
+a static balance — inherent to event-time, not a bug, and pinned that way
+by the V5 comparability tests (`TestSyncAsyncComparability`): same
+growth story asserted, byte-identity deliberately NOT. (e) The **async
+report grain**: period reports describe the living population AT the
+recording point (unlike sync's as-played grain) — window earnings of a
+strategy extinct by the recording point drop from `mean_scores` (they
+survive in the pair-keyed cooperation table), and an extinct run's final
+partial period has empty composition while still carrying its closing
+deaths and clock stamp.
+
+**#97 — 2026-07-20 — fixed_n Moran engine choices (spec Design 3,
+implementation-refined).** (a) The chat's tuple-valued mixture knob
+became **two scalar registry parameters** (`moran_weight_birth_death` /
+`moran_weight_death_birth`, normalised at use) — registry kinds are
+scalar and two floats reuse the whole widget/validation/docs machinery.
+(b) `fixed_n_death_rule` governs the death SLOT of whichever rule fires:
+`pure_random` = one uniform draw (textbook); `energy_decides` =
+lowest-energy, ties to lowest id, deterministic and drawing nothing (the
+#80 active-flag idiom). The recorded cause names the SLOT
+(`random_moran` / `replacement`), not the selection rule. (c) The
+`birth_death` victim draw is one `rng.integers` over the breeder's
+OTHERS (the breeder cannot replace itself). (d) **fixed_n never calls
+`admit_births`** — the Moran replacement vacates the seat it fills, so
+capacity admission is meaningless there (`carrying_capacity` is ignored
+wholesale); `place_offspring` IS still called before σ leaves the parent
+(place-before-pay, #80, both engines). (e) **Founders are never
+staggered in fixed_n** — there are no age deaths, so staggering would be
+dead configuration; the #80 active-flag idiom applied to setup. (f) In
+the period buffer the death is recorded BEFORE its paired birth (the
+seat empties, then fills) — an ordering the schema-4 loader now depends
+on (#100). (g) A parent driven negative by the stake is LEGAL in
+fixed_n: no insolvency death exists there, and the #63 fitness shift
+absorbs negative balances; σ = 0 recovers the textbook no-endowment
+corner.
+
+**#98 — 2026-07-20 — Imitation overlay implementation choices (spec
+Design 4; adopter rule superseded to symmetric by #93).** (a) The chat's
+`{off, on}` choice pair shipped as a registry **bool** (checkbox — the
+two-state switch IS the bool kind). (b) The overlay reuses
+`FermiSelection`'s numerically-stable `_logistic` by intra-package
+import rather than growing a second copy that could drift. (c) The
+no-op test compares strategy NAMES, not instances — strategies are
+stateless flyweights (#21), so same-name means same behavior and the
+copy would be invisible; a no-op spends its coins but emits no
+`ImitationEvent` (the coins, not the event, are the RNG contract).
+(d) `_imitate` is called inside the focal bundle immediately after each
+match's economics land, so a strategy adopted after match 2 plays in
+match 3 — immediacy is what asynchrony means. (e) The overlay layers on
+`fixed_n` too: it is a cultural channel, not a fourth Moran rule —
+demography answers who exists, imitation answers what the living play.
+
+**#99 — 2026-07-20 — The M10b RNG contract as implemented (spec Design
+8), the #34 validator gates, and the RUF001-003 lint rider.** The full
+within-event draw order is pinned in `async_dynamics.py`'s module
+docstring (focal draw → partner draw → per-match round draws + the two
+#93 overlay coins → RNG-free accrual → the demographic step's
+mode-specific draws → RNG-free emission); every draw exists only when
+its governing flag makes it meaningful (#80 active-flag idiom), and the
+moran-random rule roll is pinned as the FIRST demographic draw of the
+event (golden-mastered — a mis-pin cannot reproduce the seed-13 trace).
+Validator gates follow #34's consumed-only pattern: the weight pair's
+both-zero rejection fires only when `moran_rule = "random"` can actually
+roll (async + fixed_n), and the async knobs are accepted-but-ignored
+under sync so configs stay portable across time models. Lint rider: the
+ambiguous-unicode rules RUF001-003 are ignored in `pyproject.toml` —
+the project deliberately names its quantities σ, θ, μ, Δt, × and − in
+docstrings, comments, and widget labels (matching DESIGN and this log),
+and silencing the rules keeps `ruff check .` green without rewriting the
+house notation into ASCII.
+
+**#100 — 2026-07-20 — Schema 4 persistence choices (spec Design 10,
+Phase D).** (a) **Three-way version constants**: `SCHEMA_VERSION = 4`
+(event-time data present), `PER_AGENT_SCHEMA_VERSION = 3` (sync economy),
+2 (sync imitation) — the honest-presence rule (#83) reads as
+data-presence tiers; sync folders stay byte-identical to M10a output.
+(b) Four sibling tables (`births/deaths/imitations/periods.parquet`),
+each dense, each written only when it has rows; **missing file = empty
+shape is the CONTRACT** (a channel that never fired writes nothing), not
+just backward compat. (c) The loader re-interleaves the three event
+tables into occurrence order by a STABLE sort on `(event_index, kind)`
+with imitation(0) < death(1) < birth(2) — exact because imitations
+happen during the match bundle, and deaths precede births within one
+event in BOTH engines. This ordering is now LOAD-BEARING: any engine
+change that reorders within-event occurrence breaks the loader contract
+and needs a DECISIONS entry plus schema thought. (d) Period membership
+on load is the UNION of timeseries/periods/event-table periods — an
+async run extinct mid-period has a final partial period with empty
+composition (the #96 report grain) that would otherwise vanish;
+`timeseries.parquet` gained explicit columns so a zero-row table stays
+loadable. Sync loads degenerate to the old set. (e) The Output registry
+section sits between Dynamics and Run control — the panel/docs order
+every consumer inherits. (f) `RunTimeseries.gen_equiv_times` and
+`.demographic_events` are per-period lists aligned with `.periods` in
+BOTH modes (tournament appends `None`/`()` fills); the writers'
+strict-zip is the guard.
+
+**#101 — 2026-07-20 — Phase E UI and scenario choices: the greying map
+with the β carve-out and forward lookahead, the event-time x-axis rule,
+and the four V-scenarios (including two honesty retunes).** (a) The
+spec's ignored-parameter map is implemented as a time-model split in
+`helpers.greying`: under sync all eight async knobs grey; under async
+the generational machinery (`reproduction_mode`, the SelectionRule
+family, ScoreAccounting, `matching.matcher`) greys wholesale, the Moran
+knobs key off `fixed_n`, the weights off `moran_rule = "random"`, the
+economy demography knobs (θ, K, mortality trio) off `variable_n`, the
+Output `_m` off `every_m_events` — and **β follows the OVERLAY, not the
+rule or mode** (the #93-adjacent carve-out closing the Phase C authoring
+gap: overlay ON reaches β even under `energy_economy` + a non-fermi
+rule). Because some dependencies point FORWARD in registry order
+(`reproduction_mode` greys off `time_model`, which renders after it; β
+off the overlay), the panel now passes a session-state/registry-default
+LOOKAHEAD merged under the gathered values — the first paint uses
+defaults, every later paint the live widget state. (b) Charts: when a
+run carries `gen_equiv_time` stamps, every chart plots against the CLOCK
+with the axis labelled "Generation-equivalents (event time)" — under
+`per_event`/`every_m_events` cadences periods are not equally spaced, so
+the period index would distort trajectories; sync/tournament keep the
+period axis untouched. The app shows a one-line axis explainer
+(`GEN_EQUIV_AXIS_NOTE`) for async runs, live and in the browser.
+(c) Scenarios: `async_death_birth_fixation` (V1, TFT fixates at pinned
+N = 24), `imitation_overlay_only` (V2), `moran_random_mix` (V3),
+`sync_vs_async_economy` (V5, the M10a growth economy on the async
+clock). Two spec-time expectations were corrected by MEASUREMENT during
+scenario authoring, and the scenarios teach the true results: (i) V2's
+overlay spreads DEFECTION — in any mixed match the defector out-earns
+the very reciprocator it exploits, so copying match winners favours
+AllD even though reciprocators earn more from each other — and the
+cultural churn runs on the MATCH timescale at any β (β sets the bias of
+a ~fair per-match coin, not the rate), so the sweep completes within a
+couple of generation-equivalents; the scenario records `per_event` and
+owns both facts (a genuine V2 finding: the cultural and demographic
+channels disagree about cooperation here). (ii) V3's "sits between"
+holds for the ENSEMBLE, not per seed — a 24-agent Moran run is a
+fixation gamble (the shipped seed fixates AllD via an early lucky
+streak), and the scenario text teaches drift honestly instead of
+promising a between-trajectory.
+
+**#102 — 2026-07-20 — Async bench column measured (#91 discipline): the
+event loop costs ≈ 6-11% over the sync economy at equal N; vectorization
+trigger untripped.** `python -m pdsim.bench --time-model asynchronous`
+times the M10b loop per GENERATION-EQUIVALENT at constant N (the same
+no-demography tuning as the economy cells); the matcher axis collapses
+to one honest `event_time` column (async ignores matchers, #34).
+Measured 2026-07-20 (50 rounds, k = 5, median s/generation-equivalent,
+this machine): N = 50: 0.120 vs 0.111 economy / 0.097 imitation;
+N = 100: 0.225 vs 0.212 / 0.189; N = 200: 0.450 vs 0.409 / 0.387;
+N = 400: 0.933 vs 0.840 / 0.788. Scaling stays LINEAR in N (×2 N → ×2
+time): the O(N) accrual sweep per event — O(N²) per
+generation-equivalent — is visible only as the async/economy ratio
+creeping from 1.08 (N = 50) to 1.11 (N = 400); at 250 rounds of match
+play per event the sweep is bookkeeping-cheap, exactly as spec Design 2a
+predicted. Consequence for DESIGN §3.1: the `7.5 µs × N × k × rounds`
+model carries to async per generation-equivalent with a ≈ 1.1× constant;
+the #91 GENERATIONS term does NOT bite async runs in the regime bench
+covers (uniform partner draws have random_k's pair-recurrence, ≈
+2k/(N−1)). M18 stays review-at; bench output remains
+environment-specific and uncommitted.

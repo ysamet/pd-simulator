@@ -1270,3 +1270,121 @@ def test_sync_runs_ignore_the_output_section() -> None:
         }
     )
     assert list(run(sync)) == list(run(_with_cadence(sync, "per_event")))
+
+
+# ---------------------------------------------------------------------------
+# Phase E - V5: sync-vs-async comparability (spec Design 2a, NOT identity)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncAsyncComparability:
+    """V5: the two clocks tell the SAME growth story, never the same bytes.
+
+    Sync and async diverge BY DESIGN on the interest-compounding grain
+    (spec Design 2a): sync applies (1+r) once per boundary to the boundary
+    balance; async compounds (1+r)^dt continuously over income that
+    arrives mid-period, so the trajectories agree exactly only on a
+    static balance. These tests therefore assert COMPARABILITY - growth
+    from the founder count toward K with defectors extinct under both
+    clocks, and exact agreement on the static-balance corner - and
+    deliberately never byte-identity.
+    """
+
+    @staticmethod
+    def _growth_config(time_model: str) -> ExperimentConfig:
+        """The V5 scenario's shape at test size (20 founders, K = 60).
+
+        Args:
+            time_model: ``"synchronous"`` or ``"asynchronous"``.
+
+        Returns:
+            A validated growth-economy config on the requested clock.
+        """
+        return ExperimentConfig.model_validate(
+            {
+                "seed": 42,
+                "population": {
+                    "size": 20,
+                    "composition": {"tit_for_tat": 10, "always_defect": 10},
+                },
+                "matching": {"matcher": "random_k", "opponents_per_agent": 5},
+                "match": {"length_mode": "fixed", "rounds_per_match": 10},
+                "dynamics": {
+                    "generations": 25,
+                    "time_model": time_model,
+                    "reproduction_mode": "energy_economy",
+                    "reproduction_threshold": 500.0,
+                    "offspring_stake": 400.0,
+                    "basic_living_cost": 200.0,
+                    "carrying_capacity": 60,
+                    "mutation_rate": 0.0,
+                },
+            }
+        )
+
+    def test_both_clocks_tell_the_same_growth_story(self) -> None:
+        """Growth toward K with defectors extinct - under BOTH clocks."""
+        stories = {}
+        for time_model in ("synchronous", "asynchronous"):
+            compositions = [
+                dict(event.composition)
+                for event in run(self._growth_config(time_model))
+                if isinstance(event, GenerationFinished)
+            ]
+            sizes = [sum(c.values()) for c in compositions]
+            # The story: start at the founder count, grow, reach the
+            # neighbourhood of K, and end all-cooperator.
+            assert sizes[0] <= 25, time_model
+            assert max(sizes) >= 54, time_model  # within 10% of K = 60
+            assert sizes[-1] > 2 * sizes[0], time_model
+            assert set(compositions[-1]) == {"tit_for_tat"}, time_model
+            stories[time_model] = compositions
+        # The divergence is real (Design 2a): the trajectories are NOT
+        # identical - asserting otherwise would be asserting a bug.
+        assert stories["synchronous"] != stories["asynchronous"]
+
+    def test_static_balance_corner_agrees_exactly(self) -> None:
+        """A static balance: both clocks compound to the same boundaries.
+
+        Two mutual cooperators whose per-match income (2 rounds x R = 6)
+        is exactly cancelled by an engagement cost of 6, with L = 0 and
+        r = 0.05: every match nets zero, so the balance is STATIC between
+        boundaries - the one corner where Design 2a promises exact
+        agreement: 100 * 1.05^k at every integer boundary k, either clock.
+        """
+
+        def config(time_model: str) -> ExperimentConfig:
+            return ExperimentConfig.model_validate(
+                {
+                    "seed": 3,
+                    "population": {"size": 2, "composition": {"tit_for_tat": 2}},
+                    "matching": {"matcher": "random_k", "opponents_per_agent": 1},
+                    "match": {"length_mode": "fixed", "rounds_per_match": 2},
+                    "dynamics": {
+                        "generations": 8,
+                        "time_model": time_model,
+                        "reproduction_mode": "energy_economy",
+                        "reproduction_threshold": 1e9,
+                        "offspring_stake": 0.0,
+                        "initial_energy": 100.0,
+                        "basic_living_cost": 0.0,
+                        "engagement_cost": 6.0,
+                        "capital_return_rate": 0.05,
+                        "carrying_capacity": 10,
+                        "mutation_rate": 0.0,
+                    },
+                }
+            )
+
+        def boundary_energies(time_model: str) -> list[float]:
+            return [
+                event.agents[0].energy
+                for event in run(config(time_model))
+                if isinstance(event, GenerationFinished)
+            ]
+
+        sync_energies = boundary_energies("synchronous")
+        async_energies = boundary_energies("asynchronous")
+        assert len(sync_energies) == len(async_energies) == 8
+        assert async_energies == pytest.approx(sync_energies)
+        assert sync_energies[-1] == pytest.approx(100.0 * 1.05**8)

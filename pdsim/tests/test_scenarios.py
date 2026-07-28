@@ -29,8 +29,15 @@ V1_SCENARIOS = {
     "defectors_paradise",
 }
 
-ALL_SCENARIOS = V1_SCENARIOS | {"the_growth_economy"}
-"""The five v1 seed scenarios plus M10a's energy-economy scenario."""
+ALL_SCENARIOS = V1_SCENARIOS | {
+    "the_growth_economy",
+    "async_death_birth_fixation",
+    "imitation_overlay_only",
+    "moran_random_mix",
+    "sync_vs_async_economy",
+}
+"""The five v1 seed scenarios, M10a's energy-economy scenario, and the
+four M10b event-time scenarios (spec Validation V1/V2/V3/V5)."""
 
 
 def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
@@ -57,6 +64,11 @@ def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
     )
     data["dynamics"]["generations"] = 2
     data["tournament_cycles"] = 2
+    # Period counting below assumes one period per generation(-equivalent),
+    # so a scenario's denser recording cadence (M10b Output section) is
+    # reset to the default — the cadence is observer-only (#35), so the
+    # smoke-run shape is otherwise unaffected.
+    data["output"] = {}
     if data["match"]["length_mode"] == "continuation":
         data["match"]["continuation_probability"] = 0.5
     else:

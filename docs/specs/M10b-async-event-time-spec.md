@@ -1,4 +1,4 @@
-Status: in progress
+Status: implemented (see DECISIONS #93-#102)
 
 # M10b — Asynchronous / Moran-style event time
 

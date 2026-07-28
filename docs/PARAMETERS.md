@@ -564,6 +564,30 @@ What happens when survival costs energy and playing earns it? Agents pay a livin
 
 **Things to try:** Set the basic living cost to 320 (above the all-cooperator income of 300) and EVERYONE dies — the survival window is real. Set it to 80 (below the all-defector income of 100) and even defectors grow, because the filter is switched off. Switch the composition to 40 Always Defect and watch the population collapse over generations 4 to 6 — not all at once: every defector is on the same average trajectory, so they all approach zero energy together, and who actually crosses first is decided by participation luck, since under random_k some agents get drawn into more matches than others. Set the max age to 20 and watch the mean-age chart settle. Set the capital return rate to 0.05 and watch the escape velocity appear in the Economy panel.
 
+### Async: Death-Birth Fixation (`async_death_birth_fixation`)
+
+What does evolution look like when time has no generations? Here the clock ticks one event at a time: an agent is drawn, plays its matches, and then one randomly chosen agent dies and the rest compete — weighted by accumulated energy — to fill the empty seat (the classic Moran death-birth update). The population count is pinned, so the only thing that can change is WHO the population is: watch one strategy drift and drive toward complete fixation while the total height of the composition chart never moves. The x-axis is generation-equivalents: N events, one population's worth of activity, per unit.
+
+**Things to try:** Switch the Moran rule to birth_death — now the breeder is chosen first and its offspring replaces someone else; the two orders differ subtly in who is at risk. Switch the death rule to energy_decides and the reaper stops being blind: the lowest-energy agent always dies, so newborns (who start at the stake, here 0) live dangerously. Set the mutation rate to 0.01 and fixation stops being forever — the lost strategy keeps reappearing.
+
+### Async: Imitation Only (`imitation_overlay_only`)
+
+Can a population change what it plays without anyone being born or dying? This run switches every demographic channel off — the breeding threshold is unreachable, the living cost is zero, and there is no age limit — and turns ON the imitation overlay: after each match, one of the two players (picked by a fair coin, regardless of score) considers copying the other's strategy, and the better the other scored IN THAT MATCH, the likelier the copy. Watch strategy shares move while the population count stays perfectly flat — and watch WHICH WAY and HOW FAST they move: defection sweeps the population within a couple of generation-equivalents. In any mixed match the defector out-earns the very reciprocator it is exploiting, so copying match winners favours Always Defect even though reciprocators earn more from each other — and because copying happens per MATCH, minds change on the interaction timescale, far faster than any demographic takeover. The run records per event, so you see every single step of the sweep.
+
+**Things to try:** Set the selection intensity to 0 and the copying becomes a pure coin flip — neutral drift, which still churns just as fast but with no direction: try a few seeds and either strategy can sweep. Crank it to 10 and the takeover is nearly one-way. Compare with The Growth Economy, where the SAME strategies compete demographically and cooperators win — the two channels reward different things. Check the recorded run in the Results browser: total agents born equals the twenty founders; only minds changed.
+
+### Async: Mixed Moran Rules (`moran_random_mix`)
+
+What lies between the two classic Moran updates? Each event here rolls a weighted coin: 80% of events run birth-death (pick a breeder by energy, its offspring replaces a random other) and 20% run death-birth (a random agent dies, the rest compete for the seat). With only 24 agents any single run is a fixation GAMBLE — higher earners are favoured to take over, not guaranteed to — and the rule mixture shifts the odds. This seed happens to fixate Always Defect: an early lucky streak snowballs, which is exactly what finite-population drift means.
+
+**Things to try:** Set the weights to 1/0 (pure birth-death), then 0/1 (pure death-birth), and run each across a few seeds — single runs are gambles, so it is the SPREAD of outcomes the mixture sits between, not any one trajectory. Switch the death rule to energy_decides and the gamble largely disappears: the reaper targets the poorest, so the higher earners fixate far more reliably. In this well-mixed world the rules differ only mechanically; when population structure arrives (M11), death-birth is the update under which neighbourhoods can favour cooperation.
+
+### Async: The Growth Economy in Event Time (`sync_vs_async_economy`)
+
+The Growth Economy again — same costs, same stakes, same carrying capacity — but with the generation dissolved: births fire the moment a parent clears the threshold, deaths fire the moment energy runs out, and the clock advances 1/N per event. The population still grows from 40 toward the carrying capacity of 200 as defectors go extinct, on a comparable x-axis (generation-equivalents carry the same per-agent interaction budget as generations). Flip the time model back to synchronous and compare: the same growth story, told by two different clocks.
+
+**Things to try:** Flip the time model to synchronous and run again: both runs grow from 40 toward K = 200 and the Economy panel's survival window applies to both — but they are NOT identical runs, and should not be: event time compounds interest continuously over income that arrives mid-period, where the generational clock applies it once at each boundary. Switch the recording cadence to per_event to see every single birth and death at full resolution (bigger files, denser charts).
+
 ## Outcome metrics
 
 Named measures the sweep layer (`python -m pdsim.sweep`) computes from a

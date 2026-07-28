@@ -4,6 +4,7 @@ Usage (with the project venv active)::
 
     python -m pdsim.bench                       # default N x matcher grid
     python -m pdsim.bench --sizes 50,100 --generations 3
+    python -m pdsim.bench --time-model asynchronous   # M10b event loop
     python -m pdsim.bench --out bench.csv       # also write CSV
 
 Purpose: make the vectorized-backend trigger EMPIRICAL. The v2 plan
@@ -35,6 +36,7 @@ from pathlib import Path
 import numpy as np
 
 from pdsim.config.experiment import ExperimentConfig
+from pdsim.core.async_dynamics import AsyncDynamics
 from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics
 from pdsim.core.strategies import all_strategy_names
 
@@ -72,6 +74,7 @@ def _cell_config(
     generations: int,
     seed: int,
     reproduction_mode: str = "imitation",
+    time_model: str = "synchronous",
 ) -> ExperimentConfig:
     """Build the experiment config for one benchmark grid cell.
 
@@ -88,12 +91,17 @@ def _cell_config(
             so the timing isolates the economy bookkeeping (ledger,
             boundary, snapshots, persistent histories) at the same N as the
             imitation cell instead of timing a drifting population.
+        time_model: ``"synchronous"`` (both loops above) or
+            ``"asynchronous"`` (M10b): the event loop, timed per
+            generation-equivalent with the same constant-N tuning, so the
+            async column is directly comparable to the sync cells at the
+            same N.
 
     Returns:
         A validated evolution-mode config.
     """
     dynamics: dict[str, object] = {"generations": generations}
-    if reproduction_mode == "energy_economy":
+    if reproduction_mode == "energy_economy" or time_model == "asynchronous":
         dynamics.update(
             {
                 "reproduction_mode": "energy_economy",
@@ -103,6 +111,8 @@ def _cell_config(
                 "carrying_capacity": max(size, 200),
             }
         )
+    if time_model == "asynchronous":
+        dynamics["time_model"] = "asynchronous"  # variable_n, no demography
     return ExperimentConfig.model_validate(
         {
             "seed": seed,
@@ -128,16 +138,26 @@ def time_cell(config: ExperimentConfig, generations: int) -> float:
             post-warmup timing exists; enforced by the CLI).
 
     Returns:
-        Median wall-clock seconds per post-warmup generation.
+        Median wall-clock seconds per post-warmup generation (or
+        generation-equivalent, under the async time model).
     """
+    timings: list[float] = []
+    if config.dynamics.time_model == "asynchronous":
+        # One pull on the period iterator = one generation-equivalent at
+        # the default recording cadence with a constant-N population.
+        periods = AsyncDynamics(config, np.random.default_rng(config.seed)).run()
+        for _ in range(generations):
+            start = time.perf_counter()  # monotonic, high-resolution clock
+            next(periods)
+            timings.append(time.perf_counter() - start)
+        return statistics.median(timings[1:])
     dynamics: PopulationDynamics | EconomyDynamics
     if config.dynamics.reproduction_mode == "energy_economy":
         dynamics = EconomyDynamics(config, np.random.default_rng(config.seed))
     else:
         dynamics = PopulationDynamics(config, np.random.default_rng(config.seed))
-    timings: list[float] = []
     for _ in range(generations):
-        start = time.perf_counter()  # monotonic, high-resolution clock
+        start = time.perf_counter()
         dynamics.step()
         timings.append(time.perf_counter() - start)
     return statistics.median(timings[1:])
@@ -190,6 +210,18 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--time-model",
+        choices=("synchronous", "asynchronous"),
+        default="synchronous",
+        help=(
+            "Which clock to time (default: synchronous). 'asynchronous' times the "
+            "M10b event loop per GENERATION-EQUIVALENT at constant N (same "
+            "no-demography tuning as the economy cells). The matcher is ignored "
+            "there (#34) — the grid varies N only and the matcher column reads "
+            "'event_time'."
+        ),
+    )
+    parser.add_argument(
         "--out", default=None, help="Optional CSV output path (no default — never committed)."
     )
     return parser
@@ -216,6 +248,13 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --generations must be at least 2 (the first is warmup).", file=sys.stderr)
         return 1
 
+    asynchronous = args.time_model == "asynchronous"
+    if asynchronous:
+        # The matcher axis has no event-time meaning (#34): partners are
+        # drawn uniformly and k is consumed directly, so the grid varies N
+        # only and the column is labelled honestly.
+        matchers = ["event_time"]
+
     rows: list[dict[str, object]] = []
     print(f"{'N':>6}  {'matcher':<12}  {'s/generation':>12}")
     for size in sizes:
@@ -223,12 +262,13 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 config = _cell_config(
                     size,
-                    matcher,
+                    "random_k" if asynchronous else matcher,
                     args.k,
                     args.rounds,
                     args.generations,
                     args.seed,
                     reproduction_mode=args.reproduction_mode,
+                    time_model=args.time_model,
                 )
             except ValueError as error:
                 print(f"error: N={size}, {matcher}: {error}", file=sys.stderr)

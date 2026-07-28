@@ -229,9 +229,88 @@ UI's **Economy panel** (`ui/economy_helpers.calibration_report`) derives
 the survival window (`all-D income ≤ cost < all-C income`), escape velocity
 `e* = cost / r`, and mortality/memory readouts straight from the config —
 note the window is N-stable under `random_k` (bounded ≈ 2k interaction
-budget) but moves with N under round-robin. Still out of scope: async/Moran
-event time (M10b), population structure and local birth (M11), estate
-policy beyond destroy-on-death (M15).
+budget) but moves with N under round-robin. Still out of scope: population
+structure and local birth (M11), estate policy beyond destroy-on-death
+(M15). Async/Moran event time shipped in M10b — §2.11.
+
+### 2.11 Asynchronous event time (M10b — `dynamics.time_model`)
+
+The generation can be dissolved as the unit of time (DECISIONS #85,
+#95-#102; frozen intent in `docs/specs/M10b-async-event-time-spec.md`).
+**`dynamics.time_model` ∈ {`synchronous`, `asynchronous`}**, default
+`synchronous` — the existing generational clock, byte-identical. Under
+`asynchronous` (evolution mode only) the engine routes to
+**`AsyncDynamics`** (`core/async_dynamics.py`): time advances one **focal
+activation** at a time — a focal agent drawn uniformly plays
+`matching.opponents_per_agent` (k) matches against uniformly drawn
+distinct partners, and every consequence fires immediately (a strategy
+copied after match 2 of the bundle plays in match 3; a death fires the
+moment its trigger evaluates). The k-match bundle keeps async runs
+comparable to sync in INCOME as well as time: over one
+generation-equivalent each agent is focal once on average and drawn ≈ k
+times — the same ≈ 2k interaction budget as a synchronous `random_k`
+generation.
+
+**The clock** advances Δt = 1/N(t) per event (N read at event start); one
+**generation-equivalent** completes when the running sum crosses an
+integer. It is pure bookkeeping — no RNG, no influence, deliberately not
+a parameter; `dynamics.generations` is the run length in
+generation-equivalents. Every explicit event and period record carries a
+`gen_equiv_time` stamp (`None` on sync runs — the honest "this run has no
+event-time clock").
+
+**Two demographic engines** (`dynamics.async_population`, default
+`variable_n`):
+
+- **`variable_n`** — the §2.10 economy in event-time (#96): income and
+  the per-match engagement cost land at match completion; `L·Δt` and
+  `(1+r)^Δt` accrue in a per-event sweep (ascending id, no RNG);
+  insolvency stays strictly negative; births need `e ≥ θ` AND a
+  1.0-time-unit **breeding refractory** (the event-time image of #80's
+  one-birth-per-generation rule); the mortality trio becomes one coin
+  per agent per INTEGER birthday (same lifetime coin sequence as sync),
+  with the `max_age` cap deterministic and founder staggering carried
+  via negative `birth_time`. Interest-compounding grain, named honestly:
+  sync applies (1+r) once per boundary, async compounds over income
+  arriving mid-period — the clocks agree exactly only on a static
+  balance (pinned by the V5 comparability tests: same growth story,
+  never byte-identity).
+- **`fixed_n`** — classic Moran (#97): N pinned, one death paired with
+  one fitness-proportional birth per event, governed by
+  `dynamics.moran_rule` ∈ {`birth_death`, `death_birth`, `random`} (the
+  `random` mixture rolls per event against the normalised
+  `moran_weight_*` pair) and `dynamics.fixed_n_death_rule` ∈
+  {`pure_random`, `energy_decides`}. No insolvency/age deaths, no θ
+  births, no extinction; `carrying_capacity` ignored. The ledger still
+  runs — energy is Moran FITNESS (the #63 shift idiom, under which a
+  uniform per-capita L cancels out of selection entirely); the textbook
+  corner is the defaults + σ = 0 + `pure_random`.
+
+**The imitation overlay** (`dynamics.imitation_overlay`, bool, default
+off — #98) is a CULTURAL channel layerable on either engine: after each
+completed match, one of the two participants is chosen by a fair coin as
+the potential adopter (the symmetric sync-matching rule, #93) and copies
+the other with probability `logistic(selection_beta · gap)` — downhill
+copies possible, β = 0 true neutral drift in both clocks. Strategy-copy
+only; a no-op copy spends its two coins but emits no event.
+
+**Recording cadence** (`output.recording_cadence` ∈
+{`per_generation_equivalent`, `per_event`, `every_m_events`} +
+`output.recording_cadence_m` — the registry's Output section): decides
+when period reports are emitted. An observer control in #35's sense
+(consumes no RNG, influences nothing — pinned by test) that nevertheless
+lives in the config because it decides what the persisted record
+CONTAINS (hard rule 8). Sync runs ignore both parameters.
+
+Both async engines delegate every birth to the **Option B seam** —
+`admit_births()` / `place_offspring()`, place-before-pay — so M11's
+local-birth rewrite swaps seam implementations without reopening the
+event loop or its RNG contract. The full within-event draw order is
+pinned in `async_dynamics.py`'s module docstring and golden-mastered
+(seed-7 variable_n, seed-13 moran-random); any change is a breaking
+change requiring a DECISIONS entry (#99). The ignored-parameter map
+(which knob is inert under which mode) is implemented as UI greying with
+a β carve-out — β follows the overlay in async (#101).
 
 ## 3. Architecture
 
@@ -330,6 +409,16 @@ Key contracts:
   the large-N regime random_k is chosen for. `memory_depth` bounds it (it
   caps what strategies see, hence what the copy transfers), and the Economy
   panel's memory-growth note is the user-facing warning.
+- **The async column (M10b, measured in DECISIONS #102).** The cost model
+  carries to the event loop per GENERATION-EQUIVALENT with a ≈ 1.1×
+  constant: `python -m pdsim.bench --time-model asynchronous` measured
+  the async loop at ≈ 6-11% over the sync economy at equal N (N = 50 to
+  400, k = 5, 50 rounds), scaling linearly in N. The O(N) per-event
+  accrual sweep — O(N²) per generation-equivalent — shows up only as
+  that ratio creeping from 1.08 to 1.11 across the grid: bookkeeping-
+  cheap next to the k matches each event plays. Uniform partner draws
+  give async random_k's pair-recurrence (≈ 2k/(N−1)), so the #91
+  generations term does not bite in the benched regime.
 - The performance strategy has **three independent dimensions** (DECISIONS
   #46, #59):
   1. **Faster execution/rendering of a given interaction count.** Engine side:
@@ -361,7 +450,8 @@ Key contracts:
 
 The engine (`pdsim/core/engine.py`) is a generator: `engine.run(config,
 granularity)` yields immutable typed events (`pdsim/core/events.py`) as the run
-unfolds. Five event types (DECISIONS #35):
+unfolds. Five core event types (DECISIONS #35) plus the three explicit
+event-time types M10b added (async runs only — see below):
 
 - `RoundPlayed` — pair identity, round index, executed actions, payoffs.
 - `MatchFinished` — pair identity, per-agent match totals, match length.
@@ -380,6 +470,23 @@ unfolds. Five event types (DECISIONS #35):
   population-size field either: `N = sum(composition.values())` (#47).
   Extinction ends the run early: `RunFinished.completed` counts generations
   actually played, and an extinct run closes with empty composition/scores.
+  Since M10b the event also carries `gen_equiv_time: float | None`
+  (`None` on sync runs), and in async mode "generation" means RECORDING
+  PERIOD: one `GenerationFinished` per period under the configured
+  recording cadence, its composition/snapshots describing the living
+  population at the recording point (#96), and `RunFinished.completed`
+  counting periods (its grain follows the cadence).
+- **`BirthEvent` / `DeathEvent` / `ImitationEvent`** (M10b, async only —
+  #82/#95): explicit event-time records with `event_index`,
+  `gen_equiv_time`, agent identity, and cause (`threshold`/`moran` for
+  births; `insolvency`/`age`/`replacement`/`random_moran` for deaths;
+  from/to strategy + source for imitations). Buffered per recording
+  period and flushed in OCCURRENCE ORDER immediately before that
+  period's `GenerationFinished`, at every granularity. They coexist
+  with snapshots without violating #47: events give exact intra-period
+  timing and causes (which snapshots diff away); snapshots give the
+  energy/age state between demographic events (which no event records).
+  Synchronous mode emits none of these.
 - `CycleFinished` (tournament mode) — cycle index, composition (constant), and
   per-strategy **cumulative** totals + per-agent mean scores + rounds played
   + the run-cumulative cooperation table (#65 — cumulative like everything
@@ -421,7 +528,16 @@ pure data processing, no plotting imports — so M7's recorder can reuse it
 without touching the viz layer (DECISIONS #37). `pdsim/viz/charts.py` holds pure
 builders (`RunTimeseries` in → plotly Figure out; final summaries as plain
 table rows) with a per-strategy color map derived from Strategy Registry
-order, stable across charts, modes, and reruns.
+order, stable across charts, modes, and reruns. Since M10b,
+`RunTimeseries` also carries `gen_equiv_times` and `demographic_events` —
+per-period lists strictly aligned with `periods` in both modes (#100) —
+and the chart builders share one x-axis rule (#101): when clock stamps
+exist the charts plot against the generation-equivalent CLOCK (labelled
+"Generation-equivalents (event time)" — under the `per_event` /
+`every_m_events` cadences periods are not equally spaced, so the period
+index would distort trajectories); sync and tournament runs keep the
+classic period axis, and the app shows a one-line axis explainer for
+event-time runs.
 
 ### 4.1 The v1 Streamlit app (`pdsim/ui/app.py`)
 
@@ -686,7 +802,24 @@ Each recorded run is a folder `runs/<timestamp>_<slug>/` (name collisions get
   untouched — their per-strategy grain is unchanged (widening timeseries
   with energy columns was rejected: NaN columns for every imitation run,
   which #47c forbids).
-- **`summary.json`** — `schema_version` (3 when per-agent data exists; an
+- **The event-time tables** (schema 4 — M10b, DECISIONS #100) — written
+  exactly when the run produced event-time data (async runs): dense RAW
+  sibling tables `births.parquet` (period, event_index, gen_equiv_time,
+  agent_id, parent_id nullable Int64, strategy, energy, cause),
+  `deaths.parquet` (…, agent_id, cause), `imitations.parquet` (…,
+  agent_id, source_agent_id, from/to strategy), and `periods.parquet`
+  (period → gen_equiv_time, the charts' clock axis) — each written only
+  when it has rows; **missing file = empty shape is the contract** (a
+  channel that never fired writes nothing). On load the three event
+  tables re-interleave into occurrence order by a stable sort on
+  `(event_index, kind)` with imitation < death < birth — exact because
+  of the engine's pinned within-event ordering, which is therefore
+  load-bearing (#100) — and period membership is the UNION of
+  timeseries/periods/event-table periods, so an extinct run's final
+  empty-composition partial period survives the round trip. Sync
+  folders gain no event-time files and stay byte-identical to M10a.
+- **`summary.json`** — `schema_version` (4 when event-time data exists;
+  3 when per-agent data exists; an
   imitation run under M10a code still writes 2, byte-identical to pre-M10a
   recordings), run id, timestamps, code version, mode, seed, N, periods
   completed, scenario name (if any), wall-clock duration, headline outcome
@@ -710,15 +843,18 @@ deleted (confirmation step, `delete_run`) and renamed (`rename_run`:
 validated names, collision-safe, keeps `summary.json` and the index
 coherent) from the browser.
 
-**Schema guard** (§6.3/§6.5, DECISIONS #46/#47/#65/#83): `summary.json`'s
+**Schema guard** (§6.3/§6.5, DECISIONS #46/#47/#65/#83/#100):
+`summary.json`'s
 `schema_version` plus the file-naming convention — sibling tables arrive
-without breaking migrations, exactly as `cooperation.parquet` did in schema 2
-and `agents.parquet` in schema 3 (which still reserves room for the §6.3
-spatial and §6.5 attribute snapshot columns). Loaders reject folders written
-by a NEWER schema version and accept older ones: a schema-1 folder simply
+without breaking migrations, exactly as `cooperation.parquet` did in schema 2,
+`agents.parquet` in schema 3 (which still reserves room for the §6.3
+spatial and §6.5 attribute snapshot columns), and the four event-time
+tables in schema 4. Loaders accept 1-4 and reject folders written
+by a NEWER schema version: a schema-1 folder simply
 has no cooperation data and renders without the cooperation chart; a
 schema-1/2 folder has no per-agent data and renders without the
-population/energy/age charts (#65 compatibility, applied again).
+population/energy/age charts; a schema ≤ 3 folder has no event-time data
+and renders without the async views (#65 compatibility, applied again).
 
 Consumers: the headless CLI (`python -m pdsim.run <config.yaml>` or
 `--scenario NAME`) records every run; the UI's "Record this run" control

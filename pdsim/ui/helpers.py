@@ -52,6 +52,13 @@ IGNORED_IN_TOURNAMENT = (
     "dynamics.base_hazard",
     "dynamics.senescence_factor",
     "dynamics.max_age",
+    "dynamics.time_model",
+    "dynamics.async_population",
+    "dynamics.moran_rule",
+    "dynamics.moran_weight_birth_death",
+    "dynamics.moran_weight_death_birth",
+    "dynamics.fixed_n_death_rule",
+    "dynamics.imitation_overlay",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
 
@@ -100,6 +107,56 @@ _ACCOUNTING_PARAMS = {
 }
 """Accounting parameter -> the one accounting choice that reads it (#64)."""
 
+_ASYNC_KNOBS = (
+    "dynamics.async_population",
+    "dynamics.moran_rule",
+    "dynamics.moran_weight_birth_death",
+    "dynamics.moran_weight_death_birth",
+    "dynamics.fixed_n_death_rule",
+    "dynamics.imitation_overlay",
+    "output.recording_cadence",
+    "output.recording_cadence_m",
+)
+"""The eight M10b knobs, read only under the asynchronous time model (#34)."""
+
+_ASYNC_INERT = (
+    "dynamics.reproduction_mode",
+    "dynamics.selection_rule",
+    "dynamics.selection_tournament_k",
+    "dynamics.selection_elite_fraction",
+    "dynamics.selection_threshold_multiplier",
+    "dynamics.score_accounting",
+    "dynamics.accounting_window",
+    "dynamics.accounting_discount",
+    "matching.matcher",
+)
+"""Parameters the asynchronous time model ignores wholesale (M10b spec).
+
+``dynamics.selection_beta`` is deliberately NOT here: the imitation
+overlay consumes it in async mode, so it gets its own overlay-keyed arm
+(the spec's ignored-parameter map carve-out). ``dynamics.mutation_rate``
+is consumed by async
+newborns, and the ledger knobs (initial energy, L, engagement, r, sigma,
+overhead) run in both async modes — none of them grey here.
+"""
+
+_FIXED_N_PARAMS = ("dynamics.moran_rule", "dynamics.fixed_n_death_rule")
+"""Moran machinery — read only when ``async_population = fixed_n``."""
+
+_MORAN_WEIGHTS = ("dynamics.moran_weight_birth_death", "dynamics.moran_weight_death_birth")
+"""The mixture weights — read only when ``moran_rule = random``."""
+
+_VARIABLE_N_ONLY = (
+    "dynamics.reproduction_threshold",
+    "dynamics.carrying_capacity",
+    "dynamics.base_hazard",
+    "dynamics.senescence_factor",
+    "dynamics.max_age",
+)
+"""Economy demography knobs with no fixed_n meaning (no theta births, no
+carrying capacity, no age or insolvency deaths — the Moran replacement is
+the only demography there)."""
+
 
 def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
     """Decide whether a panel widget is greyed out right now, and why.
@@ -110,8 +167,15 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
 
     * every dynamics parameter, ignored in tournament mode;
     * ``run.tournament_cycles``, ignored in evolution mode;
+    * the TIME-MODEL split (M10b): under the asynchronous clock a whole
+      family of synchronous machinery is inert (see :func:`_async_greying`)
+      and under the synchronous clock the eight async knobs are — this
+      check runs before every mode-internal check below, so the
+      clock-level note wins;
     * ``matching.opponents_per_agent``, ignored under round-robin matching
-      (keyed off the matcher widget's current value, not the run mode, #57);
+      (keyed off the matcher widget's current value, not the run mode, #57)
+      — but never in async mode, where round-robin itself is inert and the
+      uniform partner draws consume k directly;
     * the COARSE reproduction-mode split (M10a): under ``energy_economy``
       the whole selection + accounting families are inert (differential
       survival IS the selection); under ``imitation`` the eleven economy
@@ -122,13 +186,17 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
     * each accounting rule's parameter, ignored unless that accounting is
       selected (keyed off the score-accounting widget, #64).
 
-    The app renders widgets in registry order, so by the time a dependent
-    widget renders, the value it keys off (``run.mode``, a matcher or rule
-    selectbox) is already in ``values``.
+    The app renders widgets in registry order and passes the values
+    gathered so far, topped up with a session-state/default LOOKAHEAD for
+    widgets that render later — some M10b dependencies point forward
+    (``reproduction_mode`` greys off ``time_model``, which renders after
+    it; β greys off ``imitation_overlay``, registered near the end of the
+    Dynamics block).
 
     Args:
         key: The registry key of the widget about to render.
-        values: The widget values gathered so far this script run.
+        values: The widget values gathered so far this script run (plus
+            the app's lookahead for not-yet-rendered widgets).
 
     Returns:
         ``(disabled, note)`` — whether to grey the widget out, and the
@@ -141,6 +209,14 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
         return True, (
             "NOTE: this parameter exists but is IGNORED in tournament mode — "
             "nothing evolves there (see the run-mode help)."
+        )
+    asynchronous = not tournament and values.get("dynamics.time_model") == "asynchronous"
+    if asynchronous:
+        return _async_greying(key, values)
+    if key in _ASYNC_KNOBS:
+        return True, (
+            "NOTE: only read under the ASYNCHRONOUS time model — IGNORED on "
+            "the synchronous (generational) clock (see the time-model help)."
         )
     if key == "matching.opponents_per_agent" and values.get("matching.matcher") == "round_robin":
         return True, (
@@ -170,6 +246,86 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
         return True, (
             f"NOTE: this parameter is only read by the {_ACCOUNTING_PARAMS[key]!r} "
             "score accounting — IGNORED under the currently selected choice."
+        )
+    return False, ""
+
+
+def _async_greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
+    """The asynchronous-clock arm of :func:`greying` (M10b spec's map).
+
+    Under event time the generational machinery is inert wholesale
+    (``reproduction_mode`` — the async paradigm is chosen by
+    ``async_population`` instead — the SelectionRule family, score
+    accounting, and the matcher; uniform partner draws ARE the well-mixed
+    corner and consume ``opponents_per_agent`` directly). Within async:
+    the Moran knobs apply only under ``fixed_n``, the mixture weights only
+    under ``moran_rule = random``, the economy demography knobs only under
+    ``variable_n``, and β only when the imitation overlay is on — the
+    carve-out that closes the Phase C authoring gap (an async config built
+    from widgets could not previously reach β at all).
+
+    Args:
+        key: The registry key of the widget about to render.
+        values: The widget values (with the app's lookahead — see
+            :func:`greying`).
+
+    Returns:
+        ``(disabled, note)`` — as :func:`greying`.
+    """
+    if key == "dynamics.reproduction_mode":
+        return True, (
+            "NOTE: IGNORED under the asynchronous time model — the async "
+            "paradigm is chosen by 'Async population' instead (variable_n "
+            "= the energy economy in event time; fixed_n = Moran)."
+        )
+    if key == "matching.matcher":
+        return True, (
+            "NOTE: IGNORED under the asynchronous time model — each event "
+            "draws partners uniformly (the well-mixed corner), consuming "
+            "'Opponents per agent' directly. Round-robin is a "
+            "generation-batch concept with no event-time analogue."
+        )
+    if key in _ASYNC_INERT:
+        return True, (
+            "NOTE: IGNORED under the asynchronous time model — selection "
+            "and score accounting are generational machinery; async "
+            "selection happens through births, deaths, and (optionally) "
+            "the imitation overlay."
+        )
+    if key == "dynamics.selection_beta":
+        if values.get("dynamics.imitation_overlay"):
+            return False, ""
+        return True, (
+            "NOTE: under the asynchronous time model this is read only by "
+            "the imitation overlay — switch 'Imitation overlay' on to use "
+            "it (it is the same selection intensity, on a match score gap)."
+        )
+    population = values.get("dynamics.async_population")
+    if key in _FIXED_N_PARAMS and population != "fixed_n":
+        return True, (
+            "NOTE: Moran machinery — only read when 'Async population' is "
+            "fixed_n. IGNORED under variable_n, where births and deaths "
+            "come from the energy economy."
+        )
+    if key in _MORAN_WEIGHTS and (
+        population != "fixed_n" or values.get("dynamics.moran_rule") != "random"
+    ):
+        return True, (
+            "NOTE: only read when 'Moran rule' is 'random' (under fixed_n) "
+            "— the weights mix birth-death and death-birth per event."
+        )
+    if key in _VARIABLE_N_ONLY and population == "fixed_n":
+        return True, (
+            "NOTE: only read under variable_n — fixed_n has no threshold "
+            "births, carrying capacity, or age/insolvency deaths; the "
+            "Moran replacement is its only demography."
+        )
+    if key == "output.recording_cadence_m" and (
+        values.get("output.recording_cadence") != "every_m_events"
+    ):
+        return True, (
+            "NOTE: only read when the recording cadence is "
+            "'every_m_events' — IGNORED under the other cadences."
         )
     return False, ""
 

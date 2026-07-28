@@ -8,6 +8,8 @@ the point of the helper layer (DECISIONS #38).
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from pydantic import ValidationError
 
@@ -310,3 +312,145 @@ class TestShouldRedraw:
     def test_zero_delay_still_honors_the_floor(self) -> None:
         """A zero delay must not mean redraw-every-period — that is the flood."""
         assert not helpers.should_redraw(now=1000.1, last_redraw=1000.0, delay=0.0, floor=0.5)
+
+
+class TestAsyncGreying:
+    """M10b: the time-model split in the greying rules (spec's ignored map)."""
+
+    SYNC: ClassVar[dict[str, str]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "synchronous",
+    }
+    ASYNC: ClassVar[dict[str, str]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "asynchronous",
+    }
+
+    def test_async_knobs_grey_under_the_synchronous_clock(self) -> None:
+        """All eight M10b knobs disable on the generational clock (#34)."""
+        for key in (
+            "dynamics.async_population",
+            "dynamics.moran_rule",
+            "dynamics.moran_weight_birth_death",
+            "dynamics.moran_weight_death_birth",
+            "dynamics.fixed_n_death_rule",
+            "dynamics.imitation_overlay",
+            "output.recording_cadence",
+            "output.recording_cadence_m",
+        ):
+            disabled, note = helpers.greying(key, self.SYNC)
+            assert disabled, key
+            assert "ASYNCHRONOUS" in note
+
+    def test_generational_machinery_greys_under_async(self) -> None:
+        """reproduction_mode, selection, accounting, matcher — all inert."""
+        for key in (
+            "dynamics.reproduction_mode",
+            "dynamics.selection_rule",
+            "dynamics.selection_tournament_k",
+            "dynamics.selection_elite_fraction",
+            "dynamics.selection_threshold_multiplier",
+            "dynamics.score_accounting",
+            "dynamics.accounting_window",
+            "dynamics.accounting_discount",
+            "matching.matcher",
+        ):
+            disabled, note = helpers.greying(key, self.ASYNC)
+            assert disabled, key
+            assert "asynchronous" in note
+
+    def test_beta_follows_the_overlay_not_the_rule_or_mode(self) -> None:
+        """The Phase C authoring gap, closed.
+
+        Overlay ON reaches β even under energy_economy and a non-fermi
+        rule — both inert in async.
+        """
+        off = {**self.ASYNC, "dynamics.imitation_overlay": False}
+        disabled, note = helpers.greying("dynamics.selection_beta", off)
+        assert disabled
+        assert "overlay" in note
+        on = {
+            **self.ASYNC,
+            "dynamics.imitation_overlay": True,
+            "dynamics.reproduction_mode": "energy_economy",
+            "dynamics.selection_rule": "proportional",
+        }
+        assert helpers.greying("dynamics.selection_beta", on) == (False, "")
+
+    def test_opponents_per_agent_never_greys_under_async(self) -> None:
+        """Async consumes k directly, whatever the matcher widget says.
+
+        Even a stale round_robin matcher value must not grey it — the
+        matcher itself is the inert one.
+        """
+        values = {**self.ASYNC, "matching.matcher": "round_robin"}
+        assert helpers.greying("matching.opponents_per_agent", values) == (False, "")
+
+    def test_moran_machinery_keys_off_the_population_mode(self) -> None:
+        """fixed_n enables the Moran knobs; variable_n greys them."""
+        fixed = {**self.ASYNC, "dynamics.async_population": "fixed_n"}
+        variable = {**self.ASYNC, "dynamics.async_population": "variable_n"}
+        for key in ("dynamics.moran_rule", "dynamics.fixed_n_death_rule"):
+            assert helpers.greying(key, fixed) == (False, "")
+            disabled, note = helpers.greying(key, variable)
+            assert disabled, key
+            assert "variable_n" in note
+
+    def test_weights_need_fixed_n_and_the_random_rule(self) -> None:
+        """The mixture weights are read only under moran_rule = random."""
+        random_rule = {
+            **self.ASYNC,
+            "dynamics.async_population": "fixed_n",
+            "dynamics.moran_rule": "random",
+        }
+        pure_rule = {**random_rule, "dynamics.moran_rule": "death_birth"}
+        for key in (
+            "dynamics.moran_weight_birth_death",
+            "dynamics.moran_weight_death_birth",
+        ):
+            assert helpers.greying(key, random_rule) == (False, "")
+            disabled, _ = helpers.greying(key, pure_rule)
+            assert disabled, key
+
+    def test_economy_demography_greys_under_fixed_n_but_ledger_stays(self) -> None:
+        """theta/K/mortality are variable_n-only; the ledger runs in both."""
+        fixed = {**self.ASYNC, "dynamics.async_population": "fixed_n"}
+        for key in (
+            "dynamics.reproduction_threshold",
+            "dynamics.carrying_capacity",
+            "dynamics.base_hazard",
+            "dynamics.senescence_factor",
+            "dynamics.max_age",
+        ):
+            disabled, note = helpers.greying(key, fixed)
+            assert disabled, key
+            assert "variable_n" in note
+        for key in (
+            "dynamics.offspring_stake",
+            "dynamics.basic_living_cost",
+            "dynamics.engagement_cost",
+            "dynamics.capital_return_rate",
+            "dynamics.reproduction_overhead",
+            "dynamics.initial_energy",
+            "dynamics.mutation_rate",
+        ):
+            assert helpers.greying(key, fixed) == (False, ""), key
+
+    def test_cadence_m_needs_every_m_events(self) -> None:
+        """The m widget keys off the cadence choice (#34 pattern)."""
+        boundary = {**self.ASYNC, "output.recording_cadence": "per_generation_equivalent"}
+        disabled, note = helpers.greying("output.recording_cadence_m", boundary)
+        assert disabled
+        assert "every_m_events" in note
+        every_m = {**self.ASYNC, "output.recording_cadence": "every_m_events"}
+        assert helpers.greying("output.recording_cadence_m", every_m) == (False, "")
+
+    def test_tournament_still_wins_over_the_time_model(self) -> None:
+        """A stale asynchronous time_model never un-greys tournament mode."""
+        values = {"run.mode": "tournament", "dynamics.time_model": "asynchronous"}
+        disabled, note = helpers.greying("dynamics.imitation_overlay", values)
+        assert disabled
+        assert "tournament mode" in note
+        disabled, note = helpers.greying("output.recording_cadence", values)
+        assert disabled
+        assert "ASYNCHRONOUS" in note

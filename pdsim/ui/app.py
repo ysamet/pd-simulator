@@ -76,6 +76,16 @@ RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
 SWEEPS_DIR = Path(os.environ.get("PDSIM_SWEEPS_DIR", "sweeps"))
 """Where the Sweep tab launches sweeps into (mirrors RUNS_DIR, DECISIONS #72)."""
 
+GEN_EQUIV_AXIS_NOTE = (
+    "⏱ Event-time run: the x-axis is **generation-equivalents** — each event "
+    "advances the clock by 1/N(t), so one unit is one population's worth of "
+    "events, matching a synchronous generation in both time and per-agent "
+    "interaction budget (spec Design 5). Recording points need not be evenly "
+    "spaced: under the per-event and every-m-events cadences the charts plot "
+    "against the clock, not the period count."
+)
+"""The generation-equivalent axis explainer, shown for async runs (M10b)."""
+
 st.set_page_config(page_title="pdsim — Evolutionary Prisoner's Dilemma", layout="wide")
 
 
@@ -294,16 +304,29 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         if not spec.key.startswith("run."):
             sections.setdefault(spec.section, []).append(spec)
 
+    # Forward-looking greying (M10b): some dependencies point at widgets
+    # that render LATER in registry order (reproduction_mode greys off
+    # time_model; β greys off the imitation overlay). The lookahead maps
+    # every non-nullable panel key to what its widget WILL return this
+    # run — its session-state value, or the registry default before the
+    # first interaction. Values actually gathered this run always win.
+    lookahead: dict[str, ParamValue] = {
+        key: st.session_state.get(key, spec.default)
+        for key, spec in specs.items()
+        if not spec.nullable
+    }
+
     composition: dict[str, int] = {}
     for section, section_specs in sections.items():
         with st.expander(section, expanded=section in ("Population", "Dynamics")):
             columns = st.columns(2)
             for i, spec in enumerate(section_specs):
-                # Widgets render in registry order, so the values a widget's
-                # greying keys off (run.mode, matching.matcher,
+                # Widgets render in registry order, so most values a
+                # widget's greying keys off (run.mode, matching.matcher,
                 # dynamics.reproduction_mode) are already gathered when it
-                # renders (helpers.greying, DECISIONS #34).
-                disabled, note = helpers.greying(spec.key, values)
+                # renders; the lookahead covers the forward M10b
+                # dependencies (helpers.greying, DECISIONS #34).
+                disabled, note = helpers.greying(spec.key, {**lookahead, **values})
                 with columns[i % 2]:
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
             if section == "Population":
@@ -627,6 +650,8 @@ def _run_live(
         chart_left, chart_right = col_left.empty(), col_right.empty()
         chart_coop = st.empty()  # full-width, below the pair (M9b)
         chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
+        if config.dynamics.time_model == "asynchronous":
+            st.caption(GEN_EQUIV_AXIS_NOTE)
         capacity = economy_helpers.chart_carrying_capacity(config)
         period_label = "cycle" if config.mode == "tournament" else "generation"
         fine_events = 0
@@ -901,6 +926,8 @@ def _results_browser() -> None:
             else:
                 st.session_state["_select_run"] = final_name
                 st.rerun()
+    if any(t is not None for t in loaded.timeseries.gen_equiv_times):
+        st.caption(GEN_EQUIV_AXIS_NOTE)
     col_left, col_right = st.columns(2)
     _draw_charts(
         loaded.timeseries,
@@ -1027,6 +1054,8 @@ def _run_lab() -> None:
         if last is not None:
             timeseries = last["timeseries"]
             st.caption(f"{last['note']} — switch the score views to re-render, or press Run.")
+            if any(t is not None for t in timeseries.gen_equiv_times):
+                st.caption(GEN_EQUIV_AXIS_NOTE)
             col_left, col_right = st.columns(2)
             _draw_charts(
                 timeseries,

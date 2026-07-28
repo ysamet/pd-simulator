@@ -270,3 +270,41 @@ class TestEconomyCharts:
             path.name for path in charts.export_run_charts(_evolution_series(), tmp_path)
         }
         assert not {"population.html", "mean_energy.html", "mean_age.html"} & plain_files
+
+
+class TestEventTimeAxis:
+    """M10b: async runs plot against the generation-equivalent clock."""
+
+    @staticmethod
+    def _async_series() -> RunTimeseries:
+        """Two unevenly spaced event-time periods (an every_m cadence)."""
+        timeseries = RunTimeseries(mode="evolution")
+        for index, stamp in enumerate([0.75, 2.0]):
+            timeseries.add(
+                GenerationFinished(
+                    index=index,
+                    composition={"tit_for_tat": 3, "always_defect": 1},
+                    mean_scores={"tit_for_tat": 4.0, "always_defect": 6.0},
+                    rounds_played={"tit_for_tat": 3, "always_defect": 1},
+                    gen_equiv_time=stamp,
+                )
+            )
+        return timeseries
+
+    def test_async_charts_use_the_clock_stamps(self) -> None:
+        """The clock readings become x, honestly uneven; label names the unit."""
+        figure = charts.composition_chart(self._async_series())
+        assert list(figure.data[0].x) == [0.75, 2.0]
+        assert "equivalents" in figure.layout.xaxis.title.text
+
+    def test_line_charts_share_the_event_time_axis(self) -> None:
+        """The mean-score chart rides the same x-axis helper."""
+        figure = charts.mean_score_chart(self._async_series())
+        assert list(figure.data[0].x) == [0.75, 2.0]
+        assert "event time" in figure.layout.xaxis.title.text
+
+    def test_sync_charts_keep_the_period_axis(self) -> None:
+        """No clock stamps -> the classic Generation axis, unchanged."""
+        figure = charts.composition_chart(_evolution_series())
+        assert list(figure.data[0].x) == [0, 1]
+        assert figure.layout.xaxis.title.text == "Generation"

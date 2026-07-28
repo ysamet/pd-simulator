@@ -197,9 +197,13 @@ execution order = numeric order, no gaps). v1 — pairwise repeated PD,
 object-per-agent engine, Fermi selection, strategy-switch mutation,
 Streamlit UI, persistence + headless CLI — is complete (M8, 2026-07-07).
 M9 (selection rules, accounting, cooperation recording), M9.5 (sweep layer
-+ Sweep tab), and **M10a (the score-as-energy growth economy, synchronous
++ Sweep tab), **M10a (the score-as-energy growth economy, synchronous
 generational — variable N, energy ledger, births/deaths, extinction,
-schema 3)** are complete (DECISIONS #76-#84). Next up: M11 (population
-structure — adjacency + local birth; chat-designed first), with M10b
-(async/Moran event time) a separate later spec. Design everything to not
+schema 3; DECISIONS #76-#84)**, and **M10b (the asynchronous / Moran-style
+event time-model — `time_model` clock choice, focal-bundle events on the
+1/N(t) generation-equivalent clock, variable_n + fixed_n demographic
+engines, symmetric imitation overlay, explicit birth/death/imitation
+events, recording cadence + schema 4; DECISIONS #85-#92, #93-#102)** are
+complete. Next up: M11 (population structure — adjacency + local birth;
+chat-designed first). Design everything to not
 block the v2/v3 extensions listed in `docs/DESIGN.md` §6.

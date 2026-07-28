@@ -73,3 +73,38 @@ class TestCli:
         """A malformed --sizes list fails with a plain message."""
         assert main(["--sizes", "fifty"]) == 1
         assert "whole numbers" in capsys.readouterr().err
+
+
+class TestAsyncCells:
+    """The M10b event-time column (spec Phase E, the #91 discipline)."""
+
+    def test_async_cell_produces_positive_seconds(self) -> None:
+        """An async cell times per generation-equivalent and stays sane."""
+        config = _cell_config(
+            8, "random_k", k=2, rounds=2, generations=2, seed=0, time_model="asynchronous"
+        )
+        assert config.dynamics.time_model == "asynchronous"
+        # The constant-N tuning: nobody breeds, nobody starves.
+        assert config.dynamics.reproduction_threshold == 1e12
+        assert config.dynamics.basic_living_cost == 0.0
+        seconds = time_cell(config, generations=2)
+        assert seconds > 0.0
+
+    def test_async_grid_varies_n_only(self, capsys: pytest.CaptureFixture) -> None:
+        """--time-model asynchronous collapses the matcher axis honestly."""
+        exit_code = main(
+            [
+                "--sizes",
+                "8,10",
+                "--rounds",
+                "2",
+                "--generations",
+                "2",
+                "--time-model",
+                "asynchronous",
+            ]
+        )
+        assert exit_code == 0
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 1 + 2  # header + one event_time row per N
+        assert all("event_time" in line for line in lines[1:])

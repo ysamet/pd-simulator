@@ -105,8 +105,14 @@ run data exists.
   `agents.parquet` (schema_version 3), the Economy calibration panel,
   three economy charts, and the `the_growth_economy` scenario; 645 tests
   passing.
-  ⬜ M10b — the asynchronous / Moran-style event time-model (explicit
-  birth/death events become meaningful there). A separate later spec.
+  ✅ M10b landed 2026-07-20 (DECISIONS #93-#102) — the asynchronous /
+  Moran-style event time-model: `time_model` clock choice, the focal-
+  bundle event loop with the 1/N(t) generation-equivalent clock, both
+  demographic engines (`variable_n` economy-in-event-time, `fixed_n`
+  Moran with BD/DB/random rules), the symmetric imitation overlay,
+  explicit birth/death/imitation events, recording cadence (Output
+  section), schema 4 persistence, event-time chart axis, greying map,
+  four validation scenarios, async bench column; 722 tests passing.
 - **M11 — Population structure (NEW).** Adjacency + local birth: the
   `place_offspring` structural gate (built in M10a as the well-mixed
   always-True corner) becomes neighbourhood-aware; carrying capacity may
