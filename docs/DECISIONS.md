@@ -1993,3 +1993,202 @@ the #91 GENERATIONS term does NOT bite async runs in the regime bench
 covers (uniform partner draws have random_k's pair-recurrence, ≈
 2k/(N−1)). M18 stays review-at; bench output remains
 environment-specific and uncommitted.
+
+**#103 — 2026-07-28 — M11 scope boundary: the M11a/M11b split, and M19
+(geographic structures) joins the spine (opens the M11 design batch
+#103-#110; DESIGN §2.12).** M11 splits: **M11a** = structure, local birth,
+local interaction; **M11b** = movement + the mouse layout painter.
+Rationale for the split: movement and natal placement are BOTH mixing
+dials, so shipping them together confounds attribution on the very first
+spatial experiment — natal locality alone is the regime Kaznatcheev &
+Shultz's result concerns, and it gives a clean baseline against which
+movement is a measured deviation. Separately, movement inserts a new draw
+into #99's golden-mastered event order, and landing the two apart means
+each change gets its own goldens rather than a bisect. And the genuinely
+unresolved part of movement is the SCHEDULE, which under async either
+becomes a new event type or a step inside the focal activation — and a new
+event type would break the one-event-one-activation correspondence the
+Δt = 1/N(t) convention rests on. Precedent: M10a/M10b and M9.5a/M9.5b; a/b
+splits do not disturb #76 numbering. Obligation on M11a: expose the reach
+primitive as a NAMED PUBLIC function so M11b is additive and never reopens
+structure code (Option B discipline, one milestone forward). **M19 —
+geographic structures — appends to the spine after M18** (purely additive;
+no renumbering). It is the second real implementation of M11a's structure
+abstraction and needs NOTHING from M12-M18, so it can be pulled forward
+without renumbering pain provided M11a honours the three forward-guards of
+DESIGN §2.12 (graph-of-sites, capacity field present, distance as a
+structure method). Also recorded — the DOCUMENTATION/VERIFICATION DEBT
+carried out of this design conversation: (i) the M11a explainer must carry
+the donation-game walkthrough — b = benefit to receiver, c = cost to
+giver, k = number of neighbours; the b/c > k death-birth threshold in
+plain words; the worked payoffs b = 5, c = 1 → T = 5, R = 4, P = 0,
+S = −1 giving b/c = 5, which CLEARS von Neumann (k = 4) and FAILS Moore
+(k = 8) — same grid, opposite prediction; and both honesty caveats
+(Ohtsuki assume ONE-SHOT games and weak selection, we play repeated
+matches with reciprocators, so the threshold is a calibration compass, not
+a promise); (ii) two literature claims are UNVERIFIED and must be checked
+against publisher records before entering the explainer or before M12's
+replication scenario picks a setting — whether Hammond & Axelrod used
+wrap-around on their 50×50 lattice, and the Kaznatcheev & Shultz
+300-period figure currently quoted in the M10 explainer without a
+verification note of its own.
+
+**#104 — 2026-07-28 — Sites are EXCLUSIVE CAPACITY-BEARING CONTAINERS;
+the structure is a GRAPH OF SITES, not a grid (DESIGN §2.12).** A site
+carries an id, a neighbour set, a capacity, and an optional coordinate;
+the rectangular lattice is ONE BUILDER over that abstraction (the core
+never knows rows and columns); distance is a method the STRUCTURE
+supplies — the three forward-guards that make M19's irregular site sets a
+second builder requiring no core change. Rationale: exclusivity is what
+makes density-dependence — and therefore viscosity — mean anything, and it
+is what #80's place-before-pay check was carved for. The capacity FIELD
+ships now (placement checks `occupants < capacity` even though the RHS is
+always 1) because retrofitting it later is a migration of the placement
+seam, the schema, and every test that touched them; allowing capacity > 1
+is deferred to M19 because it forces the distance-zero kernel question and
+the mixed-cell rendering question, neither of which is M11's point.
+Alternative rejected: CONTINUOUS AGENT COORDINATES — gridded/raster
+representation is the mainstream form for geographic population modelling;
+continuity buys only sub-cell precision below the model's content scale;
+and it destroys the natural notion of a full world, forcing
+density-dependence to be re-invented artificially. This also settles
+#89(a)'s open question about K (resolved in #106).
+
+**#105 — 2026-07-28 — The soft reach kernel: SUPPORT RADIUS R plus DECAY
+β (DESIGN §2.12).** One functional form, separately parameterised per use:
+the weight over a site at distance d is proportional to exp(−β·d) for
+d ≤ R and zero beyond. The four recovered corners: R = 1 is
+Hammond–Axelrod exactly; β = 0 with R = n is a uniform disc (the "hard
+cutoff" the old forward-note reached for); large β with R = n is steeply
+viscous with distant sites still reachable; R → ∞ with β = 0 is
+well-mixed — recovered by parameters rather than by a branch. M11a
+parameterises the kernel twice (`structure.birth_radius` /
+`structure.birth_decay` and `structure.interaction_radius` /
+`structure.interaction_decay`); M11b adds a third pair for the walk. This
+entry explicitly SUPERSEDES the phrasing of the M10b spec Design 9 /
+explainer §7 forward-note ("hard cutoff recoverable as temperature → 0"),
+which conflated sharpening the decay with shrinking the support —
+sharpening a decay recovers nearest-neighbours-only, not a hard-edged
+disc. The M10b spec is NOT retro-edited (frozen-spec ritual, #62); this
+entry is the record.
+
+**#106 — 2026-07-28 — Carrying capacity SURVIVES under structure as a
+second cap (DESIGN §2.12; resolves #89(a)).** K stays live under
+`structure.kind = lattice`, validated K ≤ site count, with blank K
+resolving to the site count (the #78 derived-default idiom). Rationale:
+K < site count leaves permanent slack in which the occupied region
+drifts, clusters and migrates as births and deaths reshape it — a
+genuinely interesting dynamic that "capacity is purely emergent" would
+foreclose. The blank-resolves-to-site-count default keeps the emergent
+behaviour as the zero-effort path and prevents the silent-stall failure
+mode (population parks at K with half the map empty and nothing
+explaining why); the Economy panel reporting BOTH numbers is the second
+guard. Consequence worth naming: because K remains live, ENERGY-PRIORITY
+ADMISSION STAYS MEANINGFUL under structure — both seams keep real jobs
+rather than one withering. Also recorded: `fixed_n` + lattice requires
+N = site count (validated), which makes site-recycling the ONLY possible
+Moran placement — a death leaves exactly one empty site and the newborn
+has nowhere else to go — and DISSOLVES a proposed `moran_placement`
+toggle without a parameter. Alternative rejected: K greys wholesale under
+a lattice (capacity purely emergent) — simpler, but forecloses the slack
+dynamic.
+
+**#107 — 2026-07-28 — Amending the #80 frozen boundary sequence:
+placement contention order and `dynamics.boundary_order` (DESIGN §2.12).**
+#80 states any change is a breaking change requiring a new entry; this is
+that entry. Both changes are gated so well_mixed runs stay byte-identical
+(the #80/#99 active-flag idiom), and both were decided in ONE pass
+deliberately, so the frozen sequence is amended once. (a)
+**`structure.placement_contest`** ∈ {`random`, `energy_priority`}, default
+`random`. Contention exists only where several births resolve at one
+instant — synchronous + structure + `energy_economy`, and nowhere else
+(async resolves one birth per event; `fixed_n` never calls `admit_births`
+per #97d; sync well_mixed placement never fails). The admitted birth set
+is resolved by ONE permutation then iterated — matching Hammond–Axelrod's
+random reproduction order and keeping energy's role at eligibility (θ)
+rather than at winning a contested cell. Parent-id order rejected: on a
+lattice, id correlates with founding position, so it silently becomes a
+spatial priority rule. The `energy_priority` option is retained rather
+than defaulted because richest-wins-contested-cell COMPOUNDS spatially
+(good neighbourhood → higher earnings → wins more cells → more good
+territory) — a substantive modelling claim someone should turn on
+deliberately. (b) **`dynamics.boundary_order`** ∈ {`death_first`,
+`birth_first`}, default `death_first`, sync-only, greyed under async
+(which has no boundary to order). Under a lattice the ordering is no
+longer a phase offset but a different model: it decides whether newborns
+fill scattered interior graves (deaths-first) or only frontier cells
+(births-first) — and the frontier is where the ethnocentrism mechanism
+lives. The default preserves hard rule 8 (old configs re-run identically)
+and makes H-A's period order opt-in; M12's replication scenario will set
+`birth_first` explicitly, which is why building it at M11a means M12 need
+not reopen the boundary a third time.
+
+**#108 — 2026-07-28 — Local interaction: the proximity toggle, and where
+the kernel lives (DESIGN §2.12, §3.1).** `matching.spatial_interaction`
+(bool, default off). Off: today's behaviour — `matching.matcher` picks
+round_robin or random_k over the whole population. On: partners are
+sampled from within the interaction radius by the reach kernel, and
+`matching.matcher` GREYS (round-robin has no local analogue; the
+well-mixed matchers are the infinite-radius corner), while
+`matching.opponents_per_agent` (k) stays LIVE and does the work — k at or
+above the neighbourhood size means "play all neighbours", the
+Hammond–Axelrod and Ohtsuki convention, so round-robin's IDEA survives
+the greying; k clamps to the number of neighbours that actually exist
+(the #81 clamp idiom — edge cells under `bounded`, irregular site sets at
+M19). Validator: spatial interaction requires `structure.kind = lattice`.
+Rationale for a toggle rather than "structure implies local interaction":
+it is what makes local-births-with-global-interaction and
+global-births-with-local-interaction separable experiments — the whole
+reason for two radii. CODE SHAPE: the Matcher ABC is the WRONG home for
+the primary abstraction — a matcher produces a whole pair-list for a
+generation and the async loop never calls one, it draws partners inline.
+So the structure module owns ONE `neighbourhood_sample(agent, rng)`
+primitive; the async loop calls it directly; `SpatialKernel(Matcher)` is
+a thin sync-side adapter over the same primitive. One kernel, no
+duplication, and both standing DESIGN promises (§6.3's SpatialKernel,
+§3.1's dimension 2) stay true.
+
+**#109 — 2026-07-28 — Initial layouts, the layout-file mechanism, and the
+rendering contract (DESIGN §2.12).** `structure.initial_layout` ∈
+{`random` (default), `checkerboard`, `stripes`, `blocks`, `patches`,
+`central_block`} decides ARRANGEMENT only; composition is already set by
+the three-bucket model (#67). Ordered mixed → segregated: checkerboard is
+the anti-cluster baseline; patches (seed points grown outward) gives the
+most natural irregular clusters; central_block leaves the rest of the
+grid empty and is the FILLING regime — the one Kaznatcheev & Shultz's
+early-run result concerns. The layout-FILE reference mechanism ships in
+M11a and the mouse PAINTER in M11b: painting collides with rule 4 (the
+engine knows no UI) and rule 8 (runs re-run from config), and the clean
+resolution is that the painter is a UI tool that WRITES a layout file
+which the config references, so the engine only ever reads DATA; shipping
+the file format in M11a means nothing is retrofitted, while the painter
+itself is real UI work better done alongside M11b's UI attention.
+Rendering contract per §2.12: cells always exactly square (side =
+min(max_width/cols, max_height/rows); the canvas takes the grid's
+aspect), the side floored at ≈ 3 px, and past a few thousand cells the
+grid renders as a pixel ARRAY rather than thousands of individual shapes
+— the regime where #94's wall-clock throttling starts to matter.
+
+**#110 — 2026-07-28 — The #93(B) imitation-adopter checkpoint: examined
+at M11 scoping, rolled to M12; neighbourhood-proportional imitation
+backlogged.** #93's checkpoint was written "review at M12 scoping" with a
+rolling clause; the #76 renumbering put M11 first, and M11 is where a
+graph — and therefore Ohtsuki's separate imitation threshold b/c > k + 2
+— first has any referent, so the question was raised explicitly at M11
+scoping rather than allowed to roll by default. ANSWER: NOT TRIGGERED,
+for a specific reason. Ohtsuki's imitation updating chooses the
+reassessing individual AT RANDOM, INDEPENDENTLY OF PAYOFF — that is the
+SYMMETRIC adopter rule, the one #93 already reconciled us to. So the
+literature that appears to make the fork urgent is in fact an endorsement
+of the shipped rule. `imitate_better` (forcing the lower scorer to adopt)
+is not the distinction Ohtsuki draw; their fork is between UPDATE RULES
+(birth-death / death-birth / imitation-as-replacement), which is the
+existing `dynamics.moran_rule` knob. The checkpoint rolls to M12 as
+originally written — M12's rationale (in-group vs out-group strategy
+spread) is untouched by the renumbering. SEPARATELY BACKLOGGED: Ohtsuki's
+imitation updating picks a model PROPORTIONALLY OVER THE WHOLE
+NEIGHBOURHOOD, SELF INCLUDED, whereas our overlay is a pairwise Fermi
+comparison after a match. Reproducing b/c > k + 2 exactly would require
+neighbourhood-proportional imitation — a NEW MECHANISM, declined for M11a
+explicitly (not by omission) on scope grounds; the death-birth threshold
+b/c > k is the one testable with what we have.

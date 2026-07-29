@@ -192,8 +192,9 @@ never appear in a suggested commit file list.
 ## Current phase
 
 v2 per `docs/ROADMAP.md`, on the renumbered economy-first spine
-**M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18** (DECISIONS #76;
-execution order = numeric order, no gaps). v1 — pairwise repeated PD,
+**M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18 → M19** (DECISIONS
+#76; execution order = numeric order, no gaps; M19 — geographic
+structures — appended 2026-07-28, purely additive, #103). v1 — pairwise repeated PD,
 object-per-agent engine, Fermi selection, strategy-switch mutation,
 Streamlit UI, persistence + headless CLI — is complete (M8, 2026-07-07).
 M9 (selection rules, accounting, cooperation recording), M9.5 (sweep layer
@@ -204,6 +205,8 @@ event time-model — `time_model` clock choice, focal-bundle events on the
 1/N(t) generation-equivalent clock, variable_n + fixed_n demographic
 engines, symmetric imitation overlay, explicit birth/death/imitation
 events, recording cadence + schema 4; DECISIONS #85-#92, #93-#102)** are
-complete. Next up: M11 (population structure — adjacency + local birth;
-chat-designed first). Design everything to not
+complete. M11 (population structure) is chat-designed (DESIGN §2.12,
+DECISIONS #103-#110) and splits into **M11a** (structure, local birth,
+local interaction) and **M11b** (movement + layout painter). Next up:
+M11a — spec arrives as a separate prompt. Design everything to not
 block the v2/v3 extensions listed in `docs/DESIGN.md` §6.

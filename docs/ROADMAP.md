@@ -66,7 +66,8 @@ Out of scope for v1 (but nothing may block them): everything below.
 ## v2 — Economy-first: growth, structure, tags, group games
 
 Milestone spine (renumbered in DECISIONS #76; economy-first rationale in
-#58/#75): **M9 → M9.5 → M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18.**
+#58/#75; M19 appended 2026-07-28 — purely additive, no renumbering, #103):
+**M9 → M9.5 → M10 → M11 → M12 → M13 → M14 → M15 → M16 → M17 → M18 → M19.**
 M10's variable-N invariant is the spine's load-bearing change — every
 downstream milestone is built variable-N-aware from birth. Population
 structure (M11) runs before the sweep browser (M13) by #75's own logic:
@@ -113,11 +114,32 @@ run data exists.
   explicit birth/death/imitation events, recording cadence (Output
   section), schema 4 persistence, event-time chart axis, greying map,
   four validation scenarios, async bench column; 722 tests passing.
-- **M11 — Population structure (NEW).** Adjacency + local birth: the
-  `place_offspring` structural gate (built in M10a as the well-mixed
-  always-True corner) becomes neighbourhood-aware; carrying capacity may
-  become emergent from site count. Designs the bridge to the v3 spatial
-  layer. Chat-designed first (hard rule 6: DESIGN before code).
+- **M11 — Population structure.** Chat-designed 2026-07-28 (hard rule 6:
+  DESIGN §2.12 before code; DECISIONS #103-#110). Splits into M11a/M11b
+  (#103) so natal locality gets a clean baseline before movement, and each
+  change gets its own goldens.
+  - **M11a — Structure, local birth, local interaction.** The
+    graph-of-sites abstraction with the rectangular lattice as its first
+    builder (`structure.kind`, rows/cols with a most-square derived
+    default, `moore`/`von_neumann` neighbourhoods as distance metrics,
+    `torus`/`bounded` boundaries, #104); the soft reach kernel (support
+    radius R + decay β, #105) parameterised separately for birth and
+    interaction; carrying capacity as a second cap with a site-count
+    derived default (#106); placement contention + `boundary_order`
+    (#107, amending #80); the `matching.spatial_interaction` toggle over
+    the `neighbourhood_sample` primitive with the `SpatialKernel` sync
+    adapter (#108); six initial layouts + the layout-file mechanism
+    (#109); the square-cell rendering contract with pixel-array fallback
+    (#109). The M10a `place_offspring` gate (the well-mixed always-True
+    corner) becomes the local placement seam. Spec arrives as a separate
+    prompt and must satisfy the §2.12 inline-(?) checklist obligation.
+  - **M11b — Agent movement + layout painter.** The `MovementRule` ABC
+    (#46) with its own walk radius/decay pair over the same reach kernel,
+    on a configurable schedule — the schedule is the genuinely open
+    design item: under async it either becomes a new event type or a step
+    inside the focal activation (#103); plus the mouse layout painter
+    that writes the layout files M11a's configs reference (#109).
+    Movement stays population dynamics, orthogonal to strategies (#46).
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
@@ -131,11 +153,23 @@ run data exists.
   studied dynamic, to be exposed later as a labeled option
   (dynamics.imitation_adopter ∈ {symmetric, imitate_better}, default
   symmetric) governing both modes. Deferred out of M10b because it also
-  touches the stable sync selection path. Review checkpoint at M12 scoping:
+  touches the stable sync selection path. The checkpoint was EXAMINED at
+  M11 scoping (2026-07-28) and NOT triggered: Ohtsuki's imitation
+  updating chooses the reassessing individual at random, independently of
+  payoff — an endorsement of the shipped symmetric rule, not a reason to
+  fork (DECISIONS #110). It rolls to M12 scoping as originally written:
   ethnocentrism spreads strategies between in-group and out-group, where
-  symmetric vs imitate-better can differ, so examine there whether M12 needs
-  the option as a comparison (full rationale: DECISIONS #93). Not triggered
-  ⇒ roll the checkpoint to the next imitation-touching milestone.
+  symmetric vs imitate-better can differ, so examine there whether M12
+  needs the option as a comparison (full rationale: DECISIONS #93). Not
+  triggered ⇒ roll the checkpoint to the next imitation-touching
+  milestone.
+- **Neighbourhood-proportional imitation (backlog, #110).** Ohtsuki's
+  imitation updating picks a model proportionally over the whole
+  neighbourhood, self included; our overlay is a pairwise Fermi
+  comparison after a match. Reproducing the b/c > k + 2 imitation
+  threshold exactly would require this as a NEW mechanism — declined for
+  M11a explicitly on scope grounds (the death-birth threshold b/c > k is
+  the one testable with what we have).
 - **M13 — Sweep browser.** Member-run drilldown from a sweep's summary,
   multi-sweep interactive browsing, multi-curve overlays, summary-table
   filtering, side-by-side member comparison — the affordances deferred out
@@ -159,20 +193,28 @@ run data exists.
   lands when experiments/sweeps show the sampling matchers cannot buy the
   needed scale (the bench supplies the data; DECISIONS #58/#65; M10a's
   re-bench kept the trigger untripped, #84).
+- **M19 — Geographic structures (NEW, #103).** The second real
+  implementation of M11a's structure abstraction (DESIGN §2.12 forward-
+  guards, §6.3): irregular site sets from GeoJSON polygons (shared-border
+  adjacency) or raster masks (cells absent outside a boundary); per-site
+  capacity above 1 for varying population density — which forces the
+  distance-zero kernel question and co-residency semantics (#104); map
+  rendering including the mixed-occupancy colour question (likely both a
+  blended and a dominant-strategy view, §6.3); centroid/Euclidean
+  distance as a structure-supplied metric. Purely additive after M18 and
+  needs nothing from M12-M18, so it can be pulled forward without
+  renumbering pain provided M11a honours the forward-guards.
 
-## v3+ — Geography and real-world scenario modeling
+## v3+ — Real-world scenario modeling
 
-- Spatial layer: `Agent.position`, SpatialKernel matcher (distance-weighted
-  interaction), configurable initial dispersion — generalising M11's
-  adjacency structure.
-- Agent movement over time: `MovementRule` ABC (random walk, drift toward
-  similar neighbors, post-interaction relocation) on a configurable schedule,
-  feeding SpatialKernel matching; movement is population dynamics, not a
-  strategy decision (DESIGN §6.3, DECISIONS #46).
-- Real geographies: countries/states/municipalities (GeoJSON), map visualizations
-  of population composition and spread.
+The geographic layer itself moved into the v2 spine (DECISIONS #103):
+population structure is M11a, agent movement is M11b, and real geographies
+— GeoJSON/raster site sets, map rendering, geographic distance — are M19.
+What remains v3+:
+
 - Scenario modeling toolkit for societal/geopolitical conflicts (asymmetric payoffs,
-  alliances/sanctions as mechanics, heterogeneous endowments).
+  alliances/sanctions as mechanics, heterogeneous endowments) — built over
+  M19's geographic structures.
 - Richer dashboard (Dash or FastAPI+React) replacing Streamlit if needed.
 - Sweep operation story. The sweep *capability* is v2/M9.5 and in-UI sweep
   browsing is v2/M13 (DECISIONS #59/#75/#76); what remains for v3+ is only

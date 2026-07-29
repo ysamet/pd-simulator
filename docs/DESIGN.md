@@ -95,8 +95,9 @@ Behind a `Matcher` interface:
   All pairings are drawn at the start of the match phase, in agent-id order;
   k ≤ N−1 is validated cross-parameter, and k is ignored (greyed in the UI)
   under round_robin. Exact semantics and RNG order: DECISIONS #57.
-- **SpatialKernel** (future): agents have positions; interaction probability decays
-  with distance. See §6.3.
+- **SpatialKernel** (M11a): partners sampled from within the interaction
+  radius by the soft reach kernel — the sync-side adapter over the structure
+  module's `neighbourhood_sample` primitive. See §2.12 and §6.3.
 
 ### 2.5 Match length
 
@@ -229,9 +230,12 @@ UI's **Economy panel** (`ui/economy_helpers.calibration_report`) derives
 the survival window (`all-D income ≤ cost < all-C income`), escape velocity
 `e* = cost / r`, and mortality/memory readouts straight from the config —
 note the window is N-stable under `random_k` (bounded ≈ 2k interaction
-budget) but moves with N under round-robin. Still out of scope: population
-structure and local birth (M11), estate policy beyond destroy-on-death
-(M15). Async/Moran event time shipped in M10b — §2.11.
+budget) but moves with N under round-robin. Population structure and local birth
+are no longer out of scope — designed in §2.12 (M11, DECISIONS
+#103-#110), where this section's "K may become emergent" open line
+resolves definitively: K stays live as a second cap with a site-count
+derived default (#106). Still out of scope: estate policy beyond
+destroy-on-death (M15). Async/Moran event time shipped in M10b — §2.11.
 
 ### 2.11 Asynchronous event time (M10b — `dynamics.time_model`)
 
@@ -311,6 +315,147 @@ pinned in `async_dynamics.py`'s module docstring and golden-mastered
 change requiring a DECISIONS entry (#99). The ignored-parameter map
 (which knob is inert under which mode) is implemented as UI greying with
 a β carve-out — β follows the overlay in async (#101).
+
+### 2.12 Population structure (M11 — `structure.*`)
+
+The world becomes a set of **sites** (DECISIONS #103-#110; M11a =
+structure + local birth + local interaction, M11b = movement + the layout
+painter, #103). A site is an **exclusive container**: it holds at most
+`site_capacity` agents, an integer field pinned at 1 and validated as such
+in M11a — the field ships now so that allowing capacity > 1 at M19 is a
+parameter change, not a migration of the placement seam (#104). Structure
+is selected by `structure.kind` ∈ {`well_mixed`, `lattice`}, default
+`well_mixed` — the existing aspatial world, byte-identical and recovered
+as the degenerate fully-connected corner rather than as a separate code
+path.
+
+**The core abstraction is a graph of sites, never a rectangle** (#104). A
+site carries an id, a neighbour set, a capacity, and an optional
+coordinate. The rectangular lattice is ONE BUILDER over that abstraction;
+the core never knows about rows and columns. Distance is a method the
+STRUCTURE supplies, not a constant the kernel assumes. These three
+properties are forward-guards for M19 (geographic structures): an
+irregular country raster with holes, or a set of GeoJSON municipalities
+with shared-border adjacency, must be a second builder requiring no core
+change.
+
+**Lattice geometry.** `structure.rows` / `structure.cols` (blank resolves
+to the most-square factor pair of N — the #78 derived-default idiom; note
+prime N factorises to a 1×N line, a legitimate one-dimensional lattice but
+one the app must announce rather than let look like a bug);
+`structure.neighbourhood_shape` ∈ {`moore`, `von_neumann`} (8 or 4
+neighbours at radius 1 — implemented as the distance metric, Chebyshev or
+Manhattan, that the structure hands to BOTH kernels, so it governs birth
+reach and interaction reach together); `structure.boundary` ∈ {`torus`,
+`bounded`}, default `torus`. Torus is the default because uniform degree
+removes an edge artifact: on a bounded grid a corner cell has 3 neighbours
+and an interior cell 8, and since cooperation thresholds on graphs depend
+on degree, corners become spuriously favourable to cooperation. `bounded`
+ships anyway because at M19 a coastline is a real hard edge and varying
+degree is then the model, not a bug.
+
+**The soft reach kernel** (#105). One functional form, separately
+parameterised per use: the weight over a site at distance d is
+proportional to exp(−β·d) for d ≤ R and zero beyond, where R is a
+**support radius** and β a **decay**. This supersedes the M10b
+forward-note's single-temperature phrasing (spec Design 9, explainer §7),
+which was loose — sharpening a decay recovers nearest-neighbours-only, not
+a hard-edged disc. The corners: R = 1 is Hammond–Axelrod exactly; β = 0
+with R = n is a uniform disc (the "hard cutoff" the old note reached for);
+large β with R = n is steeply viscous with distant sites still reachable;
+R → ∞ with β = 0 is well-mixed, recovered by parameters rather than by a
+branch (design-freeze §11.5). M11a parameterises the kernel twice —
+`structure.birth_radius` / `structure.birth_decay` and
+`structure.interaction_radius` / `structure.interaction_decay` — and M11b
+adds a third pair for the walk. Two radii rather than one is what makes
+local-births-with-global-interaction and
+global-births-with-local-interaction separable experiments.
+
+**The two seams keep distinct jobs.** `admit_births()` is the GLOBAL gate
+— are we under carrying capacity, rationed by energy priority when seats
+are scarce. `place_offspring()` is the LOCAL gate — is there an empty site
+in reach, sampled by the birth kernel and contested per below. A parent
+must clear both. Place-before-pay (#80) is load-bearing at last: a parent
+that cannot place a child pays NO stake and stays eligible next period.
+
+**Carrying capacity survives under structure** as a second, tighter cap
+(#106 — resolving §2.10's "may become emergent" open line). Validator:
+K ≤ site count. Blank K under a lattice resolves to the site count (#78
+idiom), making "the grid decides" the zero-effort path; a K below site
+count leaves deliberate slack in which the occupied region can drift,
+cluster and migrate. The Economy panel reports BOTH numbers so slack is
+visible rather than a mysterious stall. Under `fixed_n`, N = site count
+exactly (validated) — every site occupied, which makes site-recycling the
+ONLY possible Moran placement (a death leaves exactly one empty site and
+the newborn has nowhere else to go), so the textbook death-birth corner is
+structural rather than a rule we impose.
+
+**Birth contention and boundary order** (amending the #80 frozen sequence
+— see DECISIONS #107). Contention exists only where several births resolve
+at one instant: synchronous + structure + `energy_economy`, and nowhere
+else (async resolves one birth per event; `fixed_n` never calls
+`admit_births` per #97d; sync well_mixed placement never fails). Under
+structure, the admitted birth set is resolved by
+`structure.placement_contest` ∈ {`random`, `energy_priority`}, default
+`random` — ONE permutation then iterate, matching Hammond–Axelrod's random
+reproduction order and keeping energy's role at eligibility (θ) rather
+than at winning a contested cell. Parent-id order is rejected: on a
+lattice, id correlates with founding position, so it silently becomes a
+spatial priority rule. The shuffle is gated by the structure flag, so
+well_mixed sync runs draw no extra RNG and stay byte-identical (the
+#80/#99 active-flag idiom). `dynamics.boundary_order` ∈ {`death_first`,
+`birth_first`}, default `death_first`, exposes H-A's period order as an
+option: under a lattice the ordering is no longer a phase offset but a
+different model, because it decides whether newborns fill scattered
+interior graves (deaths-first) or only frontier cells (births-first) — and
+the frontier is where the ethnocentrism mechanism lives. Greyed under
+async, which has no boundary to order.
+
+**Local interaction** (#108). `matching.spatial_interaction` (bool,
+default off). Off: today's behaviour, `matching.matcher` picks round_robin
+or random_k over the whole population. On: partners are sampled from
+within the interaction radius by the reach kernel, and `matching.matcher`
+GREYS — round-robin has no local analogue, and the well-mixed matchers are
+the infinite-radius corner. `matching.opponents_per_agent` (k) stays LIVE
+and does the work: k at or above the neighbourhood size means "play all
+neighbours", the H-A and Ohtsuki convention, so round-robin's IDEA
+survives the greying. k clamps to the number of neighbours that actually
+exist (the #81 clamp idiom) — edge cells under `bounded`, and irregular
+site sets at M19. Validator: spatial interaction requires
+`structure.kind = lattice`.
+
+**Initial layout** (#109). `structure.initial_layout` ∈ {`random`
+(default), `checkerboard`, `stripes`, `blocks`, `patches`,
+`central_block`} decides ARRANGEMENT only; composition is already set by
+the three-bucket model (#67). Ordered mixed → segregated: checkerboard is
+the anti-cluster baseline; patches (seed points grown outward) gives the
+most natural irregular clusters; central_block leaves the rest of the grid
+empty and is the FILLING regime, the one Kaznatcheev & Shultz's early-run
+result concerns. Plus a layout-FILE reference mechanism so a hand-authored
+arrangement is DATA the engine reads (rule 8: the run must re-run from its
+config; rule 4: the engine never knows a mouse was involved). The mouse
+painter that writes such files is M11b.
+
+**Rendering contract** (#109). Cells are always exactly square: side =
+min(max_width/cols, max_height/rows); the canvas takes whatever aspect the
+grid has. The side is floored at ≈ 3 px, below which cells stop being
+distinguishable. Past a few thousand cells the grid renders as a pixel
+ARRAY, not as thousands of individual shapes, or redraw crawls — this is
+where #94's wall-clock throttling starts to matter.
+
+Structure is IGNORED in tournament mode (no births, no deaths — nothing
+for space to do). Persistence gains a site id per agent under the
+honest-presence rule (#83). Still out of scope: agent movement (M11b),
+per-site capacity above 1, irregular/geographic site sets, and
+co-residency semantics (all M19).
+
+**M11a spec obligation** (design-freeze §12, restated because ~15
+parameters arrive at once): every new CONCEPT, every ENUM VALUE
+INDIVIDUALLY (`moore` and `von_neumann` each need their own explanation,
+not merely the parameter), and every DERIVED READOUT (emergent site count,
+effective neighbour count) carries an inline (?) drawn from a single
+described source. The spec must include an explicit checklist enumerating
+them so it is verifiable, not aspirational.
 
 ## 3. Architecture
 
@@ -429,7 +574,9 @@ Key contracts:
   2. **Fewer interactions per period**, via sampling matchers behind the
      existing `Matcher` ABC: **RandomK** (O(N·k) instead of round-robin's
      O(N²); shipped in M8 — this dimension's first implementation, DECISIONS
-     #57) and later **SpatialKernel**.
+     #57) and **local interaction** (M11a — the `SpatialKernel` sync
+     adapter over the structure module's `neighbourhood_sample` primitive,
+     §2.12/#108; this dimension's second implementation).
   3. **Parallelism across runs** (DECISIONS #59; shipped in M9.5a, #70).
      Whole runs are independent, so batch experiments parallelize across
      processes — the sweep layer's `multiprocessing.Pool` runner
@@ -463,7 +610,9 @@ event-time types M10b added (async runs only — see below):
   (M9b, DECISIONS #65), and — in `energy_economy` mode only — `agents`, a
   tuple of **`AgentSnapshot`** values (agent_id, parent_id, age, energy,
   strategy) describing the POST-boundary population entering the next
-  generation (M10a, §2.10). Empty under imitation, keeping those payloads
+  generation (M10a, §2.10). Under M11 structure, `AgentSnapshot` gains a
+  site id — present exactly when the run has structure, per the
+  honest-presence rule (#83). Empty under imitation, keeping those payloads
   byte-identical to pre-M10a. Births/deaths are reconstructed by diffing
   consecutive snapshots — deliberately no explicit birth/death events in
   the synchronous model (they belong to M10b's async event time, #82). No
@@ -629,16 +778,16 @@ the seed scenarios.
 
 ## 6. Designed-for future extensions (build nothing that blocks these)
 
-### 6.1 Growing populations — score-as-energy economy (M10 — part a SHIPPED)
+### 6.1 Growing populations — score-as-energy economy (M10 SHIPPED)
 The synchronous half landed as **M10a** (§2.10, DECISIONS #77-#84): the energy
 ledger, stake-transfer reproduction, the mortality trio, carrying capacity with
-deterministic admission, passport lineage, variable N, and extinction. Still
-future: **M10b** — the asynchronous / Moran-style event time-model (explicit
-birth/death events become meaningful there); **M11** — population structure
-(adjacency + local birth; the `place_offspring` gate in `core/economy.py` is
-its designed seam, and K may become emergent from site count); **M15** —
-economy policy (taxation, redistribution, immigration, inheritance beyond the
-destroy-on-death corner).
+deterministic admission, passport lineage, variable N, and extinction; the
+asynchronous / Moran-style event time-model landed as **M10b** (§2.11,
+DECISIONS #95-#102). Still future: **M11** — population structure (designed —
+§2.12: the `place_offspring` gate in `core/economy.py` becomes the local
+placement seam, and K stays live as a second cap with a site-count derived
+default, #106); **M15** — economy policy (taxation, redistribution,
+immigration, inheritance beyond the destroy-on-death corner).
 
 ### 6.2 N-player games, reputation, punishment (M16-M17)
 Public Goods Game and variants (threshold/step-level, volunteer's dilemma, n-player
@@ -646,22 +795,40 @@ snowdrift) via the arity-agnostic `Game` interface (M16). Reciprocity machinery 
 group games: public reputation scores, targeted peer punishment (pay a cost to fine a
 defector), exclusion (M17). These enter as engine mechanics + strategy-view extensions.
 
-### 6.3 Spatial / geographic layer (v3+)
-Agents get an optional `position`; `SpatialKernel` matcher makes interaction
-probability decay with distance; initial population dispersion configurable; positions
-may map onto real geographies (countries/states/municipalities via GeoJSON), rendered
-as map visualizations. Implication now: `Agent` carries an optional position attribute
-from day one; matching is already an interface; the results schema reserves room for
-per-agent spatial snapshots.
+### 6.3 Spatial layer (M11a shipped design, M11b, M19)
 
-**Movement (v3, DECISIONS #46):** positions are not static — agents move over
-time via a `MovementRule` ABC (candidate rules: random walk, drift toward
-similar neighbors, post-interaction relocation), applied on a configurable
-schedule and feeding the same distance-weighted `SpatialKernel` matching.
-Design intent: movement is a **population-dynamics concern, orthogonal to
-strategies** — strategies do not decide movement in the base design (a
-strategy-driven movement variant may become a later option, but the ABC is
-not designed around it).
+**M11a — discrete adjacency**, per §2.12: the graph-of-sites structure,
+the soft reach kernel, local birth, and local interaction. The
+`SpatialKernel` matcher promised here since v1 is now M11a's reach kernel
+— a thin sync-side `Matcher` adapter over the structure module's
+`neighbourhood_sample` primitive (#108).
+
+**M11b — agent movement**: the `MovementRule` ABC (#46) with its own walk
+radius and decay pair over the same kernel family, on a configurable
+schedule (the schedule is M11b's genuinely open design item — under async
+it either becomes a new event type or a step inside the focal activation,
+#103); plus the mouse layout painter that writes the layout files M11a's
+config references (#109). Movement remains a **population-dynamics
+concern, orthogonal to strategies** — strategies do not decide movement in
+the base design (unchanged from #46).
+
+**M19 — geographic structures**: irregular site sets from GeoJSON polygons
+(shared-border adjacency) or raster masks (cells absent outside a
+boundary); per-site capacity above 1 for varying population density;
+co-residency semantics (are co-residents neighbours, at what distance,
+does the kernel need a value at distance 0); map rendering including the
+mixed-occupancy colour question — leading candidate: blend occupant
+strategy colours weighted by count, with the honest risk that blending
+softens cluster BOUNDARIES, which is exactly what the Hammond–Axelrod
+story is about, so M19 likely wants both a blended and a
+dominant-strategy view; centroid/Euclidean distance as a
+structure-supplied metric.
+
+**Dropped: the continuous `Agent.position` plan** — not planned, not
+needed (#104). A raster is the mainstream representation of gridded
+geography, and continuity buys only sub-cell resolution below the scale at
+which the model has content, while costing the natural notion of "full"
+that makes density-dependence work.
 
 ### 6.4 GUI evolution
 Streamlit v1 → richer dashboard (Dash or FastAPI+React) when maps and heavy
