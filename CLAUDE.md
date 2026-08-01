@@ -160,13 +160,15 @@ decisions ends with these steps, in order:
 Never end a significant session without step 2. Stale or silent docs are bugs —
 they cause other advisors to give wrong advice with full confidence.
 
-## Session continuity (context-limit protocol)
+## Session continuity (the WIP.md protocol)
 
 The end-of-session ritual has one blind spot: a session that runs out of
-context never reaches its end. This protocol covers that gap (DECISIONS #43).
+context never reaches its end. This protocol covers that gap (DECISIONS
+#43) — and one scheduled job besides: the phase-boundary hand-off at ▲
+session resets. `docs/WIP.md` has two sanctioned roles:
 
-**When a session approaches its context limit mid-work, STOP working** and
-write `docs/WIP.md` containing:
+**(a) The context-limit escape hatch.** When a session approaches its
+context limit mid-work, STOP working and write `docs/WIP.md` containing:
 
 1. **State of the work**, at file-and-task granularity: what is done, what is
    in flight, what comes next.
@@ -177,17 +179,32 @@ write `docs/WIP.md` containing:
    conversation.
 
 Then tell the owner to start a fresh session — and still perform the
-mandatory end-of-session ritual (report DOCS CHANGED/UNCHANGED as usual;
-`WIP.md` itself does NOT count as a docs change).
+mandatory end-of-session ritual.
 
-**Every session MUST check for `docs/WIP.md` at start.** If it exists: read
-it, resume from it (including the pending docs obligations), and delete it
-once its contents are absorbed. A `WIP.md` left behind after its work is
-complete is a bug.
+**(b) The phase-boundary baton.** At the end of a COMPLETED phase whose
+phase plan schedules a ▲ session reset, write `docs/WIP.md` deliberately:
+phase state, staged-awaiting-commit status, and the next phase's entry
+point (including any verification tasks it carries).
+
+In both roles the next session reads it at start and deletes it once its
+contents are absorbed. **Every session MUST check for `docs/WIP.md` at
+start.** The leftover rule, restated: a `WIP.md` existing BETWEEN sessions
+is legitimate; one still present after its successor session has started
+and absorbed it is a bug.
+
+**Never the sole carrier.** `docs/WIP.md` is git-ignored — invisible to the
+design layer (Claude.ai) and to commits. It must NEVER be the only place a
+decision, deviation, pending docs obligation, or verification-task answer
+lives: all such content goes in tracked docs (`docs/DECISIONS.md`, the
+spec, regenerated docs) and in the end-of-phase handback text, with WIP.md
+at most duplicating it. A WIP.md states explicitly whether it carries
+pending obligations — and the answer should always be "none beyond what
+tracked docs already hold."
 
 `docs/WIP.md` is **ephemeral**: it is not part of the knowledge-preservation
-contract (never uploaded to the design chat), it is git-ignored, and it must
-never appear in a suggested commit file list.
+contract (never uploaded to the design chat), it must never appear in a
+suggested commit file list, and it is never counted in the DOCS CHANGED /
+DOCS UNCHANGED report.
 
 ## Current phase
 
