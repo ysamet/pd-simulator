@@ -207,6 +207,10 @@ engines, symmetric imitation overlay, explicit birth/death/imitation
 events, recording cadence + schema 4; DECISIONS #85-#92, #93-#102)** are
 complete. M11 (population structure) is chat-designed (DESIGN §2.12,
 DECISIONS #103-#110) and splits into **M11a** (structure, local birth,
-local interaction) and **M11b** (movement + layout painter). Next up:
-M11a — spec arrives as a separate prompt. Design everything to not
-block the v2/v3 extensions listed in `docs/DESIGN.md` §6.
+local interaction) and **M11b** (movement + layout painter). M11a is **in
+progress** (spec: `docs/specs/M11a-population-structure-spec.md`; #111 =
+pre-implementation docs pass): **Phase A** — `pdsim/core/structure.py`
+plus the registry's Structure geometry block, wired to no engine code —
+landed 2026-08-01 (#112). Next up: Phase B (occupancy, layouts,
+rendering, persistence). Design everything to not block the v2/v3
+extensions listed in `docs/DESIGN.md` §6.

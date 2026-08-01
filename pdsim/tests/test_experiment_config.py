@@ -10,7 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from pdsim.config import ExperimentConfig, get_spec, load_config, save_config
-from pdsim.config.experiment import GameConfig, PopulationConfig
+from pdsim.config.experiment import (
+    GameConfig,
+    PopulationConfig,
+    StructureConfig,
+    resolve_lattice_dimensions,
+)
 
 # Machine names from the strategy registry (pdsim/core/strategies/) —
 # composition names are validated against the registered roster.
@@ -430,3 +435,73 @@ class TestEconomyConfig:
             }
         )
         assert cfg.dynamics.carrying_capacity == 200  # < N, and that is fine here
+
+
+class TestStructureSection:
+    """The M11a geometry block: StructureConfig and the most-square default."""
+
+    def test_resolver_most_square_factor_pair(self) -> None:
+        """Blank rows AND cols: the most-square factor pair of N, rows ≤ cols."""
+        assert resolve_lattice_dimensions(None, None, 400) == (20, 20)
+        assert resolve_lattice_dimensions(None, None, 60) == (6, 10)
+        assert resolve_lattice_dimensions(None, None, 100) == (10, 10)
+        assert resolve_lattice_dimensions(None, None, 2) == (1, 2)
+
+    def test_resolver_prime_n_gives_the_one_by_n_line(self) -> None:
+        """A prime N factorises only as 1×N — a line, not a bug."""
+        assert resolve_lattice_dimensions(None, None, 101) == (1, 101)
+        assert resolve_lattice_dimensions(None, None, 13) == (1, 13)
+
+    def test_resolver_one_blank_fits_the_population(self) -> None:
+        """One dimension given: the blank one is the smallest count fitting N."""
+        assert resolve_lattice_dimensions(8, None, 60) == (8, 8)  # 8×8=64 ≥ 60
+        assert resolve_lattice_dimensions(None, 8, 60) == (8, 8)
+        assert resolve_lattice_dimensions(20, None, 400) == (20, 20)
+        assert resolve_lattice_dimensions(3, None, 100) == (3, 34)  # 3×34=102 ≥ 100
+
+    def test_resolver_both_given_pass_through(self) -> None:
+        """Explicit dimensions are never second-guessed."""
+        assert resolve_lattice_dimensions(7, 9, 60) == (7, 9)
+
+    def test_default_config_resolves_dimensions_from_n(self) -> None:
+        """A config with no structure section gets resolved plain numbers."""
+        cfg = _minimal_config()  # N = 100
+        assert cfg.structure.kind == "well_mixed"
+        assert (cfg.structure.rows, cfg.structure.cols) == (10, 10)
+        assert cfg.structure.neighbourhood_shape == "moore"
+        assert cfg.structure.boundary == "torus"
+
+    def test_partial_structure_section_resolves_the_blank_dimension(self) -> None:
+        """Rows given, cols blank: cols resolves against N at validation."""
+        cfg = _minimal_config(structure={"kind": "lattice", "rows": 5})
+        assert (cfg.structure.rows, cfg.structure.cols) == (5, 20)
+
+    def test_prebuilt_structure_config_instance_is_resolved_too(self) -> None:
+        """The resolver also covers programmatic construction with models."""
+        cfg = ExperimentConfig(
+            population=PopulationConfig(size=60, composition={"tit_for_tat": 60}),
+            structure=StructureConfig(kind="lattice"),
+        )
+        assert (cfg.structure.rows, cfg.structure.cols) == (6, 10)
+
+    def test_saved_yaml_holds_plain_numbers(self, tmp_path: Path) -> None:
+        """Hard rule 8: the auto rule can never change a stored run."""
+        cfg = _minimal_config()
+        path = save_config(cfg, tmp_path / "config.yaml")
+        text = path.read_text(encoding="utf-8")
+        assert "rows: 10" in text
+        assert "cols: 10" in text
+        assert load_config(path) == cfg
+
+    def test_standalone_section_keeps_blanks(self) -> None:
+        """Only the full experiment sees N; a lone section may stay blank."""
+        section = StructureConfig()
+        assert section.rows is None
+        assert section.cols is None
+
+    def test_registry_validates_the_geometry_fields(self) -> None:
+        """Bad choice strings and out-of-range dimensions fail with clear messages."""
+        with pytest.raises(ValidationError, match=r"structure\.kind"):
+            _minimal_config(structure={"kind": "hex_grid"})
+        with pytest.raises(ValidationError, match=r"structure\.rows"):
+            _minimal_config(structure={"rows": 0})

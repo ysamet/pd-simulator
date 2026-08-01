@@ -24,6 +24,7 @@ checked, and our validators run — so an ``ExperimentConfig`` that exists is an
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
@@ -41,8 +42,10 @@ __all__ = [
     "MatchingConfig",
     "OutputConfig",
     "PopulationConfig",
+    "StructureConfig",
     "load_config",
     "resolve_initial_energy",
+    "resolve_lattice_dimensions",
     "resolve_senescence_factor",
     "save_config",
 ]
@@ -91,6 +94,54 @@ def resolve_senescence_factor(
     if base_hazard > 0 and max_age > 0:
         return (1.0 / base_hazard) ** (1.0 / max_age)
     return 1.0
+
+
+def resolve_lattice_dimensions(
+    rows: int | None, cols: int | None, population_size: int
+) -> tuple[int, int]:
+    """Resolve the ``structure.rows`` / ``structure.cols`` derived defaults (M11a).
+
+    ``None`` means "auto". With BOTH blank, the grid is the most-square
+    factor pair of the population size N: the pair of whole numbers whose
+    product is exactly N, as close to square as possible (400 gives 20×20,
+    60 gives 6×10; rows never exceed columns). A prime N factorises only as
+    1×N — a single line of cells, a legitimate one-dimensional lattice that
+    the app announces rather than lets look like a bug. With ONE blank, the
+    blank dimension resolves to the smallest count that fits N over the
+    given one (rows = 8 with N = 60 gives cols = 8, since 8×8 = 64 is the
+    smallest 8-row grid holding 60 agents). With both given, they are used
+    as-is.
+
+    A pure free function — the M10a :func:`resolve_initial_energy` pattern
+    (spec Design 11, extension 2) — so the parameter panel can call the same
+    arithmetic at paint time ("auto → 10 × 10") and can never drift from the
+    validator. The validator only *calls* it, and the resolved plain numbers
+    are what ``save_config`` writes (hard rule 8: the auto rule can never
+    retroactively change a saved run).
+
+    Args:
+        rows: The configured row count, or ``None`` for auto.
+        cols: The configured column count, or ``None`` for auto.
+        population_size: N — the founding population size the auto rule
+            sizes the grid around.
+
+    Returns:
+        The resolved ``(rows, cols)`` pair, both at least 1.
+    """
+    if rows is None and cols is None:
+        # math.isqrt (new concept) is the exact whole-number square root.
+        # The largest divisor of N at or below it is the "rows" half of the
+        # most-square pair; scanning downward finds it (1 always divides, so
+        # the search cannot fail — for a prime N it lands exactly there).
+        square_root = math.isqrt(population_size)
+        best = next(d for d in range(square_root, 0, -1) if population_size % d == 0)
+        return best, population_size // best
+    if rows is None:
+        # cols is not None here — the both-blank case returned above.
+        return math.ceil(population_size / cols), cols
+    if cols is None:
+        return rows, math.ceil(population_size / rows)
+    return rows, cols
 
 
 def _registry_field(key: str) -> FieldInfo:
@@ -317,6 +368,47 @@ class PopulationConfig(_RegistryBackedModel):
                 f"{self.size}. They must match exactly."
             )
         return self
+
+
+class StructureConfig(_RegistryBackedModel):
+    """The shape of the world: sites, lattice geometry, boundary (M11a, §2.12).
+
+    In Phase A of M11a this section is registered and validated but consumed
+    by nothing — the well-mixed engine does not route through structure code
+    at all, which is what keeps every pre-M11a run byte-identical (spec
+    Defining principle 1). Later phases wire it to founding placement, local
+    birth, and local interaction.
+
+    Attributes:
+        kind: ``"well_mixed"`` (the classic aspatial world, the default) or
+            ``"lattice"`` (a rectangular grid of exclusive sites).
+        rows: Lattice row count. ``None`` in the raw input means "auto =
+            most-square factor pair of the population size" and is resolved
+            to a plain number at experiment validation (never stored as
+            null — hard rule 8; see :func:`resolve_lattice_dimensions`).
+            ``None`` survives only in a standalone-built section, where no
+            population size is in sight.
+        cols: Lattice column count; same auto rule as ``rows``.
+        neighbourhood_shape: ``"moore"`` (8 neighbours; Chebyshev distance)
+            or ``"von_neumann"`` (4 neighbours; Manhattan distance). The
+            shape IS the grid's distance metric.
+        boundary: ``"torus"`` (edges wrap; uniform degree) or ``"bounded"``
+            (hard edges; corners have fewer neighbours).
+    """
+
+    _registry_keys: ClassVar[dict[str, str]] = {
+        "kind": "structure.kind",
+        "rows": "structure.rows",
+        "cols": "structure.cols",
+        "neighbourhood_shape": "structure.neighbourhood_shape",
+        "boundary": "structure.boundary",
+    }
+
+    kind: str = _registry_field("structure.kind")
+    rows: int | None = _registry_field("structure.rows")
+    cols: int | None = _registry_field("structure.cols")
+    neighbourhood_shape: str = _registry_field("structure.neighbourhood_shape")
+    boundary: str = _registry_field("structure.boundary")
 
 
 class DynamicsConfig(_RegistryBackedModel):
@@ -611,6 +703,8 @@ class ExperimentConfig(_RegistryBackedModel):
         matching: Who plays whom each generation.
         match: Match length mode and noise.
         population: Size, memory constraint, and initial strategy mix.
+        structure: The shape of the world — well-mixed or a lattice of
+            sites (M11a; consumed by nothing in Phase A).
         dynamics: Selection and mutation settings.
         output: Recording cadence — what the run records, never what it
             simulates (M10b; consumed by asynchronous runs only, #34).
@@ -643,9 +737,82 @@ class ExperimentConfig(_RegistryBackedModel):
     matching: MatchingConfig = Field(default_factory=MatchingConfig)
     match: MatchConfig = Field(default_factory=MatchConfig)
     population: PopulationConfig
+    structure: StructureConfig = Field(default_factory=StructureConfig)
     dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     strategy_params: dict[str, dict[str, registry.ParamValue]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_structure_dimensions(cls, data: object) -> object:
+        """Resolve blank lattice rows/cols into plain numbers (M11a).
+
+        The cross-section counterpart of ``DynamicsConfig``'s derived
+        defaults: the auto rule reads the population size, which lives in a
+        different section, so it must run here on the full experiment where
+        both sections are visible. It runs regardless of ``structure.kind``
+        — like every #78 derived default, the stored config always holds
+        plain numbers, so the auto rule can never retroactively change a
+        saved run (hard rule 8). Anything malformed (a missing population,
+        a non-integer size) is passed through untouched so pydantic's own
+        field validation reports it with its usual message.
+
+        Args:
+            data: The raw input mapping (or a non-mapping, passed through
+                untouched).
+
+        Returns:
+            The mapping with ``structure.rows`` and ``structure.cols``
+            always present as numbers.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        structure = data.get("structure")
+        if isinstance(structure, StructureConfig):
+            current_rows, current_cols = structure.rows, structure.cols
+        elif isinstance(structure, dict):
+            current_rows, current_cols = structure.get("rows"), structure.get("cols")
+        elif structure is None:
+            current_rows = current_cols = None
+        else:
+            return data
+        if current_rows is not None and current_cols is not None:
+            return data
+
+        def valid_dimension(value: object) -> bool:
+            # bool is a subclass of int (the registry gotcha), so reject it
+            # explicitly; a present-but-invalid value passes through untouched
+            # for the registry's own message.
+            return value is None or (
+                isinstance(value, int) and not isinstance(value, bool) and value >= 1
+            )
+
+        if not (valid_dimension(current_rows) and valid_dimension(current_cols)):
+            return data
+
+        population = data.get("population")
+        if isinstance(population, PopulationConfig):
+            size = population.size
+        elif isinstance(population, dict):
+            raw_size = population.get("size")
+            size = registry.get_spec("population.size").default if raw_size is None else raw_size
+        else:
+            return data
+        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+            return data
+
+        rows, cols = resolve_lattice_dimensions(current_rows, current_cols, size)
+        resolved = dict(data)
+        if isinstance(structure, StructureConfig):
+            # model_copy (new concept): the way to "change" a frozen pydantic
+            # model — it builds a new instance with the listed fields replaced.
+            resolved["structure"] = structure.model_copy(update={"rows": rows, "cols": cols})
+        elif isinstance(structure, dict):
+            resolved["structure"] = {**structure, "rows": rows, "cols": cols}
+        else:
+            resolved["structure"] = {"rows": rows, "cols": cols}
+        return resolved
 
     @model_validator(mode="after")
     def _check_matching_fits_population(self) -> Self:

@@ -2272,3 +2272,35 @@ as explainer-only knowledge — that ships a flagship that can silently
 demonstrate nothing (P = 1 clearing L) and a threshold scenario whose
 central quantity dissolves under the default matrix, with no visible
 signal in the app either way.
+
+**#112 — 2026-08-01 — Phase A micro-semantics the spec left open: the
+one-blank lattice dimension resolves by ceiling division, and zero-weight
+candidates clamp out of the kernel draw (M11a Phase A implementation).**
+Two small rules were decided during Phase A implementation because the spec
+specified the surrounding contract but not these cases. (a) **One blank
+dimension.** Design 1 and Design 11 specify blank rows AND cols (the
+most-square factor pair of N) but not one-blank-one-given, which the two
+independent nullable widgets and hand-written YAML both permit. DECIDED:
+the blank dimension resolves to the SMALLEST count that fits N over the
+given one — ceil(N / given); rows = 8 with N = 60 gives cols = 8 (8×8 = 64
+is the smallest 8-row grid holding 60 agents). This reads "auto" uniformly
+as "size the grid to fit the population", keeps blank-means-auto the
+zero-effort path, and follows the #78 idiom (resolved at validation;
+`config.yaml` stores plain numbers; `resolve_lattice_dimensions` is the
+pure free function per spec Design 11 extension 2). Alternative rejected:
+requiring both-or-neither (a validation error) — hostile to the obvious
+reading "I want 8 rows, you figure out the rest", and an error where a
+sensible resolution exists contradicts the derived-default philosophy.
+(b) **Partial zero weights in `neighbourhood_sample`.** Design 2 pins the
+ALL-zero combined-weight case (uniform fallback over the candidates, the
+#63 shift-idiom contract) but not some-zero-some-positive. DECIDED: a
+candidate whose combined weight is zero is simply never drawn, and the #81
+clamp counts DRAWABLE (positive-weight) candidates — so a draw of size 3
+over {0, 0, w} returns one site, not three. This is the mathematical
+content of "weight zero" carried through sampling-without-replacement;
+the alternative (numpy's own behaviour: raise when size exceeds the
+positive-weight count) violates the clamp idiom. No M11a call site
+exercises the partial-zero case (site_weights is Design 7's fixed_n
+breeder hook, always size 1); the rule exists so the primitive's contract
+has no undefined corner. Both rules are documented in their docstrings and
+pinned by tests (test_experiment_config.py, test_structure.py).

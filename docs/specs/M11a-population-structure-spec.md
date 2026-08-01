@@ -1,16 +1,13 @@
-Status: draft
+Status: in progress (Phase A implemented 2026-08-01; see DECISIONS #112)
 
 # M11a — Population structure (sites, local birth, local interaction)
 
 Companion explainer: **not yet written.** The explainer (the science — spatial
 reciprocity, the Ohtsuki thresholds, the Hammond–Axelrod and Kaznatcheev &
 Shultz lineage) arrives as a separate prompt that follows a literature
-verification pass, because two claims flagged UNVERIFIED in DECISIONS #103
-gate it: whether Hammond & Axelrod used wrap-around (torus) boundaries on
-their 50×50 lattice, and the Kaznatcheev & Shultz 300-period figure that the
-M10 explainer currently quotes without a verification note of its own.
-Neither claim may enter the explainer — or any scenario text — until checked
-against publisher records.
+verification pass: it is gated by the verification items enumerated in this
+spec's Out-of-scope section, none of which may enter the explainer — or any
+scenario text — until checked against publisher records.
 
 Read DESIGN §2.12 (M11a's design brief, in full), §6.3, §2.10, §3.1, §4, §5
 and DECISIONS #103–#110 (the M11 design batch), plus #34, #42, #47, #57,

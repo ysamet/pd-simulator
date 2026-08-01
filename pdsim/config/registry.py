@@ -551,6 +551,140 @@ register(
 )
 
 # ---------------------------------------------------------------------------
+# Structure — the shape of the world (docs/DESIGN.md §2.12; M11a)
+# Sits between Population and Dynamics so every auto value's source renders
+# above it: N is set in Population, rows/cols auto-derive from N here, and K
+# (Dynamics) will auto-derive from the site count (spec Design 11).
+# ---------------------------------------------------------------------------
+
+register(
+    ParameterSpec(
+        key="structure.kind",
+        kind="choice",
+        default="well_mixed",
+        choices=("well_mixed", "lattice"),
+        label="World structure",
+        section="Structure",
+        description=(
+            "The shape of the world the population lives in. 'well_mixed': the "
+            "classic aspatial world of every earlier version — there are no "
+            "places, every agent can meet every other, and distance does not "
+            "exist. 'lattice': the population lives on a rectangular grid of "
+            "sites, each site holding at most one agent; who an agent plays and "
+            "where its newborn children are placed become LOCAL questions, "
+            "decided by grid distance. One honest caveat, stated where the "
+            "choice is made: under synchronous 'imitation' reproduction the "
+            "agent a player compares its score against is still drawn from the "
+            "WHOLE population even on a lattice — interaction partners and "
+            "newborn placement go local, strategy imitation stays global."
+        ),
+        learn_more=(
+            "Putting a population on a grid is what lets cooperators survive by "
+            "clustering — neighbours mostly meet neighbours, so cooperation's "
+            "benefits stay among cooperators instead of leaking to everyone."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.rows",
+        kind="int",
+        default=None,
+        minimum=1,
+        nullable=True,
+        label="Lattice rows",
+        section="Structure",
+        description=(
+            "Number of rows in the lattice grid. Leave empty for automatic "
+            "sizing: the grid becomes the most-square rectangle whose cell "
+            "count exactly equals the population size (400 agents give a "
+            "20 x 20 grid; 60 give 6 x 10). A PRIME population size can only "
+            "factorise as a single line of cells (101 gives 1 x 101) — a "
+            "legitimate one-dimensional world, not a bug. If you set only one "
+            "dimension, the other resolves to the smallest count that fits the "
+            "whole population. Ignored under the 'well_mixed' structure."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.cols",
+        kind="int",
+        default=None,
+        minimum=1,
+        nullable=True,
+        label="Lattice columns",
+        section="Structure",
+        description=(
+            "Number of columns in the lattice grid. Leave empty for automatic "
+            "sizing: the grid becomes the most-square rectangle whose cell "
+            "count exactly equals the population size (400 agents give a "
+            "20 x 20 grid; 60 give 6 x 10). A PRIME population size can only "
+            "factorise as a single line of cells (101 gives 1 x 101) — a "
+            "legitimate one-dimensional world, not a bug. If you set only one "
+            "dimension, the other resolves to the smallest count that fits the "
+            "whole population. Ignored under the 'well_mixed' structure."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.neighbourhood_shape",
+        kind="choice",
+        default="moore",
+        choices=("moore", "von_neumann"),
+        label="Neighbourhood shape",
+        section="Structure",
+        description=(
+            "Which cells count as a cell's neighbours — and, with that, what "
+            "DISTANCE means on the grid, because the shape IS the distance "
+            "metric. 'moore': the 8 surrounding cells are neighbours; a "
+            "diagonal step counts as distance 1, so distance is the LARGER of "
+            "the row and column differences (Chebyshev distance). "
+            "'von_neumann': only the 4 orthogonal cells (up, down, left, "
+            "right) are neighbours; a diagonal step costs 2, because distance "
+            "is the row difference PLUS the column difference (Manhattan "
+            "distance). This one choice governs birth reach and interaction "
+            "reach TOGETHER: every 'how far away is that site' in the world is "
+            "measured with the metric chosen here, never per feature."
+        ),
+        learn_more=(
+            "The two classic cellular-automaton neighbourhoods, named after "
+            "Edward F. Moore and John von Neumann."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.boundary",
+        kind="choice",
+        default="torus",
+        choices=("torus", "bounded"),
+        label="Grid boundary",
+        section="Structure",
+        description=(
+            "What happens at the edge of the grid. 'torus': the world wraps "
+            "around — the left edge is adjacent to the right edge and the top "
+            "to the bottom, so there is no rim and every cell has exactly the "
+            "same number of neighbours. 'bounded': the grid has hard edges — "
+            "corner and edge cells have FEWER neighbours than interior cells "
+            "(a corner keeps 3 of Moore's 8, or 2 of von Neumann's 4). The "
+            "default is 'torus' because uniform degree removes an edge "
+            "artifact: how easily cooperation survives depends on how many "
+            "neighbours a cell has, so on a bounded grid the corners become "
+            "spuriously friendly to cooperation — an effect of the map's "
+            "edge, not a finding about the model. Choose 'bounded' "
+            "deliberately when a hard edge is itself part of what you want to "
+            "model (a coastline, a walled world)."
+        ),
+    )
+)
+
+# ---------------------------------------------------------------------------
 # Dynamics — selection and mutation (docs/DESIGN.md §2.7)
 # ---------------------------------------------------------------------------
 

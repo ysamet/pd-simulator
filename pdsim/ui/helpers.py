@@ -21,13 +21,14 @@ from pydantic import ValidationError
 from pdsim.config.experiment import (
     ExperimentConfig,
     resolve_initial_energy,
+    resolve_lattice_dimensions,
     resolve_senescence_factor,
 )
 from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
 # its parameters live at the top level of the config (DECISIONS #34).
-_SECTIONS = ("game", "matching", "match", "population", "dynamics", "output")
+_SECTIONS = ("game", "matching", "match", "population", "structure", "dynamics", "output")
 
 IGNORED_IN_TOURNAMENT = (
     "dynamics.generations",
@@ -364,6 +365,7 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
         config.matching,
         config.match,
         config.population,
+        config.structure,
         config.dynamics,
     ]
     values: dict[str, ParamValue] = {}
@@ -387,6 +389,15 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
         values["dynamics.max_age"],  # type: ignore[arg-type]
     ):
         values["dynamics.senescence_factor"] = None
+    # Same loss-free inverse for the M11a lattice dimensions: a stored pair
+    # that equals the most-square auto result is presented as auto (blank).
+    if (values["structure.rows"], values["structure.cols"]) == resolve_lattice_dimensions(
+        None,
+        None,
+        values["population.size"],  # type: ignore[arg-type]
+    ):
+        values["structure.rows"] = None
+        values["structure.cols"] = None
     return values
 
 
