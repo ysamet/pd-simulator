@@ -2192,3 +2192,83 @@ comparison after a match. Reproducing b/c > k + 2 exactly would require
 neighbourhood-proportional imitation — a NEW MECHANISM, declined for M11a
 explicitly (not by omission) on scope grounds; the death-birth threshold
 b/c > k is the one testable with what we have.
+
+**#111 — 2026-07-31 — The b/c > k threshold presupposes an ADDITIVE
+(donation-game) payoff matrix; additivity becomes the scenario's fourth
+stated requirement plus a new derived readout (§12 checklist 53 → 54);
+and the flagship's two default-overrides are recorded as decisions
+(pre-Phase-A documentation pass on the M11a spec).** The spec is at
+`Status: draft` with no code built against it, so these are
+pre-implementation corrections rather than #62 deviations; they are
+recorded here because they are genuine choices whose reasoning existed
+nowhere in the repository. (a) THE FINDING: Ohtsuki's b/c > k rule is
+derived for the donation game specifically — a cooperator pays a cost c
+so the opponent receives a benefit b, a defector pays and provides
+nothing: T = b, R = b − c, P = 0, S = −c. Reading the cost of
+cooperating off that matrix twice gives T − R = c against a cooperator
+and P − S = c against a defector — the SAME number ("additivity", or
+"equal gains from switching"); the compliance test is T − R = P − S
+(defining c), equivalently T − P = R − S (defining b). The project
+defaults T=5, R=3, P=1, S=0 FAIL it: T − R = 2 ≠ 1 = P − S — a
+perfectly valid PD (the ordering and 2R > T + S both hold) that simply
+is not a donation game. The consequence is sharper than "the rule does
+not apply": with a non-additive matrix, "b/c" is not a well-defined
+quantity at all. Two candidate benefits (T − P = 4, R − S = 3) against
+two candidate costs (T − R = 2, P − S = 1) give four defensible
+readings — 4/2 = 2.0, 4/1 = 4.0, 3/2 = 1.5, 3/1 = 3.0 — of which two
+clear von Neumann's k = 4 and two fail it, so a user could "predict"
+either outcome by choosing a definition: the signature of a malformed
+question, not a hard one. `donation_game_threshold`'s T=5, R=4, P=0,
+S=−1 IS additive (c = 1, b = 5, b/c = 5 unambiguous) — which is why
+those values were chosen, and why VT-1's negative-payoff question was
+load-bearing: additivity with P = 0 FORCES a negative sucker payoff.
+(b) DECIDED: additivity becomes the FOURTH stated requirement of the
+scenario, with the arithmetic in the scenario text; the §12 concept
+explanation for the threshold carries the precondition (b and c only
+EXIST when T − R = P − S — under a non-additive matrix the ratio is
+ambiguous, not merely inapplicable); and a NEW derived readout inspects
+the four live payoff values and reports either "additive: b = 5, c = 1,
+b/c = 5" or "not additive — the b/c > k threshold does not apply" with
+the one-line reason (cooperating costs a different amount against a
+cooperator than against a defector). It is a pure function of four
+registry values on the spec Design 11 paint-time resolver pattern — no
+new machinery. Count change, stated explicitly: §12 derived readouts
+8 → 9, checklist total 53 → 54. (c) The flagship `spatial_reciprocity`
+gains two EXPLICIT setting overrides the spec had only implied in
+prose: `neighbourhood_shape = von_neumann` (overriding the `moore`
+default) — fewer neighbours means stronger viscosity and an easier time
+for clustering, so this is the configuration most likely to actually
+show cooperation surviving, which is what a flagship scenario is for;
+and `payoff_punishment = 0` (overriding the default P = 1) — the
+scenario's entire mechanism is that a defector in a defector interior
+earns NOTHING and starves against the basic living cost L, whereas at
+P = 1 with eight Moore neighbours a defector in a solid block earns 8
+per round, which may well clear L — in which case it does not starve,
+cooperator clusters gain no relative advantage, and the flagship
+demonstrates nothing. Recorded as DECISIONS rather than treated as
+clarifications deliberately: P = 0 is not a more precise restatement of
+anything — it is an override of a live registry default chosen for a
+specific mechanical reason, and a later reader meeting it in scenario
+prose alone would have no way to recover that reason; the same logic
+covers the shape override. This is the traceability this file exists
+for. Conceptual guard, also written into the scenario text: the
+flagship does NOT rest on the Ohtsuki mechanism — its story is
+ECOLOGICAL (absolute income measured against a survival threshold),
+while b/c > k concerns relative fitness in a Moran process under weak
+selection, which is `donation_game_threshold`'s story; the two
+arguments happen to point the same way and must never be conflated.
+(d) UNVERIFIED POINTER, for the explainer's literature pass only: there
+is a known generalisation of b/c > k to non-additive matrices via a
+structure coefficient — cooperation favoured when σR + S > T + σP, with
+σ = (k+1)/(k−1) for death-birth on a regular graph (Tarnita et al.
+2009 / Nowak et al. 2009 the likely sources). It was derived during the
+design conversation by checking that it collapses correctly to b/c > k
+under additivity — a consistency check, NOT a citation — and it enters
+no spec or app text until verified against publisher records (the
+standing rule now written into the spec's explainer bullet; the σ
+inequality itself appears only here). Alternative rejected: leaving the
+flagship's values as prose implications and the additivity precondition
+as explainer-only knowledge — that ships a flagship that can silently
+demonstrate nothing (P = 1 clearing L) and a threshold scenario whose
+central quantity dissolves under the default matrix, with no visible
+signal in the app either way.
