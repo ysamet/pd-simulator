@@ -140,11 +140,34 @@ run data exists.
     inside the focal activation (#103); plus the mouse layout painter
     that writes the layout files M11a's configs reference (#109).
     Movement stays population dynamics, orthogonal to strategies (#46).
+
+    **New parameter: `matching.encounter_mode`** ∈ {`per_initiator`,
+    `per_pair`}, default `per_initiator` (today's behaviour). Under the
+    current no-deduplication rule inherited from `RandomK`, an unordered
+    pair of neighbours meets **twice** per period, because each of the two
+    independently initiates a match. That is an artefact of indexing
+    matches by initiator, not a modelling claim: an encounter is an event
+    that happens to a *pair*. `per_pair` deduplicates. Note that two
+    matches of R rounds is not equivalent to one match of 2R rounds —
+    reciprocal strategies reopen at each match boundary, and under
+    continuation mode the length is drawn per match. Deferred from M11a
+    deliberately: the M11a spec is frozen and Phase A is committed, and
+    changing pairing semantics would alter RNG consumption and invalidate
+    the golden masters Phase C depends on. Requires its own spec and a
+    DECISIONS entry when picked up.
+
+    **Advisory mechanism + advisories A1, A2, A3** (`docs/ADVISORIES.md`)
+    — warning-shaped derived readouts on the same predicate-table pattern
+    as the greying map. Owned here rather than earlier because where a
+    warning appears is a disclosure question, so the rules and the
+    parameter-panel redesign are designed together.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
   Axelrod ethnocentrism — richer with the v3 spatial layer). Built
   variable-N-aware on top of M10. See DESIGN §6.5, DECISIONS #46/#58.
+  Plus **advisories A4 and A5** (`docs/ADVISORIES.md`): the birth-death
+  cooperation warning and the payoff-scale/selection-intensity warning.
 - **Imitation adopter rule — asymmetric "imitate-better" option
   (review-at M12).** The imitation mechanism currently uses the symmetric
   adopter rule in both time models (a random adopter of the pair; β = 0 is

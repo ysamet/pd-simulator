@@ -2304,3 +2304,81 @@ exercises the partial-zero case (site_weights is Design 7's fixed_n
 breeder hook, always size 1); the rule exists so the primitive's contract
 has no undefined corner. Both rules are documented in their docstrings and
 pinned by tests (test_experiment_config.py, test_structure.py).
+
+**#113 — 2026-08-02 — A standalone explainer with no companion
+specification, and the naming that follows.**
+`docs/explainers/calibration-guide.md` ships without a paired spec. The
+companion-explainer rule assumes each explainer documents something a
+milestone built; this one documents behaviour that already exists across
+M9 through M11a, so there is nothing to specify and nothing to freeze. Two
+consequences recorded so a later reader does not conclude a spec was lost.
+First, the filename drops the milestone prefix that the explainer
+convention assumes and uses `calibration-guide.md` rather than a name
+ending `-explainer.md` — it sits in `docs/explainers/` but is a standing
+reference rather than a milestone companion, and the name says so. Second,
+this establishes the precedent for future standalone documents: a
+cross-cutting reference gets a descriptive filename, no spec, and a
+DECISIONS entry noting the deviation. Alternative rejected: writing a
+retrospective spec purely to satisfy the pairing rule, which would produce
+a document with no frozen intent, no validation section and no
+implementation to record — a ritual artifact rather than a record.
+
+**#114 — 2026-08-02 — VT-3's second-order claim overstates what the
+arithmetic supports; softened in the guide, and Phase B will measure the
+open half.** The M11a spec states that because the `fixed_n` breeder draw
+reads accumulated energy, relative differences widen as a run proceeds and
+effective selection strengthens over time. The first half does not follow
+from the shift idiom. Under `w_i = e_i − min(e)`, if agent energies
+diverge linearly at rates `r_i`, then `w_i(t) = (r_i − r_min) × t`, and
+the draw probability `w_i / Σw` has `t` in both numerator and denominator
+— it cancels. Subtracting the poorest normalises steady divergence away
+entirely. What IS demonstrable and ships in the guide: (a) selection
+begins at exactly zero, because at run start every agent holds identical
+energy, every shifted weight is zero, the uniform fallback fires, and the
+draw is neutral with no fitness content — so selection strengthens *from
+nothing*, which is a real effect but a different one; and (b) the draw
+partly selects for AGE rather than strategy, because an incumbent has had
+longer to accumulate than a newborn, and at the textbook `offspring_stake
+= 0` a newborn's weight sits at the bottom and it effectively cannot breed
+until it accumulates. Whether the spread keeps widening after divergence
+is established requires super-linear growth in the spread, which is
+plausible — richer agents breed more, and the M11a multiply-fork compounds
+distance weight with fitness — but is an empirical question, not an
+arithmetic one. **Phase B task added: log the shifted-weight spread at
+three points in a `fixed_n` run and report whether it grows faster than
+linearly.** The spec text is frozen and is NOT edited; this entry is the
+deviation record per the standing rule. The `donation_game_threshold`
+scenario text uses the softened wording. Alternative rejected: repeating
+the spec's wording in the guide, which would put a claim that fails five
+lines of algebra into user-facing scenario text.
+
+**#115 — 2026-08-02 — The flagship gains a third explicit override:
+`payoff_sucker = −1`.** #111(c) recorded two overrides for
+`spatial_reciprocity` — `neighbourhood_shape = von_neumann` and
+`payoff_punishment = 0`. With punishment overridden to 0 and sucker left
+at its registry default of 0, the configuration has punishment = sucker,
+which fails the strict `T > R > P > S` ordering that
+`game.enforce_pd_ordering` enforces by default. Three resolutions existed:
+also disable the ordering validator; override the sucker payoff to a
+negative value; or rely on the validator being lenient. DECIDED: override
+`payoff_sucker = −1`, giving T = 5, R = 3, P = 0, S = −1. Reasons. It
+keeps the scenario legal under the app's own rules, so nobody loading it
+meets a validation error or inherits a scenario exempt from checking. It
+makes the sucker payoff carry meaning rather than being a silent zero: a
+cooperator at a cluster edge now actively loses energy per defector
+neighbour, which sharpens the pressure to cluster — the mechanism the
+scenario exists to show. And it does not disturb #111's conceptual guard,
+because the matrix remains non-additive: T − R = 2 against P − S = 1, so
+the flagship is still emphatically not a donation game and its story is
+still ecological rather than Ohtsuki's. Alternative rejected: disabling
+the ordering validator for the flagship, which is defensible — punishment
+= sucker = 0 is the recognised "weak Prisoner's Dilemma" of the
+spatial-games literature (Nowak & May 1992; named and characterised by
+Szabó & Fáth 2007) — but buys a tidier matrix at the price of switching
+off a safety rail on the project's headline scenario, so that anything the
+user subsequently edits is unchecked. Second alternative rejected: relying
+on the validator being lenient, which is a fact about the code rather than
+a decision, and a rule documented as strict that behaves leniently is a
+defect waiting to be fixed out from under the scenario. **A verification
+task confirms which behaviour the validator actually has (VT-6(a), in the
+M11a spec's post-freeze addendum).**

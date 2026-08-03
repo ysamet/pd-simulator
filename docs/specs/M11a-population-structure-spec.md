@@ -956,6 +956,65 @@ does, so the registry help text must say so. **If known-set:** the only
 well-mixed effect is newborn exposure to the death phase, as described in
 Design 5. **Write the answer into the help text either way.**
 
+### Post-freeze addendum — VT-5 and VT-6 (added 2026-08-02)
+
+These two tasks arrived AFTER this spec was frozen (`Status: in
+progress`), delivered by the calibration-guide prompt that also produced
+DECISIONS #113-#115. They are recorded here rather than in `docs/WIP.md`
+because WIP.md is git-ignored and may never be the sole carrier of a
+verification task or its answer (CLAUDE.md). Nothing above this heading
+was edited. Neither task names a phase: VT-5 and VT-6(a) are read-only
+code checks that can run in any phase, while VT-6(b) needs the
+local-interaction machinery and so cannot run before Phase D.
+
+**VT-5 — `threshold_cloning` shift-dependence.** Read-only, no code
+change. In the `threshold_cloning` selection rule, is the survival bar
+computed as `multiplier × generation_mean`? **If yes:** the calibration
+guide's §3.5 table ships as written — the rule is shift-invariant only
+at the default multiplier of 1.0, because under a shift `a` the bar
+moves by `m × a` while individual scores move by `a`, leaving a relative
+displacement of `(m − 1) × a`. **If the implementation differs:** report
+the actual computation; the design layer rewrites that table row before
+the guide is considered final.
+
+**VT-6 — Joint flagship verification.** Two questions, one report.
+
+*(a) Payoff ordering validator strictness.* Does
+`game.enforce_pd_ordering` compare punishment against sucker strictly
+(`P > S`) or leniently (`P >= S`)? **If strict:** #115's override of
+`payoff_sucker = −1` is required and ships as decided. **If lenient:**
+report it — the documentation describes the rule as strict, and a rule
+documented one way and implemented another is a defect to be logged, not
+a fact to build a scenario on. #115's override stands either way.
+
+*(b) Matches per agent under spatial interaction.* Confirm empirically —
+a short instrumented run is fine — how many matches each agent actually
+plays per generation when `spatial_interaction` is on, `structure.kind =
+lattice`, `neighbourhood_shape = von_neumann`, boundary `torus`, and
+`opponents_per_agent` ≥ 4. **Expected: ≈ 8**, because Design 6 inherits
+`RandomK`'s no-deduplication behaviour, so each agent initiates 4 and is
+drawn by 4. **If ≈ 8 confirmed:** the flagship's `basic_living_cost`
+must be calibrated against a cluster-interior cooperator income of ≈ 8R,
+not 4R, and the Moore counterfactual in the scenario's things-to-try is
+a four-fold income change rather than a two-fold one — both must be
+checked against the scenario's actual living cost before the flagship is
+trusted. **If ≈ 4:** the engine deduplicates after all, and Design 6's
+text plus the calibration guide's §4.2 both need correcting. Report the
+measured number either way.
+
+**Answers so far (2026-08-02).** The two read-only halves were run in the
+delivering session, since neither needs machinery that does not yet exist.
+**VT-5: yes** — `ThresholdCloningSelection.select_parents` computes
+`threshold = self._multiplier * (sum(scores) / n)`
+(`pdsim/core/selection.py:302`), i.e. multiplier × generation mean, so the
+calibration guide's §3.5 table ships as written; its parenthetical now
+records that verification instead of flagging a pending check. **VT-6(a): strict** — the validator
+tests `not (t > r > p > s)` as one chained comparison
+(`pdsim/config/experiment.py:241`), so P = S raises; #115's
+`payoff_sucker = −1` override is REQUIRED, not merely tidy, and the
+flagship would fail validation without it. **VT-6(b) remains open** — it
+needs local interaction and so cannot run before Phase D.
+
 ## Design 11 — registry shape, section order, and the greying map
 
 ### Section order

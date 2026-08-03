@@ -146,6 +146,22 @@ historical record. Specs count as docs for the DOCS CHANGED ritual and are
 uploaded to project knowledge. Small fixes still travel as plain prompts —
 specs are for milestone-scale work.
 
+**Prompt size limit.** A single prompt must stay under 50,000 characters. The
+harness truncates silently past that, marking the cut but leaving the
+receiving session with no way to recover the tail. Deliverables that would
+exceed the limit are split into numbered sub-prompts at a natural section
+boundary, each self-contained, each with its own `Action required:` line, and
+each stating explicitly where it stops so the receiving session knows the file
+is deliberately incomplete.
+
+**Markdown must arrive as source, not as rendered text.** Prompts containing
+markdown are delivered as `.md` files or inside fenced code blocks, never as
+text copied from a rendered chat view. Copying from a rendered view strips
+headings and emphasis, converts tables to tab-separated lines, and silently
+corrupts literal asterisks — an `e*` becomes an italic marker and the asterisk
+vanishes. If a received prompt shows any of these symptoms, report it and
+request re-delivery rather than writing the damaged text.
+
 **Mandatory end-of-session ritual.** Every session that changed code or made
 decisions ends with these steps, in order:
 
