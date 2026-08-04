@@ -72,8 +72,10 @@ from pdsim.core.economy import (
 )
 from pdsim.core.events import AgentSnapshot, DemographicEvent
 from pdsim.core.game import Action, AgentId, PrisonersDilemma
+from pdsim.core.layouts import found_population
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import build_matcher
+from pdsim.core.occupancy import Occupancy
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
 from pdsim.core.strategies import create_strategy, strategy_name_of
@@ -237,6 +239,10 @@ class PopulationDynamics:
         self._accounting = build_score_accounting(config.dynamics)
         self._reproduction = StrategySwitchReproduction(config)
         self._population = build_initial_population(config)
+        # Founding placement (M11a Phase B): the run's FIRST draw, and only
+        # on a lattice with a stochastic layout. `None` on a well-mixed run,
+        # which never builds a structure at all.
+        self._occupancy = found_population(config, self._population, rng)
         self._generation = 0
 
     @property
@@ -247,6 +253,20 @@ class PopulationDynamics:
             An immutable snapshot (the agents themselves are live objects).
         """
         return tuple(self._population)
+
+    @property
+    def occupancy(self) -> Occupancy | None:
+        """Who sits where, or ``None`` for a well-mixed run.
+
+        Under imitation nothing is born and nothing dies — VT-2 confirmed
+        that a selection rule mutates the existing agents rather than
+        producing a fresh cohort — so this mapping is fixed for the whole
+        run, exactly as founded.
+
+        Returns:
+            The occupancy, or ``None`` when the world has no structure.
+        """
+        return self._occupancy
 
     def run(self) -> Iterator[GenerationReport]:
         """Play the configured number of generations, reporting each one.
@@ -463,6 +483,12 @@ class EconomyDynamics:
             agent.age = age
             agent.parent_id = None
         self._population = founders
+        # Founding placement (M11a Phase B), before any other draw. Births and
+        # deaths do NOT maintain this yet — local birth is Phase C — so a
+        # newborn's site id is None and a dead agent's site is not reclaimed.
+        # That is this phase's exit condition (nothing reads the structure),
+        # not an oversight: the founding arrangement is what Phase B ships.
+        self._occupancy = found_population(config, founders, rng)
         # Monotonic passport counter: ids are never reused, so lineage and
         # the id-ordered RNG contract stay exact across deaths.
         self._next_id = len(founders)
@@ -477,6 +503,20 @@ class EconomyDynamics:
             empty after extinction.
         """
         return tuple(self._population)
+
+    @property
+    def occupancy(self) -> Occupancy | None:
+        """Who sits where at founding, or ``None`` for a well-mixed run.
+
+        Phase B founds this and then leaves it alone: births and deaths do
+        not maintain it until local birth lands in Phase C, so after the
+        first boundary it describes the founding arrangement rather than the
+        live population.
+
+        Returns:
+            The occupancy, or ``None`` when the world has no structure.
+        """
+        return self._occupancy
 
     def run(self) -> Iterator[GenerationReport]:
         """Play up to the configured number of generations, reporting each.
@@ -622,6 +662,9 @@ class EconomyDynamics:
                 age=agent.age,
                 energy=agent.energy,
                 strategy=strategy_name_of(agent.strategy),
+                site_id=None
+                if self._occupancy is None
+                else self._occupancy.site_of(agent.agent_id),
             )
             for agent in self._population
         )

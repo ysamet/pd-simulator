@@ -87,16 +87,58 @@ from pdsim.core.events import (
     ImitationEvent,
     RunFinished,
 )
+from pdsim.core.layouts import resolve_layout_path
 from pdsim.core.timeseries import RunTimeseries
 
-SCHEMA_VERSION = 4
-"""Bump on any breaking change to the folder layout or file schemas.
+LAYOUT_FILE_NAME = "layout.txt"
+"""Name of the layout-file copy kept inside a run folder (spec Design 8).
+
+The copy is what makes a structured run folder self-contained: the recorded
+``config.yaml`` names this file rather than wherever the user's original
+lived, so the run still reproduces after the original moves (hard rule 8).
+"""
+
+SCHEMA_VERSION = 5
+"""The highest schema this code writes and understands.
 
 History: 1 = M7 original; 2 = M9b adds ``cooperation.parquet`` and the
 ``final_cooperation_rate`` summary field (DECISIONS #65); 3 = M10a adds
 ``agents.parquet``, ``total_agents_born``, and ``population_final``;
 4 = M10b adds the four event-time tables (``births.parquet``,
-``deaths.parquet``, ``imitations.parquet``, ``periods.parquet``).
+``deaths.parquet``, ``imitations.parquet``, ``periods.parquet``);
+5 = M11a adds the ``site_id`` column on ``agents.parquet``.
+
+Bump on any breaking change to the folder layout or file schemas. The
+loader accepts everything up to this number and rejects above it.
+"""
+
+STRUCTURE_SCHEMA_VERSION = 5
+"""What ANY lattice evolution run writes (M11a Phase B).
+
+State the ladder honestly, so the number is not read as an implication: a
+synchronous economy run on a lattice writes 5 — a version that *arrived*
+with event-time data the run does not have. That is coherent because the
+loader is **presence-driven, not version-driven** (#100(b) makes
+missing-file-equals-empty-shape the contract): the version says how new a
+loader must be, and the files themselves say what the run contains.
+
+It is written on the strength of the CONFIG, not of the recorded rows,
+which is why a synchronous imitation lattice run declares 5 while recording
+no per-agent data at all: under imitation, occupancy is fully determined by
+the config and the seed, so there is nothing to persist (spec Design 10,
+resolved by VT-2) — but a reader still needs to know the run had structure.
+"""
+
+EVENT_TIME_SCHEMA_VERSION = 4
+"""What a well-mixed asynchronous run writes: event-time data, no structure."""
+
+PER_AGENT_SCHEMA_VERSION = 3
+"""What a run with per-agent data but NO event-time data writes.
+
+Synchronous energy-economy runs under M10b code: they produce snapshots
+(``agents.parquet``) but no event-time clock or explicit demographic
+events, so they keep declaring schema 3, byte-identical to M10a
+recordings (the honest-presence rule, #83).
 """
 
 PER_AGENT_SCHEMA_VERSION = 3
@@ -134,13 +176,25 @@ AGENTS_COLUMNS = (
     "energy",
     "strategy",
 )
-"""Columns of ``agents.parquet``, one row per (period, post-boundary agent).
+"""Base columns of ``agents.parquet``, one row per (period, post-boundary agent).
 
 ``parent_id`` is a nullable integer (pandas ``Int64``): founders are
 ``<NA>``. There is deliberately no born/died flag — any id present at G but
 not G−1 was born at G, any id present at G−1 but not G died during G, so
 the birth/death record is derivable by diff (raw-not-derived, #47).
+
+**This tuple is the column set of a run WITHOUT structure.** M11a appends
+:data:`SITE_COLUMN` for lattice runs, which is the first application of
+#83's honest-presence rule at *column* grain rather than file grain — see
+:data:`AGENTS_COLUMNS_WITH_SITE`. The writer therefore varies its column
+set by run type, and the loader stays presence-driven.
 """
+
+SITE_COLUMN = "site_id"
+"""The M11a column naming the site an agent occupies (nullable ``Int64``)."""
+
+AGENTS_COLUMNS_WITH_SITE = (*AGENTS_COLUMNS, SITE_COLUMN)
+"""Columns of ``agents.parquet`` for a run that has structure."""
 
 BIRTHS_COLUMNS = (
     "period",
@@ -195,6 +249,46 @@ INDEX_COLUMNS = (
     "outcome",
 )
 """Columns of ``runs/index.csv``, one row per recorded run."""
+
+
+def _has_structure(config: ExperimentConfig) -> bool:
+    """Report whether a run's world has structure worth recording.
+
+    Tournament mode is excluded deliberately: nothing is born and nothing
+    dies there, so space has nothing to do and the structure section is
+    ignored (``docs/DESIGN.md`` §2.12).
+
+    Args:
+        config: The run's configuration.
+
+    Returns:
+        True for an evolution run on a lattice.
+    """
+    return config.mode == "evolution" and config.structure.kind == "lattice"
+
+
+def _anticipated_schema_version(config: ExperimentConfig) -> int:
+    """Predict a run's schema version from its config, before any event arrives.
+
+    Written as a ``config.yaml`` header comment up front; ``summary.json``'s
+    version is decided at finalize time from what was actually recorded (the
+    honest-presence rule, #83). The two agree for every configuration —
+    including the structure tier, which is config-driven on both sides
+    because an imitation lattice run records no structural rows at all.
+
+    Args:
+        config: The run's configuration.
+
+    Returns:
+        The schema version this configuration is expected to write.
+    """
+    if _has_structure(config):
+        return STRUCTURE_SCHEMA_VERSION
+    if config.mode == "evolution" and config.dynamics.time_model == "asynchronous":
+        return EVENT_TIME_SCHEMA_VERSION
+    if config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy":
+        return PER_AGENT_SCHEMA_VERSION
+    return PER_STRATEGY_SCHEMA_VERSION
 
 
 def _code_version() -> dict[str, str | None]:
@@ -321,7 +415,12 @@ class RunRecorder:
             name = f"{stamp}_{safe_slug}"
         self.folder = _unique_folder(self._out_dir, name)
         version = _code_version()
-        config_path = save_config(config, self.folder / "config.yaml")
+        # A run that reads a hand-authored layout file copies it in and
+        # records the copy's name, so the folder re-runs from anywhere even
+        # if the original later moves or changes (hard rule 8; spec
+        # Design 8). Everything else records its config untouched.
+        recorded = self._copy_layout_file(config)
+        config_path = save_config(recorded, self.folder / "config.yaml")
         # The header comment anticipates the schema from the config (the
         # comment is written up front, before any event arrives): only an
         # asynchronous evolution run produces event-time data and schema 4;
@@ -330,12 +429,7 @@ class RunRecorder:
         # writing 2, so imitation configs stay byte-identical to pre-M10a
         # recordings. summary.json's version is decided at finalize time
         # from the data actually recorded (the honest-presence rule, #83).
-        if config.mode == "evolution" and config.dynamics.time_model == "asynchronous":
-            anticipated = SCHEMA_VERSION
-        elif config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy":
-            anticipated = PER_AGENT_SCHEMA_VERSION
-        else:
-            anticipated = PER_STRATEGY_SCHEMA_VERSION
+        anticipated = _anticipated_schema_version(config)
         # YAML comments carry the code version without breaking load_config
         # (extra *keys* would be rejected by the strict schema — comments
         # are invisible to the parser; DECISIONS #47).
@@ -347,6 +441,37 @@ class RunRecorder:
             encoding="utf-8",
         )
         self._version = version
+
+    def _copy_layout_file(self, config: ExperimentConfig) -> ExperimentConfig:
+        """Copy a hand-authored layout into the run folder, and point the config at it.
+
+        A ``config.yaml`` that references ``layouts/my_painting.txt`` by path
+        stops re-running the moment that file moves or changes, which
+        violates hard rule 8. Copying the file in — and recording the copy's
+        bare name — makes the folder self-contained; the loader resolves a
+        bare name against the config's own folder.
+
+        Args:
+            config: The run's configuration.
+
+        Returns:
+            The configuration to record: the original for every run that
+            reads no layout file, or a copy whose ``structure.layout_file``
+            names the local copy.
+        """
+        structure = config.structure
+        if structure.initial_layout != "from_file" or not structure.layout_file:
+            return config
+        source = resolve_layout_path(structure.layout_file)
+        if not source.is_file():
+            # Not the recorder's error to raise: founding reads the same path
+            # moments later and reports it far more usefully.
+            return config
+        destination = self.folder / LAYOUT_FILE_NAME
+        destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        return config.model_copy(
+            update={"structure": structure.model_copy(update={"layout_file": LAYOUT_FILE_NAME})}
+        )
 
     def add(self, event: Event) -> None:
         """Fold one engine event into the recording.
@@ -489,24 +614,36 @@ class RunRecorder:
         """
         if not self._has_agent_data():
             return
+        # The column set varies by RUN TYPE, not by row content: a structured
+        # run carries `site_id`, an unstructured one does not have the column
+        # at all (#83's honest presence, now at column grain). Keying it off
+        # the config rather than off "did any snapshot have a site" keeps the
+        # shape stable across periods.
+        structured = _has_structure(self._config)
         series = self.timeseries
         rows = []
         for i, period in enumerate(series.periods):
             for snapshot in series.agent_snapshots[i]:
-                rows.append(
-                    {
-                        "period": period,
-                        "agent_id": snapshot.agent_id,
-                        "parent_id": snapshot.parent_id,
-                        "age": snapshot.age,
-                        "energy": snapshot.energy,
-                        "strategy": snapshot.strategy,
-                    }
-                )
-        frame = pd.DataFrame(rows, columns=list(AGENTS_COLUMNS))
+                row = {
+                    "period": period,
+                    "agent_id": snapshot.agent_id,
+                    "parent_id": snapshot.parent_id,
+                    "age": snapshot.age,
+                    "energy": snapshot.energy,
+                    "strategy": snapshot.strategy,
+                }
+                if structured:
+                    row[SITE_COLUMN] = snapshot.site_id
+                rows.append(row)
+        columns = AGENTS_COLUMNS_WITH_SITE if structured else AGENTS_COLUMNS
+        frame = pd.DataFrame(rows, columns=list(columns))
         # Nullable integer dtype: founders' parent_id is a real <NA>, not a
-        # float NaN that would corrupt the ids of everyone else.
+        # float NaN that would corrupt the ids of everyone else. A site id is
+        # nullable for the same reason — in Phase B a newborn has no site,
+        # because births do not place yet (local birth is Phase C).
         frame["parent_id"] = frame["parent_id"].astype("Int64")
+        if structured:
+            frame[SITE_COLUMN] = frame[SITE_COLUMN].astype("Int64")
         frame.to_parquet(self.folder / "agents.parquet", index=False)
 
     def _write_demographic_parquets(self) -> None:
@@ -598,11 +735,16 @@ class RunRecorder:
         has_agents = self._has_agent_data()
         snapshots = self.timeseries.agent_snapshots
         # The version tracks the presence of data (the honest-presence
-        # rule, #83): event-time data -> 4 (async runs), per-agent data
-        # only -> 3 (sync economy runs, byte-identical to M10a), neither
-        # -> 2 (sync imitation runs, byte-identical to pre-M10a).
-        if self._has_event_time_data():
-            version = SCHEMA_VERSION
+        # rule, #83): structure -> 5 (any lattice run), event-time data -> 4
+        # (async runs), per-agent data only -> 3 (sync economy runs,
+        # byte-identical to M10a), neither -> 2 (sync imitation runs,
+        # byte-identical to pre-M10a). Structure is read from the config
+        # rather than from the rows, because an imitation lattice run has
+        # structure and records none of it (Design 10, VT-2).
+        if _has_structure(self._config):
+            version = STRUCTURE_SCHEMA_VERSION
+        elif self._has_event_time_data():
+            version = EVENT_TIME_SCHEMA_VERSION
         elif has_agents:
             version = PER_AGENT_SCHEMA_VERSION
         else:
@@ -830,8 +972,13 @@ def _read_agents(folder: Path) -> dict[int, tuple[AgentSnapshot, ...]]:
     if not path.is_file():
         return {}
     frame = pd.read_parquet(path)
+    # Presence-driven at COLUMN grain (M11a): a run without structure has no
+    # site_id column at all, and reads back as every agent unplaced — the
+    # same contract #100(b) already applies to whole missing files.
+    has_site = SITE_COLUMN in frame.columns
     by_period: dict[int, list[AgentSnapshot]] = {}
     for row in frame.itertuples(index=False):
+        site = getattr(row, SITE_COLUMN) if has_site else None
         by_period.setdefault(int(row.period), []).append(
             AgentSnapshot(
                 agent_id=int(row.agent_id),
@@ -840,6 +987,7 @@ def _read_agents(folder: Path) -> dict[int, tuple[AgentSnapshot, ...]]:
                 age=int(row.age),
                 energy=float(row.energy),
                 strategy=str(row.strategy),
+                site_id=None if site is None or pd.isna(site) else int(site),
             )
         )
     return {period: tuple(snapshots) for period, snapshots in by_period.items()}

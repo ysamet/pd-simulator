@@ -122,6 +122,7 @@ from pdsim.core.events import (
     ImitationEvent,
 )
 from pdsim.core.game import PrisonersDilemma
+from pdsim.core.layouts import found_population
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.reproduction import StrategySwitchReproduction
 
@@ -193,6 +194,10 @@ class AsyncDynamics:
             agent.age = age
             agent.parent_id = None
         self._population = founders
+        # Founding placement (M11a Phase B): once per run, before the clock
+        # starts, and gated so a well-mixed run draws nothing. Occupancy is
+        # not maintained by the demographic events yet — Phase C does that.
+        self._occupancy = found_population(config, founders, rng)
         # Monotonic passport counter (M10a): ids are never reused.
         self._next_id = len(founders)
         # The generation-equivalent clock (spec Design 5) and event counter.
@@ -764,6 +769,9 @@ class AsyncDynamics:
                 age=agent.age,
                 energy=agent.energy,
                 strategy=strategy_name_of(agent.strategy),
+                site_id=None
+                if self._occupancy is None
+                else self._occupancy.site_of(agent.agent_id),
             )
             for agent in self._population
         )

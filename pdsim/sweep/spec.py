@@ -477,6 +477,17 @@ def sweep_validation_messages(spec: SweepSpec) -> list[str]:
 
     # --- Composition axis --------------------------------------------------
     comp = spec.composition
+    if comp is not None and base is not None and base.structure.initial_layout == "from_file":
+        # A layout file names a strategy per cell, so its counts ARE the
+        # composition (M11a spec Design 8). Varying composition while a file
+        # pins every cell is incoherent, and the incoherence belongs here —
+        # at spec validation — rather than as a silent override discovered
+        # halfway through a campaign.
+        messages.append(
+            "the base config reads its layout from a file, which fixes the strategy "
+            "in every cell — so a composition axis has nothing to vary. Drop the "
+            "composition axis, or choose a generated initial layout."
+        )
     if comp is not None:
         buckets = {"vary": {comp.vary}, "fixed": set(comp.fixed), "fill": set(comp.fill)}
         for name in [comp.vary, *comp.fixed, *comp.fill]:

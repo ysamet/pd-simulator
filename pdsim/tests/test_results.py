@@ -20,9 +20,14 @@ from pdsim.config.experiment import ExperimentConfig, load_config
 from pdsim.core import engine
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import (
+    AGENTS_COLUMNS,
+    EVENT_TIME_SCHEMA_VERSION,
+    LAYOUT_FILE_NAME,
     PER_AGENT_SCHEMA_VERSION,
     PER_STRATEGY_SCHEMA_VERSION,
     SCHEMA_VERSION,
+    SITE_COLUMN,
+    STRUCTURE_SCHEMA_VERSION,
     RunRecorder,
     _rmtree_robust,
     _unique_folder,
@@ -462,7 +467,7 @@ class TestAsyncPersistence:
         """The honest version stamp and the sibling tables that have rows."""
         folder, live = _record(_async_config(), tmp_path)
         summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
-        assert summary["schema_version"] == SCHEMA_VERSION
+        assert summary["schema_version"] == EVENT_TIME_SCHEMA_VERSION
         assert "# schema_version: 4" in (folder / "config.yaml").read_text(encoding="utf-8")
         assert (folder / "periods.parquet").is_file()
         # The seed-7 fixture fires all three channels (verified below), so
@@ -585,3 +590,161 @@ class TestAsyncPersistence:
         # Both folders load back exactly (the round-trip is cadence-blind).
         assert load_run(coarse_folder).timeseries.periods == coarse.periods
         assert load_run(fine_folder).timeseries.periods == fine.periods
+
+
+class TestStructurePersistence:
+    """M11a schema 5: the site_id column and the layout-file copy (#83)."""
+
+    @staticmethod
+    def _lattice_economy_config() -> ExperimentConfig:
+        """Build an economy config on a 3x3 lattice.
+
+        Returns:
+            A validated config whose 6 founders occupy 6 of 9 sites.
+        """
+        config = _economy_config()
+        return config.model_copy(
+            update={
+                "structure": config.structure.model_copy(
+                    update={"kind": "lattice", "rows": 3, "cols": 3}
+                )
+            }
+        )
+
+    def test_a_lattice_run_writes_schema_5_and_the_site_column(self, tmp_path: Path) -> None:
+        """Any lattice run declares 5; the column rides on agents.parquet."""
+        import pandas as pd
+
+        folder, _ = _record(self._lattice_economy_config(), tmp_path)
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == STRUCTURE_SCHEMA_VERSION
+        assert "# schema_version: 5" in (folder / "config.yaml").read_text(encoding="utf-8")
+        frame = pd.read_parquet(folder / "agents.parquet")
+        assert SITE_COLUMN in frame.columns
+        # Every agent that HAS a site has it to itself, in every period —
+        # the exclusivity invariant, seen from the record rather than from
+        # the occupancy object.
+        for _, period_rows in frame.groupby("period"):
+            placed = period_rows[SITE_COLUMN].dropna()
+            assert placed.nunique() == len(placed)
+        assert frame[SITE_COLUMN].notna().any()
+
+    def test_a_well_mixed_run_has_no_site_column_at_all(self, tmp_path: Path) -> None:
+        """Honest presence at column grain: absent, not NaN-filled (#47c/#83)."""
+        import pandas as pd
+
+        folder, _ = _record(_economy_config(), tmp_path)
+        frame = pd.read_parquet(folder / "agents.parquet")
+        assert tuple(frame.columns) == AGENTS_COLUMNS
+        assert SITE_COLUMN not in frame.columns
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == PER_AGENT_SCHEMA_VERSION
+
+    def test_site_ids_survive_the_round_trip(self, tmp_path: Path) -> None:
+        """Snapshots compare by value, so a lost site id fails here."""
+        folder, live = _record(self._lattice_economy_config(), tmp_path)
+        loaded = load_run(folder)
+        assert loaded.timeseries.agent_snapshots == live.agent_snapshots
+        placed = [
+            snapshot
+            for period in live.agent_snapshots
+            for snapshot in period
+            if snapshot.site_id is not None
+        ]
+        assert placed  # founders carry their sites through the parquet
+
+    def test_newborns_have_no_site_in_phase_b(self, tmp_path: Path) -> None:
+        """The phase's exit condition, recorded honestly rather than papered over.
+
+        Occupancy is founded at generation 0 and then left alone: local
+        birth is Phase C, so an agent born mid-run occupies no site and its
+        site id is null. Pinning it here means Phase C's arrival will show
+        up as this test failing, which is the moment to retire it.
+        """
+        folder, live = _record(self._lattice_economy_config(), tmp_path)
+        newborns = [
+            snapshot
+            for period in live.agent_snapshots
+            for snapshot in period
+            if snapshot.parent_id is not None
+        ]
+        assert newborns  # the fixture does breed
+        assert all(snapshot.site_id is None for snapshot in newborns)
+        assert load_run(folder).timeseries.agent_snapshots == live.agent_snapshots
+
+    def test_an_imitation_lattice_run_records_no_agents_but_still_declares_5(
+        self, tmp_path: Path
+    ) -> None:
+        """Design 10's nothing-to-persist branch, as resolved by VT-2.
+
+        Ids are preserved across imitation generations, so occupancy never
+        changes after founding and is fully determined by the config — there
+        is nothing to record. The version still says 5, because a reader
+        must know the run had structure.
+        """
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 4,
+                "population": {"size": 9, "composition": {"tit_for_tat": 5, "always_defect": 4}},
+                "match": {"length_mode": "fixed", "rounds_per_match": 2},
+                "structure": {"kind": "lattice", "rows": 3, "cols": 3},
+                "dynamics": {"generations": 3},
+            }
+        )
+        folder, _ = _record(config, tmp_path)
+        assert not (folder / "agents.parquet").exists()
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+        assert summary["schema_version"] == STRUCTURE_SCHEMA_VERSION
+
+    def test_the_loader_accepts_five_and_rejects_six(self, tmp_path: Path) -> None:
+        """The ceiling moved with the schema; the guard did not move with it."""
+        folder, _ = _record(self._lattice_economy_config(), tmp_path)
+        summary_path = folder / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert summary["schema_version"] == SCHEMA_VERSION == 5
+        assert load_run(folder) is not None
+        summary["schema_version"] = SCHEMA_VERSION + 1
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        with pytest.raises(ValueError, match="schema_version"):
+            load_run(folder)
+
+    def test_a_schema_4_folder_still_loads(self, tmp_path: Path) -> None:
+        """Older folders keep loading: presence-driven, not version-driven."""
+        folder, live = _record(_economy_config(), tmp_path)
+        loaded = load_run(folder)
+        assert loaded.timeseries.agent_snapshots == live.agent_snapshots
+        assert all(
+            snapshot.site_id is None
+            for period in loaded.timeseries.agent_snapshots
+            for snapshot in period
+        )
+
+    def test_the_layout_file_is_copied_into_the_run_folder(self, tmp_path: Path) -> None:
+        """Hard rule 8: the folder re-runs even after the original moves."""
+        source = tmp_path / "painting.txt"
+        source.write_text(
+            "kind: lattice_grid\nrows: 3\ncols: 3\n\n"
+            "tit_for_tat tit_for_tat tit_for_tat\n"
+            "always_defect always_defect always_defect\n"
+            ". . .\n",
+            encoding="utf-8",
+        )
+        config = self._lattice_economy_config()
+        config = config.model_copy(
+            update={
+                "structure": config.structure.model_copy(
+                    update={"initial_layout": "from_file", "layout_file": str(source)}
+                )
+            }
+        )
+        folder, _ = _record(config, tmp_path / "runs")
+        copy = folder / LAYOUT_FILE_NAME
+        assert copy.is_file()
+        assert copy.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+        # The recorded config points at the copy, and re-loading resolves it
+        # even though the bare name does not exist in the working directory.
+        reloaded = load_config(folder / "config.yaml")
+        assert Path(reloaded.structure.layout_file or "").is_file()
+        source.unlink()
+        assert load_run(folder) is not None

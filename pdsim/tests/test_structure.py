@@ -676,33 +676,37 @@ def test_sample_rejects_negative_size_and_negative_site_weights() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The import guard — the executable form of "wired to nothing"
+# The import guard, retired and replaced (Phase B)
 # ---------------------------------------------------------------------------
+#
+# Phase A's guard asserted that NO engine module imported this one — the
+# executable form of "wired to nothing". Phase B is the phase that wires it,
+# so that assertion is now false by design and has been removed rather than
+# weakened into a list of exceptions that would grow every phase.
+#
+# What it protected is still protected, by better tests than an import scan:
+# the well-mixed path must build no structure and consume no randomness. That
+# is asserted directly in test_layouts.py (`TestWellMixedIsUntouched`), which
+# checks the occupancy is None and the RNG stream is unmoved — a property the
+# import scan could only ever approximate.
 
 
-def test_no_engine_module_imports_the_structure_module() -> None:
-    """Phase A's defining property, as an executable assertion.
+def test_ui_and_io_layers_do_not_reach_into_structure_internals() -> None:
+    """Hard rule 4's direction of travel, kept honest as the module gets wired.
 
-    No module under pdsim/ imports pdsim.core.structure except the module
-    itself and the config/registry additions (currently not even those).
-    Tests are exempt — they are how the module is exercised at all this
-    phase.
+    The structure module is core; the UI may consume it, but nothing under
+    core/, config/, or io/ may import UI or plotting code. This is the check
+    that survives Phase B — the one about which way the dependency points.
     """
     package_root = Path(pdsim.__file__).parent
-    allowed = {
-        package_root / "core" / "structure.py",
-        package_root / "config" / "registry.py",
-        package_root / "config" / "experiment.py",
-    }
-    pattern = re.compile(
-        r"pdsim\.core\.structure|from\s+pdsim\.core\s+import\s+[^\n]*\bstructure\b"
-    )
+    forbidden = re.compile(r"import\s+streamlit|from\s+streamlit|import\s+plotly|from\s+plotly")
     offenders = []
-    for path in package_root.rglob("*.py"):
-        if path in allowed or "tests" in path.parts:
-            continue
-        if pattern.search(path.read_text(encoding="utf-8")):
-            offenders.append(str(path.relative_to(package_root)))
+    for area in ("core", "config", "io"):
+        for path in (package_root / area).rglob("*.py"):
+            if "tests" in path.parts:
+                continue
+            if forbidden.search(path.read_text(encoding="utf-8")):
+                offenders.append(str(path.relative_to(package_root)))
     assert offenders == [], (
-        f"Phase A wires the structure module to NOTHING, but these modules import it: {offenders}"
+        f"Hard rule 4: the headless layers must not import UI or plotting code: {offenders}"
     )

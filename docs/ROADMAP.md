@@ -134,6 +134,14 @@ run data exists.
     corner) becomes the local placement seam. Spec arrives as a separate
     prompt and must satisfy the §2.12 inline-(?) checklist obligation.
 
+    Phase status: **A landed 2026-08-01** (#112 — the structure module,
+    wired to nothing). **B landed 2026-08-03** (#116-#120 — occupancy,
+    the seven founding layouts plus the layout file, schema 5's `site_id`
+    column, the grid renderer; VT-2 and VT-3 answered, and #114's
+    shifted-weight spread measured and found to PLATEAU rather than grow).
+    After B, structure exists and is visible but nothing reads it. **C —
+    local birth, the riskiest phase — is next.**
+
     Calibration-guide residue (DECISIONS #113–#115) folded into the
     remaining phases: Phase B measures the #114 shifted-weight spread;
     Phase C carries the ADVISORIES.md stake+overhead validation fix; Phase

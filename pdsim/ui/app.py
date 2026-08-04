@@ -32,7 +32,7 @@ from streamlit.delta_generator import DeltaGenerator
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.registry import ParameterSpec, ParamValue
 from pdsim.config.scenarios import all_scenarios
-from pdsim.core import engine
+from pdsim.core import engine, layouts
 from pdsim.core.events import CycleFinished, GenerationFinished, MatchFinished, RoundPlayed
 from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
@@ -51,6 +51,28 @@ from pdsim.viz import charts
 
 CUSTOM = "Custom"
 """The dropdown entry that starts from registry defaults (DECISIONS #36/#40)."""
+
+STRUCTURE_HELP = {
+    "site_count": (
+        "How many cells the world has. Every cell holds at most one agent, so this "
+        "is the largest population the world could ever hold. It is rows x columns, "
+        "using the same arithmetic the run itself uses — so the number here and the "
+        "grid you get can never disagree."
+    ),
+    "occupancy": (
+        "How many cells currently hold an agent, and what share of the world that "
+        "is. Below 100% the population has room to grow into empty space; at 100% "
+        "the world is full and every birth needs somebody to die first."
+    ),
+    "isolated": (
+        "How many agents begin with no occupied neighbouring cell. A scattered "
+        "start in a sparsely filled world can strand agents this way. It matters "
+        "from the milestone where agents play their neighbours: an agent with no "
+        "neighbours plays nobody, earns nothing, and starves — which is the model "
+        "being honest about isolation, not a fault."
+    ),
+}
+"""Inline (?) explanations for the Structure panel's derived readouts (the §12 rule)."""
 
 PROGRESS_EVERY = 200
 """Fine-grained events between progress-line refreshes (DECISIONS #39)."""
@@ -127,6 +149,15 @@ def _widget(spec: ParameterSpec, *, disabled: bool = False, note: str = "") -> P
         nullable).
     """
     help_text = _help_text(spec, note)
+    if spec.kind == "str":
+        # Free text (M11a): a nullable string reads blank as "unset", so it
+        # needs no companion checkbox — unlike the nullable number kinds,
+        # where a blank box would be indistinguishable from zero.
+        typed = st.text_input(spec.label, key=spec.key, help=help_text, disabled=disabled)
+        stripped = str(typed).strip()
+        if stripped:
+            return stripped
+        return None if spec.nullable else ""
     if spec.nullable and spec.kind == "int":
         limited = st.checkbox(
             f"Limit {spec.label.lower()}?",
@@ -211,7 +242,11 @@ def _load_state(
     """
     for spec in helpers.panel_specs():
         value = values.get(spec.key, spec.default)
-        if spec.nullable and spec.kind == "int":
+        if spec.kind == "str":
+            # A text box holds "" for unset, never None — Streamlit rejects a
+            # None value for text_input.
+            st.session_state[spec.key] = "" if value is None else str(value)
+        elif spec.nullable and spec.kind == "int":
             st.session_state[f"{spec.key}#limit"] = value is not None
             st.session_state[f"{spec.key}#value"] = (
                 int(value) if value is not None else int(spec.minimum or 1)
@@ -331,6 +366,15 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
             if section == "Population":
                 composition = _composition_panel()
+            if section == "Structure" and values.get("structure.kind") == "lattice":
+                # The Population section renders before Structure (registry
+                # order), so the composition is already gathered here — which
+                # is what lets the preview be live: change the layout and the
+                # arrangement redraws without running anything. The lookahead
+                # supplies what has not rendered yet, the SEED above all: a
+                # preview built on the default seed would show a different
+                # arrangement from the one the run founds.
+                _structure_panel({**lookahead, **values}, composition)
             if (
                 section == "Dynamics"
                 and values.get("run.mode") == "evolution"
@@ -490,6 +534,75 @@ def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -
         st.markdown(f"**Admission at capacity** — {ECONOMY_HELP['admission']}")
         st.markdown(f"**Estate destruction on death** — {ECONOMY_HELP['estate_destruction']}")
         st.markdown(f"**Passport ids and lineage** — {ECONOMY_HELP['passport_id']}")
+
+
+def _grid_area(
+    config: ExperimentConfig,
+    key_prefix: str,
+    config_dir: Path | None = None,
+) -> None:
+    """Draw the lattice and its derived readouts, if the run has one.
+
+    Presentation only (the #38 split): the arrangement itself comes from
+    :func:`pdsim.core.layouts.founding_view`, a pure function of the config
+    and the seed, so what the panel shows and what the engine founds cannot
+    drift apart.
+
+    Phase B scope, said plainly to the user rather than left to be inferred:
+    this is the FOUNDING arrangement. Births and deaths do not move anyone
+    yet — local birth is Phase C — so the picture does not change as a run
+    proceeds.
+
+    Args:
+        config: The run's configuration.
+        key_prefix: Distinguishes chart elements rendered by different app
+            areas in the same script run.
+        config_dir: Folder to resolve a relative layout file against (a
+            recorded run keeps its own copy).
+    """
+    try:
+        view = layouts.founding_view(config, config_dir)
+    except (FileNotFoundError, ValueError) as error:
+        st.warning(f"The grid cannot be drawn: {error}")
+        return
+    if view is None:
+        return
+    st.plotly_chart(
+        charts.grid_chart(view.rows, view.cols, view.placements),
+        width="stretch",
+        key=f"{key_prefix}_grid",
+    )
+    col_sites, col_occupied, col_isolated = st.columns(3)
+    col_sites.metric("Sites", f"{view.site_count}", help=STRUCTURE_HELP["site_count"])
+    col_occupied.metric(
+        "Occupied",
+        f"{view.occupied} ({view.occupancy_fraction:.0%})",
+        help=STRUCTURE_HELP["occupancy"],
+    )
+    col_isolated.metric("Isolated at founding", f"{view.isolated}", help=STRUCTURE_HELP["isolated"])
+    if view.isolated:
+        st.caption(
+            f"{view.isolated} agent(s) start with no occupied neighbour. Once local "
+            "interaction arrives such an agent plays nobody and earns nothing — "
+            "correct, but worth knowing you chose it."
+        )
+
+
+def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
+    """Preview the founding arrangement from the panel's current values.
+
+    Args:
+        values: Registry key → widget value gathered so far this script run.
+        composition: Strategy machine name → agent count.
+    """
+    try:
+        config = helpers.build_config(values, composition)
+    except ValidationError:
+        # Mid-edit states are routinely invalid (a mix that does not yet sum
+        # to N). The Run button reports those properly; a preview stays quiet.
+        st.caption("Set a valid population mix to preview the grid.")
+        return
+    _grid_area(config, key_prefix="panel")
 
 
 def _request_stop() -> None:
@@ -941,6 +1054,9 @@ def _results_browser() -> None:
         economy=_economy_placeholders(),
         carrying_capacity=economy_helpers.chart_carrying_capacity(loaded.config),
     )
+    # A recorded lattice run carries its own layout file, so the grid is
+    # resolved against the run folder rather than the working directory.
+    _grid_area(loaded.config, key_prefix="browser", config_dir=RUNS_DIR / run_id)
     _final_summary_area(loaded.timeseries)
 
 

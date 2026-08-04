@@ -1,4 +1,4 @@
-Status: in progress (Phase A implemented 2026-08-01; see DECISIONS #112)
+Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120)
 
 # M11a — Population structure (sites, local birth, local interaction)
 

@@ -2382,3 +2382,212 @@ a decision, and a rule documented as strict that behaves leniently is a
 defect waiting to be fixed out from under the scenario. **A verification
 task confirms which behaviour the validator actually has (VT-6(a), in the
 M11a spec's post-freeze addendum).**
+
+**#116 — 2026-08-03 — VT-2 answered: synchronous imitation PRESERVES agent
+ids, so Design 10's nothing-to-persist branch ships (M11a Phase B).**
+Verified against the running code and at runtime, not merely expected.
+`PopulationDynamics.step` is the only consumer of a `SelectionRule`'s
+parent indices, and it mutates the EXISTING agent objects in place —
+`agent.strategy = strategy` then `agent.reset_for_new_generation()` over
+`zip(self._population, offspring)` — with `self._population` never rebound
+and no `Agent(...)` constructed anywhere after `build_initial_population`.
+Slot i therefore holds agent id i for the whole run: score and
+per-opponent histories are wiped at each boundary (#31), strategy is
+overwritten, id and object identity survive. This confirms #89(c)'s "an id
+must mean one creature forever" as a live invariant of the imitation path,
+not just of the economy path. CONSEQUENCE, as the spec pre-specified:
+under imitation nobody is born and nobody dies, so occupancy never changes
+after founding, is fully determined by the config and the seed, and
+re-running reproduces it exactly — there is NOTHING TO PERSIST.
+Implemented: no `occupancy.parquet`, no widened `agents.parquet` (which
+would NaN-fill energy and age for every imitation run, the shape #47c
+forbids), and the live renderer obtains occupancy by REPLAYING founding
+from the config. The replay is exact because the founding draw is the
+first draw of the run (#119), so a fresh generator seeded identically
+reproduces it before anything else has touched the stream; a test asserts
+the replayed arrangement equals the engine's. The second branch specified
+in Design 10 is now dead and should be read as historical. Forward note
+stands: once M11b lets agents move, occupancy becomes genuinely
+time-varying and `occupancy.parquet` becomes necessary regardless of this
+answer.
+
+**#117 — 2026-08-03 — VT-3 answered: the async `fixed_n` breeder draw
+reads ACCUMULATED ENERGY through the #63 shift with no intensity knob —
+and the #114 measurement finds the shifted-weight spread PLATEAUS rather
+than growing super-linearly (M11a Phase B).** (a) VT-3, by inspection:
+`AsyncDynamics._proportional_parent` computes `floor = min(agent.energy
+for agent in candidates)` then `weights = [agent.energy - floor for agent
+in candidates]`, normalises, and draws. It reads `agent.energy` — the
+cross-event accumulated STOCK, never `agent.score`; `async_dynamics.py`
+never reads `score` at all. The stock is a full ledger (initial energy,
+per-match payoffs less engagement cost, the living cost, compounding
+capital returns, past stakes), so what is sampled is lifetime wealth. The
+shift is exactly `w_i = e_i - min(e)`, so the poorest candidate always has
+weight 0 and is never drawn unless all energies are equal, in which case
+the uniform fallback fires. On the intensity question the answer is
+definitively NO: no beta, no exponent, no temperature anywhere on that
+path. `dynamics.selection_beta` is read only by the synchronous `fermi`
+rule and, under async, only by the imitation OVERLAY — the app already
+greys it out under async unless the overlay is on. Note the asymmetry: the
+DEATH side is configurable (`fixed_n_death_rule`), while the BIRTH side is
+hard-wired raw-energy roulette. So Ohtsuki's weak-selection limit cannot
+be approached in this engine, and the b/c > k threshold stays a
+CALIBRATION COMPASS, NOT A PREDICTION — the wording #103 already uses, now
+verified rather than expected. (b) The #114 measurement, assigned to this
+phase by the spec's phase-task ledger. A well-mixed async `fixed_n` run
+(24 agents, seed 21, death-birth, pure-random reaper, stake 0, 300
+generation-equivalents, 7200 breeder draws) was instrumented temporarily —
+the probe does not ship — to log the spread `max(e) - min(e)` (which under
+the shift IS the maximum weight), the standard deviation of the shifted
+weights, and the top agent's actual draw probability. Windowed means at
+three points across the run, in three variants: TEXTBOOK (no mutation, no
+capital return) spread 825 -> 868 -> 739 at t = 88 / 163 / 287, p(top)
+0.188 -> 0.183 -> 0.165; MUTATION 0.01 906 -> 680 -> 785, p(top) 0.200 ->
+0.163 -> 0.177; CAPITAL RETURN 0.02 858 -> 905 -> 763, p(top) 0.191 ->
+0.187 -> 0.167. READING: growth is not merely sub-super-linear, it is FLAT
+— the spread reaches a plateau by the first probe and wanders around it,
+while `spread / t` falls by roughly a factor of four across the run, and
+the top agent's draw probability drifts DOWN rather than up in every
+variant. Neither of the two channels #114 named as plausible (richer
+agents breeding more; compounding capital) shifts the picture. So the
+spec's frozen second-order claim — that effective selection strengthens
+over time — is not merely unsupported by the algebra (#114) but
+contradicted by measurement: what is real is that selection strengthens
+FROM ZERO in the opening moments, and the age effect (an incumbent has had
+longer to accumulate than a newborn, which at stake 0 sits at the bottom
+and cannot breed until it accumulates). The guide's softened wording
+therefore stands unchanged and needs no further edit. Honest scope limit
+on the measurement: one seed, one population size, one matcher, one death
+rule — enough to refute "strengthens over time", not enough to
+characterise the plateau's height as a function of the parameters.
+
+**#118 — 2026-08-03 — The Parameter Registry gains a `str` kind, for
+`structure.layout_file` (M11a Phase B).** The spec's Parameters table
+types `structure.layout_file` as "str, nullable", but the registry's
+`ParamKind` admitted only `int`, `float`, `bool` and `choice` — a
+filesystem path is the project's first genuinely open value. DECIDED: add
+`"str"` rather than smuggle the path in as a degenerate `choice` or keep
+it outside the registry. Keeping it out was never available: hard rule 3
+makes a parameter without a registry entry a bug. Encoding it as a
+`choice` would be a lie about the value set and would break the UI's
+selectbox. The kind carries its own weakness in its documentation: a value
+not drawn from a declared set cannot be validated beyond "it is a string",
+so anything with a knowable set of values stays a `choice`. Three
+consumers were extended with it: `validate` (type check, plus
+blank-to-`None` normalisation for a nullable string, so "unset" has one
+spelling rather than two), `gendocs` (kind label "text"; allowed values
+"any text; may be empty"), and the app's widget dispatcher (a
+`text_input`, checked BEFORE the nullable branches, which would otherwise
+have routed a nullable string into the nullable-float widget). The sweep
+tokeniser needed no change: its fall-through already keeps a raw token,
+and a swept layout path is refused for a different reason (#119).
+
+**#119 — 2026-08-03 — Founding-layout mechanics the spec left open: the
+centred footprint, the two traversals, deal-to-agent matching, and how
+"the file wins" is actually implemented (M11a Phase B).** Design 8 fixes
+the layouts' PURPOSES and dealing disciplines but not every mechanism;
+these were decided at implementation and are recorded because a later
+reader would otherwise have to reverse-engineer them from the code. (a)
+FOOTPRINT when N < site count. The patterned layouts take "a centred
+contiguous block of N sites", implemented as: order every site by
+Chebyshev distance from the grid centre, ties broken ascending by id, take
+the first N. Chebyshev regardless of the run's neighbourhood shape — under
+the von Neumann metric the same rule would carve a DIAMOND, which is not
+what "central block" describes. `random` scatters over the whole grid
+instead, per Design 8. (b) TRAVERSALS. `checkerboard` deals round-robin
+along a SERPENTINE sweep, not a row-major one: with an even column count,
+row-major round-robin restarts each row on the same strategy and produces
+vertical stripes rather than a chessboard, which would fail the spec's own
+acceptance test ("with two equal-count strategies this reproduces the
+literal checkerboard"). The serpentine alternates between vertically
+adjacent cells too, giving the checkerboard for any column count. `blocks`
+deals run-length along a TILED serpentine (tiles about sqrt(rows) x
+sqrt(cols), tiles themselves swept boustrophedon), which is what makes its
+runs compact in TWO dimensions rather than in one — the property that
+distinguishes it from `stripes`, and it is pinned by a test comparing how
+many columns a run spans under each. No new parameter, per Design 8.
+`central_block` deals run-length row-major inside its footprint; what
+defines it is the empty frame, not the arrangement within. (c) DEAL TO
+AGENTS. The deal decides which STRATEGY sits in which site; agents
+carrying that strategy are then assigned to those sites in ascending
+agent-id order. So the layout never reorders agents and never touches ids
+— `build_initial_ population` keeps producing agents in
+composition-declaration order, and the ascending-machine-name rule (#67)
+governs the DEAL, not the population. (d) "THE FILE WINS", implemented.
+Design 8 says a layout file's cell counts ARE the composition and the mix
+widgets are superseded. Rather than derive N from the file — which would
+feed the auto grid dimensions and K's derived default from a filesystem
+read inside a before-validator — the file overwrites each agent's STRATEGY
+at founding, and the population SIZE must still match the file's
+occupied-cell count, with a validation error naming both numbers when it
+does not. So the widgets' mixture is genuinely superseded while N stays
+the single arithmetic source everything else derives from. Alternative
+rejected: requiring the widgets to reproduce the file's counts, which
+Design 8 explicitly calls a trap. (e) VALIDATION PLACEMENT.
+`initial_layout = from_file` with a blank path is a config error (only
+that direction can silently run a different experiment); a stale path
+under another layout is ignored, the `continuation_probability` idiom.
+Header dimensions, unregistered tokens, and the population-size match are
+checked when the file is READ at founding, because config validation is
+deliberately filesystem-free. The sweep-axis incoherence (#a composition
+axis over a base whose every cell is pinned by a file) is refused at
+sweep-spec validation, as Design 8 requires. (f) RNG POSITION. The
+founding draw is placed as the FIRST draw of the run, before the economy's
+founder decoration in all three dynamics classes — Design 9 only requires
+"once per run, before generation 0", and first is the position that makes
+the renderer's replay exact (#116). Exactly one draw is consumed: `random`
+takes one permutation, `patches` one seed sample of size "number of
+strategies"; the other five layouts and every well-mixed run consume none,
+asserted directly against the generator's state.
+
+**#120 — 2026-08-03 — Schema 5 is CONFIG-driven, honest presence reaches
+COLUMN grain, and the grid renders the FOUNDING arrangement (M11a Phase
+B).** (a) SCHEMA 5. `SCHEMA_VERSION` becomes 5 (the ceiling the loader
+accepts) and the tier constants are split out: `STRUCTURE_SCHEMA_VERSION =
+5`, `EVENT_TIME_SCHEMA_VERSION = 4` (previously spelled `SCHEMA_VERSION`),
+`PER_AGENT_SCHEMA_VERSION = 3`, `PER_STRATEGY_SCHEMA_VERSION = 2`. Design
+10 says ANY lattice run writes 5, and that forces the structure tier to be
+read from the CONFIG rather than from the recorded rows, unlike every tier
+below it: a synchronous imitation lattice run records no per-agent data at
+all (#116) yet a reader still must know the run had structure. Both the
+anticipated version (the `config.yaml` header comment) and the actual one
+(`summary.json`) therefore consult the config for this tier and agree.
+Tournament runs are excluded — structure is ignored there. (b)
+COLUMN-GRAIN PRESENCE. `site_id` is a nullable `Int64` column present on
+`agents.parquet` exactly when the run has structure, and absent otherwise
+— the first application of #83's honest-presence rule at column grain
+rather than file grain, with the loader made presence-driven to match
+(`SITE_COLUMN in frame.columns`). Keyed off the run type, not off whether
+any row happens to carry a site, so the shape is stable across periods. A
+test pins that a well-mixed run's column tuple is unchanged, since nothing
+else in the suite did. (c) PHASE B'S HONEST GAP, recorded rather than
+hidden: occupancy is founded at generation 0 and then left alone, because
+local birth is Phase C. So under the economy a newborn's `site_id` is null
+and a dead agent's site is not reclaimed. This is the phase's exit
+condition (nothing reads the structure) rather than an oversight, and it
+is pinned by a test that Phase C is expected to break — at which point the
+test retires. (d) LAYOUT-FILE SELF-CONTAINMENT. The recorder copies the
+file into the run folder as `layout.txt` and records the copy's bare name;
+`load_config` resolves a layout path that is not found from the working
+directory against the config file's own folder. So a recorded run re-runs
+from anywhere even after the original file moves (hard rule 8), at the
+cost of the recorded config's path differing from the authored one — which
+is the point, and is tested. (e) THE RENDERER shows the FOUNDING
+arrangement, computed by replay from (config, seed) rather than from run
+output. That is what lets one code path serve imitation runs (which
+persist nothing), economy runs, and the results browser alike, and it lets
+the panel preview a layout live — change the dropdown and the arrangement
+redraws without running anything, which is what V2 actually asks the owner
+to do. Cells are exactly square by construction (plotly's `scaleanchor`),
+not by sizing arithmetic that a container width could defeat. Three
+derived readouts ship beside it — site count, occupancy fraction, and the
+Design 8 mandatory guard, the count of agents with no occupied neighbour
+at founding — each with its own inline explanation per the §12 rule. (f)
+PHASE A'S IMPORT GUARD IS RETIRED, not weakened. Its assertion (no engine
+module imports `core.structure`) is false by design now that Phase B wires
+the module, and adding exceptions to it would have left a test whose name
+and message contradict what it checks. What it protected is now asserted
+directly and better: a well-mixed run builds no occupancy and moves the
+generator's state not at all. A narrower hard-rule-4 scan (nothing under
+core/, config/, io/ imports Streamlit or plotly) takes its place in the
+same file.

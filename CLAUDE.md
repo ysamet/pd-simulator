@@ -244,6 +244,16 @@ local interaction) and **M11b** (movement + layout painter). M11a is **in
 progress** (spec: `docs/specs/M11a-population-structure-spec.md`; #111 =
 pre-implementation docs pass): **Phase A** — `pdsim/core/structure.py`
 plus the registry's Structure geometry block, wired to no engine code —
-landed 2026-08-01 (#112). Next up: Phase B (occupancy, layouts,
-rendering, persistence). Design everything to not block the v2/v3
-extensions listed in `docs/DESIGN.md` §6.
+landed 2026-08-01 (#112). **Phase B** — occupancy, founding via the seven
+initial layouts plus the layout file, the two registry entries, site-id
+persistence at schema 5, and the grid renderer — landed 2026-08-03
+(#116-#120); VT-2 and VT-3 are answered there, along with #114's
+shifted-weight measurement. After Phase B structure exists and is visible
+but **nothing reads it**: behaviour is unchanged and a lattice run with a
+deterministic layout still matches its well-mixed twin. Next up:
+**Phase C — local birth, the riskiest phase** (`place_offspring` becomes
+structure-aware; `birth_radius`/`birth_decay`; `placement_contest`;
+`boundary_order`; VT-4; the stake-plus-overhead validation fix from the
+spec's phase-task ledger; the blocked-parents Economy readout; the
+Design 9 RNG amendments and golden masters). Design everything to not
+block the v2/v3 extensions listed in `docs/DESIGN.md` §6.

@@ -373,11 +373,12 @@ class PopulationConfig(_RegistryBackedModel):
 class StructureConfig(_RegistryBackedModel):
     """The shape of the world: sites, lattice geometry, boundary (M11a, §2.12).
 
-    In Phase A of M11a this section is registered and validated but consumed
-    by nothing — the well-mixed engine does not route through structure code
-    at all, which is what keeps every pre-M11a run byte-identical (spec
-    Defining principle 1). Later phases wire it to founding placement, local
-    birth, and local interaction.
+    As of Phase B this section decides where founding agents live: a lattice
+    run builds its structure and lays its founders out at generation 0. It
+    still decides nothing else — who plays whom (Phase D) and where children
+    land (Phase C) remain global. The well-mixed engine does not route
+    through structure code at all, which is what keeps every pre-M11a run
+    byte-identical (spec Defining principle 1).
 
     Attributes:
         kind: ``"well_mixed"`` (the classic aspatial world, the default) or
@@ -394,6 +395,12 @@ class StructureConfig(_RegistryBackedModel):
             shape IS the grid's distance metric.
         boundary: ``"torus"`` (edges wrap; uniform degree) or ``"bounded"``
             (hard edges; corners have fewer neighbours).
+        initial_layout: How founding agents are arranged on the grid — one
+            of the seven values in
+            :data:`~pdsim.core.layouts.LAYOUT_CHOICES`. Arrangement only:
+            the per-strategy counts are already resolved (#67).
+        layout_file: Path to a hand-authored layout file, read only under
+            ``initial_layout = "from_file"`` and ``None`` otherwise.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
@@ -402,6 +409,8 @@ class StructureConfig(_RegistryBackedModel):
         "cols": "structure.cols",
         "neighbourhood_shape": "structure.neighbourhood_shape",
         "boundary": "structure.boundary",
+        "initial_layout": "structure.initial_layout",
+        "layout_file": "structure.layout_file",
     }
 
     kind: str = _registry_field("structure.kind")
@@ -409,6 +418,33 @@ class StructureConfig(_RegistryBackedModel):
     cols: int | None = _registry_field("structure.cols")
     neighbourhood_shape: str = _registry_field("structure.neighbourhood_shape")
     boundary: str = _registry_field("structure.boundary")
+    initial_layout: str = _registry_field("structure.initial_layout")
+    layout_file: str | None = _registry_field("structure.layout_file")
+
+    @model_validator(mode="after")
+    def _check_layout_file(self) -> Self:
+        """Require a path when the layout is read from a file.
+
+        The converse is deliberately NOT an error: a path left behind after
+        switching the layout away from ``from_file`` is simply ignored, the
+        same idiom as ``match.continuation_probability`` under a fixed match
+        length. Only the missing-path direction can silently produce a run
+        that is not the one the user asked for.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If ``initial_layout`` is ``"from_file"`` without a
+                ``layout_file``.
+        """
+        if self.initial_layout == "from_file" and not self.layout_file:
+            raise ValueError(
+                "structure.initial_layout is 'from_file' but structure.layout_file is "
+                "empty — name the file that paints the grid, or choose one of the "
+                "generated layouts."
+            )
+        return self
 
 
 class DynamicsConfig(_RegistryBackedModel):
@@ -1003,14 +1039,19 @@ def load_config(path: str | Path) -> ExperimentConfig:
         path: Path to a YAML file with the :class:`ExperimentConfig` layout.
 
     Returns:
-        The validated configuration.
+        The validated configuration. A relative ``structure.layout_file``
+        that is not found from the working directory but IS found beside
+        this config file is rewritten to that path — which is what lets a
+        recorded run folder, carrying its own copy of the layout, re-run
+        from anywhere (hard rule 8; M11a spec Design 8).
 
     Raises:
         FileNotFoundError: If the file does not exist.
         ValueError: If the file is not a YAML mapping at the top level.
         pydantic.ValidationError: If any value is missing, unknown, or invalid.
     """
-    text = Path(path).read_text(encoding="utf-8")
+    config_path = Path(path)
+    text = config_path.read_text(encoding="utf-8")
     # yaml.safe_load parses standard YAML types only — it cannot execute
     # arbitrary Python the way yaml.load can, so it is the right call for
     # user-supplied files.
@@ -1020,7 +1061,17 @@ def load_config(path: str | Path) -> ExperimentConfig:
             f"Config file {path} must contain a YAML mapping (key: value pairs) at the "
             f"top level, got {type(data).__name__}."
         )
-    return ExperimentConfig.model_validate(data)
+    config = ExperimentConfig.model_validate(data)
+    layout_file = config.structure.layout_file
+    if layout_file and not Path(layout_file).is_file():
+        beside = config_path.parent / Path(layout_file).name
+        if beside.is_file():
+            config = config.model_copy(
+                update={
+                    "structure": config.structure.model_copy(update={"layout_file": str(beside)})
+                }
+            )
+    return config
 
 
 def save_config(config: ExperimentConfig, path: str | Path) -> Path:

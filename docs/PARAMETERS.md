@@ -192,6 +192,24 @@ Which cells count as a cell's neighbours — and, with that, what DISTANCE means
 
 What happens at the edge of the grid. 'torus': the world wraps around — the left edge is adjacent to the right edge and the top to the bottom, so there is no rim and every cell has exactly the same number of neighbours. 'bounded': the grid has hard edges — corner and edge cells have FEWER neighbours than interior cells (a corner keeps 3 of Moore's 8, or 2 of von Neumann's 4). The default is 'torus' because uniform degree removes an edge artifact: how easily cooperation survives depends on how many neighbours a cell has, so on a bounded grid the corners become spuriously friendly to cooperation — an effect of the map's edge, not a finding about the model. Choose 'bounded' deliberately when a hard edge is itself part of what you want to model (a coastline, a walled world).
 
+#### `structure.initial_layout` — Initial layout
+
+- **Type:** choice
+- **Allowed values:** one of: `random`, `checkerboard`, `stripes`, `blocks`, `patches`, `central_block`, `from_file`
+- **Default:** `random`
+
+How the starting population is ARRANGED on the grid. It decides arrangement only — how many agents of each strategy there are is already fixed by the population mix, and the layout simply deals that fixed deck onto cells. This choice matters enormously on a lattice: whether cooperators start clustered together or scattered among defectors can decide whether cooperation survives at all. 'random': agents are scattered over the whole grid in random order — the closest spatial analogue of the classic well-mixed world, and the honest baseline. 'checkerboard': strategies are dealt one cell at a time in rotation, so agents are interleaved as thoroughly as the counts allow — with two equal-sized strategies this is the literal chessboard, and with four unequal ones it is still the maximum-mixing arrangement. This is the ANTI-CLUSTER baseline: if cooperation survives here, it is not surviving by clustering. 'stripes': each strategy's whole count is dealt as one consecutive run along a row-by-row sweep, giving broad bands. Because the run ends where the COUNT ends rather than where a row ends, a 'stripe' can be a fragment of a row — that is the arrangement working as intended, not a glitch. 'blocks': the same consecutive-run dealing, but along a tile-by-tile sweep, so each strategy occupies a chunky two-dimensional region instead of horizontal bands. 'patches': one randomly placed seed cell per strategy, with each patch then growing outward until its quota is used up — the most natural irregular clusters. Only the seed placement is random; the growth is fixed. 'central_block': the population fills a centred rectangle and the rest of the grid is left EMPTY — the expanding-frontier setup, where what you are watching is a population growing into empty space. 'from_file': read the exact arrangement, cell by cell, from a layout file you wrote (see the layout file parameter). Ignored under the 'well_mixed' structure.
+
+*Learn more:* Starting arrangement is a genuine experimental variable in spatial game theory, not a cosmetic one: the classic result that cooperators survive by clustering is a statement about arrangement, so comparing 'patches' against 'checkerboard' at identical composition isolates exactly that effect.
+
+#### `structure.layout_file` — Layout file
+
+- **Type:** text
+- **Allowed values:** any text; may be empty (= off)
+- **Default:** empty (no limit)
+
+Path to a text file that paints the starting world cell by cell. Read only when the initial layout is 'from_file'; leave it empty otherwise. The file is a picture of the grid: a short header of 'kind: lattice_grid', 'rows:' and 'cols:' lines, then one line per grid row, with one token per cell separated by spaces. A token is either a strategy's machine name (such as 'always_defect') or a full stop '.' for a cell left empty. The file's row and column counts must match the grid's, and it must place exactly as many agents as the population size — but WHICH strategy sits in each cell is entirely the file's decision, so the population-mix widgets no longer control the arrangement or the mixture. A copy of the file is saved into the run folder, so a recorded run can always be re-run even if the original file later moves or changes.
+
 ### Dynamics
 
 #### `dynamics.generations` — Generations

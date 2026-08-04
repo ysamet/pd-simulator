@@ -40,6 +40,97 @@ def strategy_colors() -> dict[str, str]:
     return {info.name: palette[i % len(palette)] for i, info in enumerate(all_strategies())}
 
 
+def grid_chart(
+    rows: int,
+    cols: int,
+    placements: dict[int, str],
+    *,
+    title: str = "Founding layout",
+) -> go.Figure:
+    """Draw the lattice: one square cell per site, coloured by its occupant.
+
+    The rendering contract (#109, ``docs/DESIGN.md`` §6.3): **cells are always
+    exactly square.** That is enforced here rather than by sizing arithmetic
+    in the caller — plotly's ``scaleanchor`` ties one pixel of the y axis to
+    one pixel of the x axis, so the canvas takes whatever aspect the grid has
+    and a cell can never come out oblong at any container width.
+
+    This is the "correct at a few hundred cells" renderer: one heatmap trace,
+    one cell per site. The pixel-array fallback and the ~3 px cell floor for
+    very large grids are Phase E.
+
+    Args:
+        rows: Grid row count.
+        cols: Grid column count.
+        placements: Site id -> strategy machine name, for occupied sites
+            only. Site ids are row-major (``id = row * cols + col``), matching
+            :class:`~pdsim.core.structure.LatticeStructure`.
+        title: Figure title.
+
+    Returns:
+        A plotly figure. Empty sites render in the background colour, so a
+        sparsely occupied grid reads as a population inside a world rather
+        than as a grid with holes in it.
+    """
+    names = sorted({name for name in placements.values()})
+    colors = strategy_colors()
+    index_of = {name: i for i, name in enumerate(names)}
+    # z holds the strategy INDEX per cell (None where empty); the discrete
+    # colorscale below turns those indices into the project's stable
+    # per-strategy colours rather than a continuous gradient.
+    z: list[list[float | None]] = [[None] * cols for _ in range(rows)]
+    labels: list[list[str]] = [["empty"] * cols for _ in range(rows)]
+    for site_id, name in placements.items():
+        row, col = divmod(site_id, cols)
+        if 0 <= row < rows and 0 <= col < cols:
+            z[row][col] = float(index_of[name])
+            labels[row][col] = _display_name(name)
+
+    if names:
+        # One flat band per strategy: stop i covers [i/n, (i+1)/n], so a cell
+        # holding index i lands squarely inside its own band.
+        span = 1.0 / len(names)
+        colorscale: list[list[float | str]] = []
+        for i, name in enumerate(names):
+            color = colors.get(name, _FALLBACK_COLOR)
+            colorscale.append([i * span, color])
+            colorscale.append([min(1.0, (i + 1) * span), color])
+    else:
+        colorscale = [[0.0, _FALLBACK_COLOR], [1.0, _FALLBACK_COLOR]]
+
+    figure = go.Figure(
+        go.Heatmap(
+            z=z,
+            text=labels,
+            colorscale=colorscale,
+            zmin=-0.5,
+            zmax=max(len(names) - 0.5, 0.5),
+            showscale=False,
+            xgap=1,
+            ygap=1,
+            hovertemplate="row %{y}, col %{x}<br>%{text}<extra></extra>",
+        )
+    )
+    figure.update_layout(
+        title=title,
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
+        plot_bgcolor="rgba(0,0,0,0.06)",
+    )
+    figure.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
+    # scaleanchor + scaleratio 1 is what makes the cells exactly square; the
+    # y axis is reversed so row 0 renders at the top, matching how a layout
+    # file is written and read.
+    figure.update_yaxes(
+        showticklabels=False,
+        showgrid=False,
+        zeroline=False,
+        scaleanchor="x",
+        scaleratio=1,
+        autorange="reversed",
+    )
+    return figure
+
+
 def _display_name(name: str) -> str:
     """Return a strategy's display name, tolerating unregistered names.
 

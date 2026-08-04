@@ -56,6 +56,7 @@ _KIND_LABELS = {
     "float": "number",
     "bool": "true/false",
     "choice": "choice",
+    "str": "text",
 }
 """Novice-facing names for the registry's parameter kinds."""
 
@@ -87,6 +88,8 @@ def _format_range(spec: ParameterSpec) -> str:
     if spec.kind == "choice":
         options = ", ".join(f"`{choice}`" for choice in spec.choices or ())
         return f"one of: {options}"
+    if spec.kind == "str":
+        return "any text" + ("; may be empty (= off)" if spec.nullable else "")
     parts: list[str] = []
     if spec.minimum is not None and spec.maximum is not None:
         upper = _format_number(spec.maximum)

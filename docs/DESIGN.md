@@ -436,6 +436,28 @@ arrangement is DATA the engine reads (rule 8: the run must re-run from its
 config; rule 4: the engine never knows a mouse was involved). The mouse
 painter that writes such files is M11b.
 
+**Layout file format** (M11a Phase B). Plain text: a header of
+`kind: lattice_grid`, `rows:` and `cols:` lines, then a body of one token
+per cell — a strategy machine name, or `.` for an empty site. The `kind:`
+discriminator ships from day one so M19's `site_map` variant (a
+site-id/strategy body, needing no geometry) is a reader dispatch rather than
+a format migration. The file WINS on composition: it names a strategy per
+cell, so its counts are the composition and the mix widgets no longer decide
+the arrangement (the population SIZE must still agree, and a mismatch is a
+validation error). A sweep that varies composition while a file pins every
+cell is rejected at spec validation. The recorder copies the file into the
+run folder and records the copy's name, so the folder re-runs after the
+original moves (rule 8).
+
+**Topology / occupancy split.** `Structure` (`core/structure.py`) is an
+immutable value — the sites, the neighbour relation, the distance metric —
+derived once from the config. `Occupancy` (`core/occupancy.py`) is mutable
+per-run state owned by the dynamics: site → agent and agent → site, kept
+mutually consistent, with exclusivity checked as `occupants < capacity` so
+M19's per-site capacity is a parameter change rather than a migration of the
+placement seam. Keeping the two apart is what lets the topology be shared,
+cached, and (later) precomputed.
+
 **Rendering contract** (#109). Cells are always exactly square: side =
 min(max_width/cols, max_height/rows); the canvas takes whatever aspect the
 grid has. The side is floored at ≈ 3 px, below which cells stop being
@@ -747,6 +769,14 @@ more" note. From this registry we generate:
 
 It is structurally impossible for a parameter to exist without an explanation: the
 registry entry *is* the parameter's existence.
+
+**Parameter kinds** are `int`, `float`, `bool`, `choice`, and — since M11a
+Phase B (DECISIONS #118) — `str`. `str` is free text and is deliberately the
+weakest kind: a value not drawn from a declared set cannot be validated
+beyond "it is a string", so anything with a knowable set of values stays a
+`choice`. It exists for genuinely open values — currently only
+`structure.layout_file`, a filesystem path. A nullable `str` normalises
+blank text to `None`, so "unset" has one spelling rather than two.
 
 `docs/PARAMETERS.md` (implemented in M8, DECISIONS #56) is a **committed,
 generated artifact**: `python -m pdsim.gendocs` (top-level `pdsim/gendocs.py`,

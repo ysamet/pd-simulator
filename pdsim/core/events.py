@@ -93,6 +93,12 @@ class AgentSnapshot:
         energy: Energy carried into the next generation (what its next
             energy update reads as carried-in).
         strategy: Strategy machine name.
+        site_id: Which site the agent occupies (M11a Phase B), or ``None``
+            when the run has no structure — the honest-presence rule (#83)
+            at field grain. This is also the live grid renderer's input: the
+            snapshot IS the render state. In Phase B only founders carry a
+            site, because births and deaths do not yet maintain occupancy
+            (local birth is Phase C); a newborn's site id is ``None``.
     """
 
     agent_id: AgentId
@@ -100,6 +106,7 @@ class AgentSnapshot:
     age: int
     energy: float
     strategy: str
+    site_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
