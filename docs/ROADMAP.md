@@ -133,6 +133,13 @@ run data exists.
     (#109). The M10a `place_offspring` gate (the well-mixed always-True
     corner) becomes the local placement seam. Spec arrives as a separate
     prompt and must satisfy the §2.12 inline-(?) checklist obligation.
+
+    Calibration-guide residue (DECISIONS #113–#115) folded into the
+    remaining phases: Phase B measures the #114 shifted-weight spread;
+    Phase C carries the ADVISORIES.md stake+overhead validation fix; Phase
+    D answers VT-6(b), whose report may force design-layer corrections to
+    the flagship's living cost and the guide's §4.2. Details in the spec's
+    post-freeze phase-task ledger.
   - **M11b — Agent movement + layout painter.** The `MovementRule` ABC
     (#46) with its own walk radius/decay pair over the same reach kernel,
     on a configurable schedule — the schedule is the genuinely open
