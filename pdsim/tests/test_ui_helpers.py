@@ -8,6 +8,7 @@ the point of the helper layer (DECISIONS #38).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -454,3 +455,137 @@ class TestAsyncGreying:
         disabled, note = helpers.greying("output.recording_cadence", values)
         assert disabled
         assert "ASYNCHRONOUS" in note
+
+
+class TestGridPreview:
+    """The grid's visibility predicate and its minimal config (#121)."""
+
+    def test_grid_visible_truth_table(self) -> None:
+        """Evolution + lattice, nothing else consulted."""
+        assert helpers.grid_visible({"run.mode": "evolution", "structure.kind": "lattice"})
+        assert not helpers.grid_visible({"run.mode": "evolution", "structure.kind": "well_mixed"})
+        assert not helpers.grid_visible({"run.mode": "tournament", "structure.kind": "lattice"})
+        assert not helpers.grid_visible({})
+
+    def test_visibility_ignores_reproduction_mode_and_time_model(self) -> None:
+        """The defect's shape, pinned as a property.
+
+        The two switches that hid the grid must not enter the predicate
+        at all.
+        """
+        base = {"run.mode": "evolution", "structure.kind": "lattice"}
+        for extra in (
+            {"dynamics.reproduction_mode": "energy_economy"},
+            {"dynamics.time_model": "asynchronous"},
+            {"dynamics.reproduction_mode": "energy_economy", "dynamics.time_model": "asynchronous"},
+        ):
+            assert helpers.grid_visible({**base, **extra})
+
+    def test_the_defect_itself_a_failing_section_elsewhere_cannot_hide_the_grid(self) -> None:
+        """Regression pin for the observed disappearance (#121).
+
+        N = 400 with the default K = 200: the FULL config fails validation
+        under `energy_economy` (K >= N is checked exactly there), and that
+        failure once took the preview down with it. The preview config must
+        build anyway, because the grid never reads the dynamics section.
+        """
+        values = helpers.default_widget_values()
+        values["run.mode"] = "evolution"
+        values["structure.kind"] = "lattice"
+        values["population.size"] = 400
+        values["dynamics.reproduction_mode"] = "energy_economy"
+        composition = {"always_cooperate": 200, "always_defect": 200}
+        with pytest.raises(ValidationError):
+            helpers.build_config(values, composition)  # the full panel fails...
+        config = helpers.grid_preview_config(values, composition)  # ...the preview must not
+        assert config.structure.kind == "lattice"
+        assert config.population.size == 400
+
+    def test_the_preview_keeps_mode_seed_population_and_structure(self) -> None:
+        """Exactly the founding inputs survive; the rest are defaults."""
+        values = helpers.default_widget_values()
+        values["run.mode"] = "evolution"
+        values["run.seed"] = 99
+        values["structure.kind"] = "lattice"
+        values["structure.initial_layout"] = "stripes"
+        values["population.size"] = 9
+        values["dynamics.selection_beta"] = 7.5  # must NOT reach the preview
+        config = helpers.grid_preview_config(values, {"always_defect": 9})
+        assert config.seed == 99
+        assert config.structure.initial_layout == "stripes"
+        assert config.dynamics.selection_beta != 7.5  # defaulted, not copied
+
+    def test_genuinely_grid_relevant_problems_still_raise(self) -> None:
+        """The preview is lenient about OTHER sections, not about its own."""
+        values = helpers.default_widget_values()
+        values["run.mode"] = "evolution"
+        values["structure.kind"] = "lattice"
+        values["population.size"] = 10
+        with pytest.raises(ValidationError):
+            helpers.grid_preview_config(values, {"always_defect": 7})  # mix != N
+
+
+class TestLayoutPopulationMismatch:
+    """The file-vs-widgets population comparison behind the populate offer (#124)."""
+
+    TEXT = (
+        "kind: lattice_grid\nrows: 2\ncols: 3\n\n"
+        "always_defect always_defect .\n"
+        "tit_for_tat . tit_for_tat\n"
+    )
+
+    def _write(self, tmp_path: Path, text: str | None = None) -> str:
+        """Write a scratch layout file and return its path string.
+
+        Args:
+            tmp_path: pytest's per-test directory.
+            text: File contents; the class fixture by default.
+
+        Returns:
+            The absolute path as a string (contains separators, so the #122
+            rule uses it as given).
+        """
+        path = tmp_path / "scratch_layout.txt"
+        path.write_text(text or self.TEXT, encoding="utf-8")
+        return str(path)
+
+    def test_agreement_returns_none(self, tmp_path: Path) -> None:
+        """Matching size and mix → nothing to offer."""
+        layout_file = self._write(tmp_path)
+        result = helpers.layout_population_mismatch(
+            layout_file, 4, {"always_defect": 2, "tit_for_tat": 2, "pavlov": 0}
+        )
+        assert result is None
+
+    def test_a_size_difference_reports_the_files_population(self, tmp_path: Path) -> None:
+        """The returned pair is exactly what the widgets would need to hold."""
+        layout_file = self._write(tmp_path)
+        result = helpers.layout_population_mismatch(layout_file, 20, {"always_defect": 20})
+        assert result == (4, {"always_defect": 2, "tit_for_tat": 2})
+
+    def test_a_mix_only_difference_still_reports(self, tmp_path: Path) -> None:
+        """Same total, different mixture: the recorded config should not lie."""
+        layout_file = self._write(tmp_path)
+        result = helpers.layout_population_mismatch(layout_file, 4, {"always_defect": 4})
+        assert result == (4, {"always_defect": 2, "tit_for_tat": 2})
+
+    def test_an_unregistered_token_raises_with_its_position(self, tmp_path: Path) -> None:
+        """The token check runs here too.
+
+        The offer must never propose writing an unknown strategy into
+        the widgets.
+        """
+        layout_file = self._write(tmp_path, self.TEXT.replace("tit_for_tat", "tit_for_tta"))
+        with pytest.raises(ValueError, match=r"'tit_for_tta' \(line 6, cell 1\)"):
+            helpers.layout_population_mismatch(layout_file, 4, {})
+
+    def test_a_nearly_empty_file_is_refused(self, tmp_path: Path) -> None:
+        """Below the smallest legal population no widget state could match."""
+        text = "kind: lattice_grid\nrows: 1\ncols: 3\n\nalways_defect . .\n"
+        with pytest.raises(ValueError, match="at least 2"):
+            helpers.layout_population_mismatch(self._write(tmp_path, text), 1, {})
+
+    def test_a_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
+        """The app shows this as the grid warning, same as founding would."""
+        with pytest.raises(FileNotFoundError):
+            helpers.layout_population_mismatch(str(tmp_path / "absent.txt"), 4, {})

@@ -1,0 +1,10 @@
+# Comma-separated example: a tit-for-tat island in a sea of defectors.
+# 24 agents — set Population size to 24 to use it.
+kind: lattice_grid
+rows: 4
+cols: 6
+
+always_defect, always_defect, always_defect, always_defect, always_defect, always_defect
+always_defect, tit_for_tat,   tit_for_tat,   tit_for_tat,   always_defect, always_defect
+always_defect, tit_for_tat,   tit_for_tat,   tit_for_tat,   always_defect, always_defect
+always_defect, always_defect, always_defect, always_defect, always_defect, always_defect

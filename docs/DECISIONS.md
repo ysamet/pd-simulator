@@ -2591,3 +2591,189 @@ directly and better: a well-mixed run builds no occupancy and moves the
 generator's state not at all. A narrower hard-rule-4 scan (nothing under
 core/, config/, io/ imports Streamlit or plotly) takes its place in the
 same file.
+
+**#121 — 2026-08-04 — The grid preview validated the WHOLE panel, so a
+failing section the grid never reads could hide it; the preview now builds
+from exactly the founding inputs, behind a named visibility predicate
+(M11a Phase B follow-up).** THE DEFECT, from the owner's manual
+validation: with `structure.kind = lattice`, the founding grid vanished
+when `reproduction_mode` was switched to `energy_economy`, and likewise
+under `time_model = asynchronous`. DIAGNOSED CAUSE — neither of the design
+layer's two hypotheses. The grid was never gated to sync imitation, and
+founding- replay exactness was never the problem (the founding path reads
+mode, seed, population and structure only, and is identical in every
+mode). The panel preview built the FULL `ExperimentConfig` from every
+widget value and drew the grid only if the whole thing validated — and
+`_check_capacity_fits_ population` (K >= N) runs exactly when K is
+consumed: synchronous `energy_economy`, or asynchronous `variable_n` (the
+async default). With V1's population of 400 and `carrying_capacity` at its
+default 200, the check is dormant under imitation (#34: ignored parameters
+are never validation errors) and fires the moment either switch flips —
+reproduced headlessly with exactly that error. The grid then vanished
+behind a misleading caption blaming the population mix. FIX, in three
+parts. (a) A NAMED predicate, `helpers.grid_visible` — evolution mode AND
+lattice, deliberately consulting neither `reproduction_mode` nor
+`time_model` — in the shape Phase E's greying/visibility predicate table
+can fold in unchanged; the flagship and drifting frontier are sync-economy
+runs and `donation_game_threshold` is async, so any clock or reproduction
+gate would make V4-V6 unwatchable. (b) `helpers.grid_preview_config`
+builds the preview from ONLY mode, seed, population.* and structure.* (the
+`GRID_PREVIEW_SECTIONS` tuple), everything else at registry defaults — so
+a validation failure elsewhere in the panel can never take the grid down
+with it, while genuinely grid-relevant failures (mix != N, `from_file`
+without a file) still show, now with the ACTUAL validation message instead
+of the guess. Strategy parameters are omitted on stated reasoning: the
+deal reads strategy names and counts, never their tunables. (c)
+Replay-versus-engine placement pins added for a sync-economy lattice run
+and an async `fixed_n` lattice run, mirroring the existing imitation pin —
+founding-replay exactness was hypothesis (b) and deserved pinning in the
+modes the later phases watch, even though it was not the cause; the
+economy pin reads the engine's placement off the persisted founder
+snapshots, exercising the site_id path end to end. The results-browser
+grid needed no fix (it renders from the recorded config,
+mode-independently) and the live view is untouched. Regression test: the
+exact defect state — N = 400, default K, economy — pinned as "full config
+raises, preview builds anyway".
+
+**#122 — 2026-08-04 — `grid_templates/` is the layout files' default home;
+a bare filename resolves there, a recorded folder's own copy outranks it;
+token spellings are surfaced in app, error, and help text (M11a Phase B
+follow-up; extends Design 8, which is silent on resolution).** (a) THE
+FOLDER: `grid_templates/` at the repository root, shipped with a README
+(format rules: header, both separators, the '.' empty-site token, where
+machine names come from, the population-size contract) and two small 4x6
+examples in real registered machine names — `example_quadrants.txt`
+(whitespace-separated, 18 agents) and `example_island.txt`
+(comma-separated, 24 agents). A test parses both against the live strategy
+registry, so the examples cannot rot. (b) THE RESOLUTION RULE: a
+`structure.layout_file` value containing NO path separator is a template
+name and resolves against `grid_templates/`; a value containing a
+separator, or an absolute path, is used as given. One exception outranks
+the template folder, pinned by a test: a recorded run's own beside-config
+copy wins for bare names, because a recorded folder must stay
+self-contained (hard rule 8) — otherwise re-running an old folder could
+silently read a same-named template written later. `load_config` now
+routes through the same `resolve_layout_path` so the CLI, the recorder,
+and the app share one rule. Alternative rejected: resolving bare names
+against the working directory (the pre-existing accident) — a bare name in
+a config would then mean different files from different shells, which is
+exactly the reproducibility smell hard rule 8 exists to prevent. (c)
+COPY-NOT-MOVE pinned explicitly: the recorder test now asserts the user's
+original still exists after the run, alongside the run folder's copy. (d)
+TOKEN SPELLINGS, three surfaces that cannot drift: the app renders the
+registered machine names beside the Layout file widget at paint time (from
+the strategy registry, never hardcoded); the unregistered-token error now
+names the offending token with its FILE line and cell number (the parser
+records per-cell positions for exactly this) and lists the valid names;
+and the registry help text for `layout_file` and the `from_file` enum
+value states that tokens are registry machine names and points at the
+in-app list and the shipped examples.
+
+**#123 — 2026-08-04 — Layout files accept comma-separated bodies; comma
+presence anywhere in the body decides for the WHOLE body; an empty field
+between commas is an error, never an empty site (M11a Phase B follow-up;
+extends Design 8's format).** DETECTION RULE: if any body line contains a
+comma, the entire body parses comma-separated with each token stripped of
+surrounding whitespace; otherwise the body parses whitespace-separated
+exactly as before (existing files are untouched byte-for-byte, and a test
+pins that a comma file parses identically to its whitespace twin).
+Whole-body detection makes mixed-separator files impossible by
+construction — a whitespace-styled line inside a comma file yields one
+token and fails the cell-count check rather than being half-reinterpreted.
+'.' remains the empty-site token in BOTH modes. A blank token in comma
+mode (',,' or a leading/trailing comma) raises a validation error naming
+the line and cell and telling the user to write '.' — bare gaps must not
+silently mean "empty", or a missing token becomes indistinguishable from a
+typo; the same reasoning as #83's honest-presence rule, applied to a text
+format. The header is unchanged. Alternatives rejected: a `separator:`
+header field — more machinery for no ambiguity gained, since detection is
+already unambiguous; and treating blank fields as empty sites — rejected
+for the typo-masking reason above.
+
+**#124 — 2026-08-04 — Under `from_file`, the app compares the layout
+file's implied population against the Population section and offers a
+one-click populate; mismatch is an alert with a choice, never a silent
+override of the widgets (M11a Phase B follow-up; interim treatment pending
+Phase E's greying).** A layout file names a strategy per cell, so it IS a
+population — a size (the occupied-cell count) and a mixture. Design 8
+already rules that the file wins on composition and calls the alternative
+(making the user reproduce, in the widgets, counts the file states) a
+trap; but until Phase E's greying lands, the widgets are live and the user
+was left retyping the file's numbers to satisfy the size validator.
+DECIDED: a Streamlit-free helper (`helpers.layout_population_mismatch`)
+reads the file's (size, per-strategy counts) and compares them with the
+current widgets — token-checking the file against the strategy registry
+first, so the offer can never propose writing an unknown name into the
+widgets, and refusing files below the minimum legal population (2). On
+agreement the grid renders as usual. On ANY difference — size or mixture,
+because a mixture-only difference would otherwise record a config whose
+composition is not what actually runs — the panel shows both populations
+and offers two explicit ways out: switch `initial_layout` away from
+`from_file` (keeping the widgets as typed), or press "Populate the
+Population section from the file", which writes `population.size` and
+every registered strategy's mix count (absent strategies to 0) via a
+Streamlit button callback — callbacks run in the pre-render window of the
+next script run, the one moment widget session state may legally be
+written, the same window the scenario loader uses. The grid is withheld
+while the mismatch stands, so the alert-with-choice occupies exactly the
+spot the preview will fill once the state is coherent. Alternatives
+rejected: silently overriding the widgets at run time (two sources of the
+same truth disagreeing on screen — the exact trap Design 8 names);
+auto-populating without asking (the user may have meant to keep their mix
+and switch layouts instead, and an unprompted write to six widgets reads
+as the app fighting the user, #40's scenario-is-not-a-lock spirit);
+deriving `population.size` from the file inside config validation
+(rejected in #119(d) — validation stays filesystem-free and N stays the
+single arithmetic source). Registry help and the grid_templates README now
+mention the offer; the spec body is untouched.
+
+**#125 — 2026-08-04 — `central_block` was an alias of `stripes` (identical
+output in every configuration); it now builds Design 8's definitional
+footprint — the most-square centred RECTANGLE of exactly N cells,
+orientation-aware, with a stated fallback — and the full-grid coincidence
+with `stripes` is documented as inherent (M11a Phase B follow-up; fixes an
+unrecorded #119(a) collapse).** THE DEFECT, found by the owner walking V2:
+every layout example showed `central_block` identical to `stripes`. A
+sweep over five grid sizes and seven populations confirmed zero differing
+configurations — the two enum values were one code path. Cause: Design 8
+distinguishes them by FOOTPRINT in the sparse case — `central_block` is
+definitionally "a centred rectangle sized to N", while the patterned
+layouts got "a centred contiguous block of N sites", implemented in
+#119(a) as the Chebyshev ball around the grid centre. The implementation
+routed `central_block` through the same ball, and since both deal
+run-length along a row-major sweep inside their footprint, the two
+coincided everywhere. The ball is not generally a rectangle: N = 10 on 5x5
+gave a 3x3 blob plus one stray agent at the distance-2 ring's lowest site
+id — the grid's corner — for both layouts. TWO REASONS NOBODY SAW IT
+EARLIER, both worth recording: with `structure.rows`/`cols` left blank the
+grid auto-sizes to EXACTLY N sites, so the world is always full, the empty
+frame cannot exist, and at a full grid the two layouts coincide
+NECESSARILY (the rectangle sized to N is the whole world); and the Phase B
+validation's suggested workaround — population 100 on a manual 20x20 —
+collides by accident, because the 100-cell ball is exactly the centred
+10x10 square, which is also 100's most-square rectangle. DECIDED:
+`central_block` gets its own footprint function. The rectangle is the
+most-square factor pair of N that FITS the grid, tried in both
+orientations (a wide grid gets a wide block, a tall grid a tall one),
+centred by integer division; a prime N makes a single centred line, the
+same reading the grid's own auto-sizing gives prime populations. When no
+exact rectangle of N cells fits — a prime N exceeding both grid dimensions
+— the footprint falls back to the generic centred blob, keeping the layout
+total rather than refusing a legal configuration; the fallback is pinned
+by a test asserting footprint equality with `stripes` in exactly that
+corner. Dealing inside the rectangle stays run-length row-major.
+Consequences, stated honestly: at a FULL grid `central_block` still equals
+`stripes` (inherent — no frame exists), and the registry help text now
+says so and tells the user to set rows/columns larger than the population
+to see the frame; at sparse N whose ball happens to equal the rectangle (a
+perfect-square N centred on matching parity) the two still coincide;
+everywhere else they now visibly differ, pinned by tests at N = 10 on 5x5
+(2x5 rectangle vs blob-with-a-knob) and N = 60 on 20x20 (6x10 rectangle vs
+banded blob). No RNG is consumed either way (deterministic layout, the
+#119(f) gate untouched), no golden master existed on the sparse case, and
+engine behaviour is unchanged. Alternatives rejected: filling a
+slightly-larger rectangle partially for no-fit N (empty cells INSIDE the
+block — the frame stops meaning anything); and amending `stripes` to span
+the grid's full width in sparse worlds so the two are categorically
+different — that is a Design 8 semantics change and belongs to the design
+layer, flagged in the handback rather than taken here.

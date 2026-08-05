@@ -468,6 +468,132 @@ def build_config(
     return ExperimentConfig.model_validate(data)
 
 
+def grid_visible(values: Mapping[str, ParamValue]) -> bool:
+    """The grid's visibility predicate: evolution mode on a lattice.
+
+    A NAMED predicate rather than an inline conditional, so Phase E can fold
+    it into the greying/visibility predicate table unchanged (spec Design
+    11). Deliberately independent of ``reproduction_mode`` and
+    ``time_model``: every scenario the later phases validate by eye is a
+    non-imitation configuration (the flagship and the drifting frontier are
+    synchronous economy runs; `donation_game_threshold` is asynchronous),
+    so a grid gated to any reproduction or clock choice would make V4-V6
+    unwatchable. Tournament mode stays out: nothing is born and nothing
+    dies there, so space has nothing to do (DESIGN §2.12).
+
+    Args:
+        values: Widget values keyed by registry key (plus ``run.mode``).
+
+    Returns:
+        True exactly when the founding grid should render.
+    """
+    return values.get("run.mode") == "evolution" and values.get("structure.kind") == "lattice"
+
+
+GRID_PREVIEW_SECTIONS = ("population", "structure")
+"""The config sections the founding-grid preview reads (plus mode and seed).
+
+This tuple is the fix for a concrete defect (DECISIONS #121): the preview
+once validated the ENTIRE panel, so any cross-section rule in sections the
+grid never reads — K >= N is checked exactly under `energy_economy` and
+async `variable_n`, and nowhere else — could hide it. The founding
+arrangement is a pure function of (mode, seed, population, structure); the
+preview must depend on exactly that and nothing more.
+"""
+
+
+def grid_preview_config(
+    values: Mapping[str, ParamValue], composition: Mapping[str, int]
+) -> ExperimentConfig:
+    """Assemble the minimal config the founding-grid preview needs.
+
+    Everything outside :data:`GRID_PREVIEW_SECTIONS` (plus the seed) is left
+    at registry defaults, so a validation problem elsewhere in the panel — a
+    carrying capacity below the population, an async k too large — can
+    never take the grid down with it. Strategy parameters are omitted on
+    the same reasoning: the deal reads strategy NAMES and counts, never
+    their tunables, so they cannot change the picture.
+
+    Args:
+        values: Widget values keyed by registry key.
+        composition: Strategy machine name → agent count.
+
+    Returns:
+        A validated config whose founding arrangement is identical to the
+        full run's (same mode, seed, population, and structure).
+
+    Raises:
+        pydantic.ValidationError: Only for problems the grid genuinely has —
+            a mix that does not sum to the population size, incoherent
+            lattice dimensions, ``from_file`` without a file.
+    """
+    minimal: dict[str, ParamValue] = {
+        key: value
+        for key, value in values.items()
+        if key.split(".", maxsplit=1)[0] in GRID_PREVIEW_SECTIONS
+    }
+    minimal["run.mode"] = values.get("run.mode", "evolution")
+    if "run.seed" in values:
+        minimal["run.seed"] = values["run.seed"]
+    return build_config(minimal, composition)
+
+
+def layout_population_mismatch(
+    layout_file: str, size: int, composition: Mapping[str, int]
+) -> tuple[int, dict[str, int]] | None:
+    """Compare a layout file's implied population against the Population widgets.
+
+    A layout file names a strategy per cell, so its cell counts ARE a
+    population: a size (the occupied-cell count) and a mixture (spec
+    Design 8 — the file wins on composition). This helper reads that
+    population off the file so the app can offer to fill the Population
+    section in from it, instead of making the user retype numbers the file
+    already states (DECISIONS #124).
+
+    Args:
+        layout_file: The configured value — a bare template name or a path,
+            resolved by the #122 rule.
+        size: The current ``population.size`` widget value.
+        composition: The current mix widgets' values (zeros included; they
+            are ignored for the comparison).
+
+    Returns:
+        ``None`` when the file and the widgets agree exactly, else the
+        file's ``(size, counts)`` — what the widgets would need to hold.
+
+    Raises:
+        FileNotFoundError: If the file cannot be found.
+        ValueError: If the file is malformed, names unregistered strategies
+            (reported with line and cell), or places fewer than two agents —
+            below the smallest legal population, so no widget state could
+            ever match it.
+    """
+    from pdsim.core.layouts import read_layout_file, resolve_layout_path, validate_layout_file
+    from pdsim.core.strategies import all_strategy_names
+
+    layout = read_layout_file(resolve_layout_path(layout_file))
+    # Self-consistent dimensions and size make this run ONLY the token
+    # check — the full grid/size validation belongs to founding, where the
+    # run's resolved rows and cols are in play.
+    validate_layout_file(
+        layout,
+        rows=layout.rows,
+        cols=layout.cols,
+        known_strategies=frozenset(all_strategy_names()),
+        population_size=layout.occupied_count,
+    )
+    if layout.occupied_count < 2:
+        raise ValueError(
+            f"Layout file places {layout.occupied_count} agent(s); a run needs at "
+            "least 2. Name more cells, or choose a generated layout."
+        )
+    file_counts = layout.strategy_counts()
+    widget_counts = {name: count for name, count in composition.items() if count > 0}
+    if layout.occupied_count == size and file_counts == widget_counts:
+        return None
+    return layout.occupied_count, file_counts
+
+
 def collect_strategy_params(
     values: Mapping[str, ParamValue],
 ) -> dict[str, dict[str, ParamValue]]:

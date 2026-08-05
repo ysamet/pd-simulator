@@ -366,7 +366,7 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
             if section == "Population":
                 composition = _composition_panel()
-            if section == "Structure" and values.get("structure.kind") == "lattice":
+            if section == "Structure" and helpers.grid_visible({**lookahead, **values}):
                 # The Population section renders before Structure (registry
                 # order), so the composition is already gathered here — which
                 # is what lets the preview be live: change the layout and the
@@ -588,19 +588,86 @@ def _grid_area(
         )
 
 
+def _populate_from_layout_file(size: int, counts: dict[str, int]) -> None:
+    """Write a layout file's implied population into the Population widgets.
+
+    A button callback: Streamlit runs it at the START of the next script
+    run, before any widget is instantiated, which is the one moment widget
+    session state may legally be written — the same pre-render window the
+    scenario loader uses (DECISIONS #124).
+
+    Args:
+        size: The file's occupied-cell count → ``population.size``.
+        counts: The file's per-strategy counts → the mix widgets (registered
+            strategies absent from the file are set to 0).
+    """
+    st.session_state["population.size"] = int(size)
+    for info in all_strategies():
+        st.session_state[f"composition.{info.name}"] = int(counts.get(info.name, 0))
+
+
 def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
     """Preview the founding arrangement from the panel's current values.
+
+    The preview is built from ONLY the sections the founding arrangement
+    reads — mode, seed, population, structure — with everything else at
+    registry defaults (DECISIONS #121). Validating the whole panel here
+    once hid the grid whenever an UNRELATED section failed: K >= N is
+    checked exactly under `energy_economy` and async `variable_n`, so
+    flipping either switch with a default K below N made the grid vanish.
+
+    Under ``from_file`` the layout file IS a population — a size and a
+    mixture — so when it disagrees with the Population section the panel
+    says so and offers to fill the widgets in from the file, rather than
+    leaving the user to retype numbers the file already states (#124).
 
     Args:
         values: Registry key → widget value gathered so far this script run.
         composition: Strategy machine name → agent count.
     """
+    if values.get("structure.initial_layout") == "from_file":
+        names = ", ".join(f"`{info.name}`" for info in all_strategies())
+        st.caption(
+            "Layout-file tokens are strategy machine names, spelled exactly as "
+            f"registered: {names}. Write `.` for an empty cell. A bare filename "
+            "is looked up in the `grid_templates/` folder, which ships with "
+            "commented examples."
+        )
+        layout_file = values.get("structure.layout_file")
+        if layout_file:
+            try:
+                mismatch = helpers.layout_population_mismatch(
+                    str(layout_file), int(values.get("population.size") or 0), composition
+                )
+            except (FileNotFoundError, ValueError) as error:
+                st.warning(f"The grid cannot be drawn: {error}")
+                return
+            if mismatch is not None:
+                file_size, file_counts = mismatch
+                file_mix = ", ".join(f"{name} {count}" for name, count in file_counts.items())
+                st.warning(
+                    f"The layout file describes a different population: {file_size} "
+                    f"agents ({file_mix}), while the Population section currently "
+                    f"says {values.get('population.size')} with a different mix. "
+                    "The file decides both the arrangement AND the mixture, so "
+                    "either switch Initial layout away from 'from_file' to keep "
+                    "the Population section as typed, or fill it in from the file:"
+                )
+                st.button(
+                    "Populate the Population section from the file",
+                    key="populate_from_layout_file",
+                    on_click=_populate_from_layout_file,
+                    args=(file_size, file_counts),
+                )
+                return
     try:
-        config = helpers.build_config(values, composition)
-    except ValidationError:
-        # Mid-edit states are routinely invalid (a mix that does not yet sum
-        # to N). The Run button reports those properly; a preview stays quiet.
-        st.caption("Set a valid population mix to preview the grid.")
+        config = helpers.grid_preview_config(values, composition)
+    except ValidationError as error:
+        # Only genuinely grid-relevant problems remain (a mix that does not
+        # sum to N, incoherent dimensions, a missing layout file) — so name
+        # the actual problem instead of guessing at one.
+        messages = helpers.validation_messages(error)
+        st.caption(f"The grid preview is waiting on: {messages[0]}")
         return
     _grid_area(config, key_prefix="panel")
 

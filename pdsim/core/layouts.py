@@ -109,6 +109,14 @@ class LayoutFile:
     rows: int
     cols: int
     cells: tuple[str | None, ...]
+    positions: tuple[tuple[int, int], ...] = ()
+    """Per cell: (file line number, cell number in that line), both 1-based.
+
+    Carried so a validation error can say WHERE the bad token sits in the
+    file the user actually wrote — the grid's row/column alone points at
+    the wrong place once blank lines and comments are in play. Empty for a
+    hand-built ``LayoutFile``; the validator then omits locations.
+    """
 
     @property
     def occupied_count(self) -> int:
@@ -139,9 +147,9 @@ def parse_layout_file(text: str) -> LayoutFile:
     """Parse layout-file text into a :class:`LayoutFile` (pure — no filesystem).
 
     The format (spec Design 8) is a header of ``kind:``, ``rows:`` and
-    ``cols:`` lines, then a body that is a character grid — one whitespace-
-    separated token per cell, where a token is a strategy machine name or
-    ``.`` for an empty site::
+    ``cols:`` lines, then a body that is a character grid — one token per
+    cell, where a token is a strategy machine name or ``.`` for an empty
+    site::
 
         kind: lattice_grid
         rows: 2
@@ -150,35 +158,44 @@ def parse_layout_file(text: str) -> LayoutFile:
         always_defect always_defect .
         tit_for_tat   .             tit_for_tat
 
+    Tokens are separated by whitespace, or — since DECISIONS #123 — by
+    commas: if ANY body line contains a comma, the entire body parses
+    comma-separated with each token stripped of surrounding whitespace, so
+    mixed-separator files are impossible by construction. ``.`` is the
+    empty-site token in BOTH modes; an empty field between commas is an
+    error, not an empty site, because a bare gap that silently meant
+    "empty" would make a missing token indistinguishable from a typo.
+
     Blank lines are separators and are ignored; ``#`` begins a comment line.
 
     Args:
         text: The file's contents.
 
     Returns:
-        The parsed layout.
+        The parsed layout, with per-cell file positions for error reporting.
 
     Raises:
         ValueError: If a header line is missing or malformed, the kind is
-            not :data:`LAYOUT_FILE_KIND`, or the body's cell count does not
-            match ``rows × cols``. Strategy names are NOT checked here —
-            that needs the strategy registry, so it belongs to the caller
+            not :data:`LAYOUT_FILE_KIND`, a comma-separated line has an
+            empty field, or the body's cell count does not match
+            ``rows × cols``. Strategy names are NOT checked here — that
+            needs the strategy registry, so it belongs to the caller
             (:func:`validate_layout_file`).
     """
     header: dict[str, str] = {}
-    body: list[str] = []
-    for raw in text.splitlines():
+    body: list[tuple[int, str]] = []
+    for line_number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         # The header is over as soon as a line is not `key: value`. Grid rows
         # never contain a colon (machine names are lowercase identifiers), so
         # this split is unambiguous rather than positional.
-        if not body and ":" in line:
+        if not body and ":" in line and "," not in line:
             key, _, value = line.partition(":")
             header[key.strip().lower()] = value.strip()
             continue
-        body.append(line)
+        body.append((line_number, line))
 
     for required in ("kind", "rows", "cols"):
         if required not in header:
@@ -202,7 +219,29 @@ def parse_layout_file(text: str) -> LayoutFile:
     if rows < 1 or cols < 1:
         raise ValueError(f"Layout file dimensions must be at least 1x1, got {rows}x{cols}.")
 
-    tokens = [token for line in body for token in line.split()]
+    # One comma anywhere in the body puts the WHOLE body in comma mode —
+    # a per-line choice would let one malformed line silently change how
+    # its neighbours parse (DECISIONS #123).
+    comma_mode = any("," in line for _, line in body)
+    tokens: list[str] = []
+    positions: list[tuple[int, int]] = []
+    for line_number, line in body:
+        if comma_mode:
+            fields = [field.strip() for field in line.split(",")]
+            for cell_number, field in enumerate(fields, start=1):
+                if not field:
+                    raise ValueError(
+                        f"Layout file has an empty field on line {line_number} "
+                        f"(cell {cell_number}). Write {EMPTY_TOKEN!r} for an empty "
+                        "site — a bare gap between commas is treated as a mistake, "
+                        "not as an empty site, so a missing token cannot hide."
+                    )
+                tokens.append(field)
+                positions.append((line_number, cell_number))
+        else:
+            for cell_number, field in enumerate(line.split(), start=1):
+                tokens.append(field)
+                positions.append((line_number, cell_number))
     if len(tokens) != rows * cols:
         raise ValueError(
             f"Layout file declares {rows}x{cols} = {rows * cols} cells but its body "
@@ -210,7 +249,9 @@ def parse_layout_file(text: str) -> LayoutFile:
             f"{EMPTY_TOKEN!r} for an empty site."
         )
     cells = tuple(None if token == EMPTY_TOKEN else token for token in tokens)
-    return LayoutFile(kind=header["kind"], rows=rows, cols=cols, cells=cells)
+    return LayoutFile(
+        kind=header["kind"], rows=rows, cols=cols, cells=cells, positions=tuple(positions)
+    )
 
 
 def read_layout_file(path: str | Path) -> LayoutFile:
@@ -273,11 +314,21 @@ def validate_layout_file(
             f"{rows}x{cols}. Change the file's header, or set structure.rows / "
             "structure.cols to match it."
         )
-    unknown = sorted({cell for cell in layout.cells if cell is not None} - known_strategies)
-    if unknown:
+    offenders: list[str] = []
+    for index, cell in enumerate(layout.cells):
+        if cell is None or cell in known_strategies:
+            continue
+        if index < len(layout.positions):
+            line_number, cell_number = layout.positions[index]
+            offenders.append(f"{cell!r} (line {line_number}, cell {cell_number})")
+        else:
+            offenders.append(repr(cell))
+    if offenders:
         raise ValueError(
-            f"Layout file names unregistered strategies: {', '.join(unknown)}. "
-            f"Every non-'{EMPTY_TOKEN}' token must be a strategy machine name."
+            f"Layout file names unregistered strategies: {'; '.join(offenders)}. "
+            f"Every non-'{EMPTY_TOKEN}' token must be a strategy machine name, "
+            f"spelled exactly as registered. Valid names: "
+            f"{', '.join(sorted(known_strategies))}."
         )
     if layout.occupied_count != population_size:
         raise ValueError(
@@ -349,6 +400,50 @@ def _footprint(structure: LatticeStructure, size: int, layout: str) -> tuple[Sit
     if size >= structure.site_count:
         return structure.site_ids
     return tuple(sorted(_centre_ordered_sites(structure)[:size]))
+
+
+def _central_block_footprint(structure: LatticeStructure, size: int) -> tuple[SiteId, ...]:
+    """The `central_block` footprint: a centred RECTANGLE of exactly N cells.
+
+    Design 8 defines this layout's footprint definitionally — "a centred
+    rectangle sized to N" — which is NOT the generic centred blob the other
+    patterned layouts use (#125; the two coincide only when the blob happens
+    to be a rectangle, e.g. a perfect-square N on an even grid). The
+    rectangle is the most-square factor pair of N that fits the grid, in
+    either orientation, so a wide grid gets a wide block and a tall grid a
+    tall one; a prime N makes a single line, the same reading the grid's own
+    auto-sizing gives prime populations.
+
+    When NO exact rectangle of N cells fits — a prime N larger than both
+    grid dimensions — the footprint falls back to the generic centred blob:
+    the most compact centred shape that always exists, keeping the layout
+    total rather than refusing a legal configuration.
+
+    Args:
+        structure: The lattice.
+        size: How many agents there are.
+
+    Returns:
+        Exactly ``size`` site ids in ascending order: the whole grid when
+        the population fills it, the centred rectangle otherwise.
+    """
+    if size >= structure.site_count:
+        return structure.site_ids
+    rows, cols = structure.rows, structure.cols
+    for divisor in range(math.isqrt(size), 0, -1):
+        if size % divisor:
+            continue
+        a, b = divisor, size // divisor
+        for block_rows, block_cols in ((a, b), (b, a)):
+            if block_rows <= rows and block_cols <= cols:
+                top = (rows - block_rows) // 2
+                left = (cols - block_cols) // 2
+                return tuple(
+                    row * cols + col
+                    for row in range(top, top + block_rows)
+                    for col in range(left, left + block_cols)
+                )
+    return _footprint(structure, size, "central_block")
 
 
 def _row_major(structure: LatticeStructure, footprint: Sequence[SiteId]) -> list[SiteId]:
@@ -595,6 +690,14 @@ def deal_layout(
         order = [int(site_id) for site_id in scattered]
         return _run_length(order, counts)
 
+    if layout == "central_block":
+        # The definitional footprint (Design 8, #125): a centred RECTANGLE
+        # sized to N, dealt run-length row-major inside. On a full grid the
+        # rectangle is the whole world and the picture coincides with
+        # `stripes` — inherent, since the layout's defining feature is the
+        # empty frame and a full world has none.
+        rectangle = _central_block_footprint(structure, size)
+        return _run_length(_row_major(structure, rectangle), counts)
     footprint = _footprint(structure, size, layout)
     if layout == "patches":
         return _patches(structure, footprint, counts, rng)
@@ -604,9 +707,7 @@ def deal_layout(
         return _run_length(_tiled(structure, footprint), counts)
     # `stripes` sweeps row-major, so a strategy's run breaks at the row edge —
     # a "stripe" can be a fragment of a row, because stripe boundaries fall
-    # where the COUNTS fall. `central_block` deals the same way inside its
-    # centred footprint; what defines it is the empty frame around it (the
-    # filling regime, #109), not the arrangement within.
+    # where the COUNTS fall.
     return _run_length(_row_major(structure, footprint), counts)
 
 
@@ -696,25 +797,44 @@ def found_occupancy(
     return occupancy
 
 
-def resolve_layout_path(layout_file: str, config_dir: Path | None = None) -> Path:
-    """Find a layout file, preferring the working directory then the config's folder.
+GRID_TEMPLATES_DIR = Path("grid_templates")
+"""Default home for hand-authored layout files (DECISIONS #122).
 
-    A recorded run keeps a copy of its layout beside its ``config.yaml`` (so
-    the folder is self-contained — hard rule 8), and that copy is stored in
-    the recorded config as a bare filename. Re-running such a folder from
-    anywhere therefore needs the second lookup.
+Relative to the working directory, like ``runs/`` and ``sweeps/`` — the
+project's directory convention. It ships in the repository with a README
+stating the format and two commented examples.
+"""
+
+
+def resolve_layout_path(layout_file: str, config_dir: Path | None = None) -> Path:
+    """Resolve a configured layout-file value to an actual path.
+
+    The rule (DECISIONS #122 — spec Design 8 is silent on resolution, so
+    this is an extension): a value containing **no path separator** is a
+    template name and resolves against :data:`GRID_TEMPLATES_DIR`; a value
+    containing a separator, or an absolute path, is used as given. One
+    exception outranks the template folder: a recorded run keeps a copy of
+    its layout beside its ``config.yaml`` under a bare name (hard rule 8),
+    and that copy must win — otherwise re-running an old folder could
+    silently read a same-named template written later.
 
     Args:
-        layout_file: The configured path, absolute or relative.
+        layout_file: The configured value — a bare template name, or a path.
         config_dir: The folder the config was loaded from, when it came from
             a file; ``None`` for an in-memory config (the app).
 
     Returns:
-        The first path that exists — as given, or beside the config — falling
-        back to the path as given so the caller raises one clear
-        FileNotFoundError rather than this function inventing an error.
+        The first path that exists in precedence order (beside-config for
+        bare names, then ``grid_templates/``, then as given); when nothing
+        exists, the most likely intended path — so the caller's
+        FileNotFoundError names the place the user should look.
     """
     given = Path(layout_file)
+    bare = given.name == layout_file and not given.is_absolute()
+    if bare:
+        if config_dir is not None and (Path(config_dir) / layout_file).is_file():
+            return Path(config_dir) / layout_file
+        return GRID_TEMPLATES_DIR / layout_file
     if given.is_file() or config_dir is None:
         return given
     beside = Path(config_dir) / given.name

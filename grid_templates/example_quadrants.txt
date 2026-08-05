@@ -1,0 +1,10 @@
+# Whitespace-separated example: three blocks and an empty strip.
+# 18 agents — set Population size to 18 to use it.
+kind: lattice_grid
+rows: 4
+cols: 6
+
+always_cooperate always_cooperate always_cooperate tit_for_tat tit_for_tat tit_for_tat
+always_cooperate always_cooperate always_cooperate tit_for_tat tit_for_tat tit_for_tat
+always_defect    always_defect    always_defect    .           .           .
+always_defect    always_defect    always_defect    .           .           .

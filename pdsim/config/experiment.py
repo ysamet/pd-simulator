@@ -1063,12 +1063,21 @@ def load_config(path: str | Path) -> ExperimentConfig:
         )
     config = ExperimentConfig.model_validate(data)
     layout_file = config.structure.layout_file
-    if layout_file and not Path(layout_file).is_file():
-        beside = config_path.parent / Path(layout_file).name
-        if beside.is_file():
+    if layout_file:
+        # One resolution rule everywhere (#122): bare names prefer the copy
+        # beside this config (a recorded folder is self-contained, hard
+        # rule 8) and otherwise mean grid_templates/; paths resolve as
+        # given, falling back to beside-config. Rewriting here pins the
+        # resolved path into the config the engine actually receives.
+        # Imported lazily: config -> core at module scope would put an
+        # import cycle one refactor away.
+        from pdsim.core.layouts import resolve_layout_path
+
+        resolved = resolve_layout_path(layout_file, config_dir=config_path.parent)
+        if str(resolved) != layout_file and resolved.is_file():
             config = config.model_copy(
                 update={
-                    "structure": config.structure.model_copy(update={"layout_file": str(beside)})
+                    "structure": config.structure.model_copy(update={"layout_file": str(resolved)})
                 }
             )
     return config

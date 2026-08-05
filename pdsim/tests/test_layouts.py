@@ -26,6 +26,8 @@ from pdsim.core.layouts import (
     founding_view,
     layout_consumes_rng,
     parse_layout_file,
+    read_layout_file,
+    resolve_layout_path,
     validate_layout_file,
 )
 from pdsim.core.occupancy import Occupancy
@@ -225,6 +227,81 @@ class TestLayoutDealing:
         placement = deal_layout(structure, {AC: 4, AD: 5}, "stripes", np.random.default_rng(0))
         assert sorted(placement) == [6, 7, 8, 11, 12, 13, 16, 17, 18]
 
+    def test_central_block_is_a_true_rectangle_at_non_square_n(self) -> None:
+        """N=10 on 5x5: a centred 2x5 rectangle, not the blob-with-a-knob (#125).
+
+        The generic centred footprint for 10 is the 3x3 ball plus one stray
+        cell at the ring's lowest id — which is what `stripes` gets, and
+        what `central_block` wrongly got before the fix.
+        """
+        structure = _lattice(rows=5, cols=5)
+        counts = {AC: 5, AD: 5}
+        block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
+        assert sorted(block) == list(range(5, 15))  # rows 1-2, all five columns
+        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+        assert block != stripes
+
+    def test_central_block_differs_from_stripes_on_an_oversized_grid(self) -> None:
+        """The V2 walk's missing contrast: N=60 on 20x20 (#125).
+
+        `central_block` is the centred 6x10 rectangle; `stripes` bands the
+        generic centred blob. Before the fix the two were one code path and
+        identical in every configuration.
+        """
+        structure = _lattice(rows=20, cols=20)
+        counts = {AC: 30, AD: 30}
+        block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
+        rows = {site // 20 for site in block}
+        cols = {site % 20 for site in block}
+        assert rows == set(range(7, 13)) and cols == set(range(5, 15))
+        assert block != deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+
+    def test_central_block_orientation_follows_the_grid(self) -> None:
+        """A wide grid gets a wide block: N=12 on 3x10 is 3x4, not 4x3."""
+        structure = _lattice(rows=3, cols=10)
+        block = deal_layout(structure, {AC: 12}, "central_block", np.random.default_rng(0))
+        rows = {site // 10 for site in block}
+        cols = {site % 10 for site in block}
+        assert rows == {0, 1, 2} and cols == {3, 4, 5, 6}
+
+    def test_central_block_prime_n_makes_a_centred_line(self) -> None:
+        """A prime population's only rectangle is 1xN.
+
+        The same reading the grid's own auto-sizing gives prime populations.
+        """
+        structure = _lattice(rows=5, cols=5)
+        block = deal_layout(structure, {AC: 5}, "central_block", np.random.default_rng(0))
+        assert sorted(block) == [10, 11, 12, 13, 14]  # the middle row
+
+    def test_central_block_falls_back_when_no_rectangle_fits(self) -> None:
+        """A prime N wider than both grid dimensions: the blob, not an error."""
+        structure = _lattice(rows=3, cols=3)
+        counts = {AC: 3, AD: 4}
+        block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
+        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+        assert len(block) == 7
+        assert sorted(block) == sorted(stripes)  # same footprint, by design
+
+    def test_the_blob_can_coincide_with_the_rectangle_and_that_is_not_a_bug(self) -> None:
+        """N=30 on 12x12: stripes and central_block are IDENTICAL — correctly.
+
+        The generic centred blob is built ring by ring with lowest-id ties
+        filling from the top, and at this N the 30 nearest cells complete
+        exactly the 5x6 rectangle rows 3-7 x cols 3-8 — the very rectangle
+        `central_block` computes as 30's most-square factor pair. Whenever
+        the blob happens to be a rectangle, the two layouts coincide, and
+        that is a property of the footprints, not a regression of #125.
+        Pinned so the next person who trips over such a case (twice now:
+        100 on 20x20, 30 on 12x12) finds the explanation in the suite.
+        """
+        structure = _lattice(rows=12, cols=12)
+        counts = {AC: 15, AD: 15}
+        block = deal_layout(structure, counts, "central_block", np.random.default_rng(1))
+        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(1))
+        assert block == stripes
+        assert sorted({site // 12 for site in block}) == [3, 4, 5, 6, 7]
+        assert sorted({site % 12 for site in block}) == [3, 4, 5, 6, 7, 8]
+
     def test_patches_consume_rng_only_at_the_seeds(self) -> None:
         """Growth is deterministic: two different seeds move the patches, not the sizes."""
         structure = _lattice(rows=6, cols=6)
@@ -409,6 +486,76 @@ class TestFounding:
         )
         assert founding_view(config) is None
 
+    def test_replay_matches_the_engine_under_the_sync_economy(self) -> None:
+        """Design 9's founding position, pinned for the economy path (#121).
+
+        The renderer replays founding from (config, seed); that is exact
+        only if no draw precedes founding in the engine. The imitation pin
+        above established it for one mode — the flagship and the drifting
+        frontier are ECONOMY runs, so the property must hold there too.
+        The engine's placement is read off the persisted surface (founder
+        snapshots' site ids), which also exercises the site_id path.
+        """
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 13,
+                "population": {"size": 12, "composition": {AC: 6, AD: 6}},
+                "match": {"length_mode": "fixed", "rounds_per_match": 2},
+                "structure": {"kind": "lattice", "rows": 4, "cols": 4, "initial_layout": "random"},
+                "dynamics": {
+                    "reproduction_mode": "energy_economy",
+                    "generations": 2,
+                    "mutation_rate": 0.0,
+                    "reproduction_threshold": 1000.0,
+                    "offspring_stake": 100.0,
+                    "initial_energy": 100.0,
+                    "basic_living_cost": 0.0,
+                    "carrying_capacity": 16,
+                },
+            }
+        )
+        view = founding_view(config)
+        assert view is not None
+        first = next(e for e in engine.run(config) if isinstance(e, GenerationFinished))
+        founders = [s for s in first.agents if s.parent_id is None]
+        assert founders and all(s.site_id is not None for s in founders)
+        for snapshot in founders:
+            assert view.placements[snapshot.site_id] == snapshot.strategy
+
+    def test_replay_matches_the_engine_under_the_async_clock(self) -> None:
+        """The same pin for the asynchronous path (`donation_game_threshold`'s mode)."""
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 21,
+                "population": {"size": 9, "composition": {AC: 5, AD: 4}},
+                "matching": {"matcher": "random_k", "opponents_per_agent": 3},
+                "match": {"length_mode": "fixed", "rounds_per_match": 2},
+                "structure": {"kind": "lattice", "rows": 3, "cols": 3, "initial_layout": "patches"},
+                "dynamics": {
+                    "time_model": "asynchronous",
+                    "async_population": "fixed_n",
+                    "moran_rule": "death_birth",
+                    "fixed_n_death_rule": "pure_random",
+                    "generations": 2,
+                    "mutation_rate": 0.0,
+                    "offspring_stake": 0.0,
+                    "basic_living_cost": 0.0,
+                },
+            }
+        )
+        view = founding_view(config)
+        assert view is not None
+        first = next(e for e in engine.run(config) if isinstance(e, GenerationFinished))
+        placed = [s for s in first.agents if s.site_id is not None]
+        # fixed_n replaces agents as it goes; the surviving founders still
+        # carry their founding sites, and under a mutation-free run their
+        # strategies are exactly what the deal put there.
+        assert placed
+        for snapshot in placed:
+            assert view.placements[snapshot.site_id] == snapshot.strategy
+
 
 class TestWellMixedIsUntouched:
     """Defining principle 1, asserted directly (this replaces Phase A's guard)."""
@@ -484,3 +631,127 @@ class TestWellMixedIsUntouched:
             ]
 
         assert trajectory("lattice") == trajectory("well_mixed")
+
+
+class TestCommaSeparator:
+    """The comma-separated body style (DECISIONS #123)."""
+
+    WHITESPACE = f"kind: lattice_grid\nrows: 2\ncols: 3\n\n{AD} {AD} .\n{AC} . {AC}\n"
+    COMMA = f"kind: lattice_grid\nrows: 2\ncols: 3\n\n{AD}, {AD}, .\n{AC},  . , {AC}\n"
+
+    def test_a_comma_file_parses_identically_to_its_whitespace_twin(self) -> None:
+        """Same cells, same counts — the separator is presentation only."""
+        whitespace = parse_layout_file(self.WHITESPACE)
+        comma = parse_layout_file(self.COMMA)
+        assert comma.cells == whitespace.cells
+        assert comma.strategy_counts() == whitespace.strategy_counts()
+        assert (comma.rows, comma.cols) == (whitespace.rows, whitespace.cols)
+
+    def test_one_comma_puts_the_whole_body_in_comma_mode(self) -> None:
+        """Mixed-separator files are impossible by construction.
+
+        A whitespace-looking line inside a comma-mode file is ONE token per
+        line (commas are the only separator), so the cell count comes up
+        short — the file is rejected rather than half-reinterpreted.
+        """
+        mixed = f"kind: lattice_grid\nrows: 2\ncols: 3\n\n{AD}, {AD}, .\n{AC} . {AC}\n"
+        with pytest.raises(ValueError, match="6 cells but its body holds 4"):
+            parse_layout_file(mixed)
+
+    def test_an_empty_field_between_commas_is_an_error(self) -> None:
+        """A bare gap must not silently mean 'empty' — that masks typos."""
+        text = f"kind: lattice_grid\nrows: 2\ncols: 3\n\n{AD}, , .\n{AC}, ., {AC}\n"
+        with pytest.raises(ValueError, match=r"empty field on line 5 \(cell 2\)"):
+            parse_layout_file(text)
+
+    def test_a_trailing_comma_is_an_error_too(self) -> None:
+        """The blank token it produces gets the same treatment."""
+        text = f"kind: lattice_grid\nrows: 1\ncols: 2\n\n{AD}, {AD},\n"
+        with pytest.raises(ValueError, match=r"Write '\.' for an empty site"):
+            parse_layout_file(text)
+
+    def test_the_dot_stays_the_empty_token_in_comma_mode(self) -> None:
+        """`.` means empty in both styles."""
+        layout = parse_layout_file(self.COMMA)
+        assert layout.cells[2] is None
+        assert layout.cells[4] is None
+
+    def test_an_unregistered_token_error_names_line_cell_and_valid_names(self) -> None:
+        """The #122 surfacing: the error is a map, not a shrug."""
+        text = f"kind: lattice_grid\nrows: 2\ncols: 2\n\n{AD} {AD}\ntit_for_tta {AC}\n"
+        layout = parse_layout_file(text)
+        with pytest.raises(ValueError) as excinfo:
+            validate_layout_file(
+                layout,
+                rows=2,
+                cols=2,
+                known_strategies=frozenset({AC, AD, "tit_for_tat"}),
+                population_size=4,
+            )
+        message = str(excinfo.value)
+        assert "'tit_for_tta' (line 6, cell 1)" in message
+        assert "tit_for_tat" in message  # the valid names are listed
+
+
+class TestGridTemplates:
+    """The shipped templates and the bare-name resolution rule (#122)."""
+
+    def test_both_shipped_examples_parse_and_use_registered_names(self) -> None:
+        """The README's examples must never rot against the registry."""
+        from pdsim.core.strategies import all_strategy_names
+
+        known = frozenset(all_strategy_names())
+        for name, agents in (("example_quadrants.txt", 18), ("example_island.txt", 24)):
+            layout = read_layout_file(Path("grid_templates") / name)
+            validate_layout_file(
+                layout, rows=4, cols=6, known_strategies=known, population_size=agents
+            )
+            assert layout.occupied_count == agents
+
+    def test_a_bare_name_resolves_against_grid_templates(self) -> None:
+        """No separator means 'a template' — the #122 rule."""
+        resolved = resolve_layout_path("example_island.txt")
+        assert resolved == Path("grid_templates") / "example_island.txt"
+        assert resolved.is_file()
+
+    def test_a_path_with_a_separator_is_used_as_given(self, tmp_path: Path) -> None:
+        """Only bare names get the template lookup."""
+        target = tmp_path / "mine.txt"
+        target.write_text("x", encoding="utf-8")
+        assert resolve_layout_path(str(target)) == target
+
+    def test_the_beside_config_copy_outranks_a_same_named_template(self, tmp_path: Path) -> None:
+        """A recorded folder's own copy outranks the template directory.
+
+        Otherwise an old run could silently read a same-named template
+        written later (hard rule 8).
+        """
+        (tmp_path / "example_island.txt").write_text("the folder's copy", encoding="utf-8")
+        resolved = resolve_layout_path("example_island.txt", config_dir=tmp_path)
+        assert resolved == tmp_path / "example_island.txt"
+
+    def test_a_bare_template_run_founds_from_the_template(self) -> None:
+        """End to end: bare name in the config, arrangement from the file."""
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 1,
+                "population": {
+                    "size": 24,
+                    "composition": {"always_defect": 15, "tit_for_tat": 9},
+                },
+                "structure": {
+                    "kind": "lattice",
+                    "rows": 4,
+                    "cols": 6,
+                    "initial_layout": "from_file",
+                    "layout_file": "example_island.txt",
+                },
+                "dynamics": {"generations": 1},
+            }
+        )
+        view = founding_view(config)
+        assert view is not None
+        assert view.occupied == 24
+        assert view.placements[7] == "tit_for_tat"  # island interior
+        assert view.placements[0] == "always_defect"  # the sea

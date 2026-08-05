@@ -741,6 +741,10 @@ class TestStructurePersistence:
         folder, _ = _record(config, tmp_path / "runs")
         copy = folder / LAYOUT_FILE_NAME
         assert copy.is_file()
+        # Copy, not move: the user's original is untouched by recording
+        # (#122's explicit pin — a recorder that consumed the file would
+        # destroy the template every run reads from).
+        assert source.is_file()
         assert copy.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
         # The recorded config points at the copy, and re-loading resolves it
         # even though the bare name does not exist in the working directory.
