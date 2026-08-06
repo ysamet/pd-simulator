@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.core import engine
@@ -22,6 +23,7 @@ from pdsim.core.layouts import (
     LAYOUT_CHOICES,
     STOCHASTIC_LAYOUTS,
     deal_layout,
+    found_occupancy,
     found_population,
     founding_view,
     layout_consumes_rng,
@@ -378,30 +380,38 @@ class TestLayoutFile:
                 layout, rows=2, cols=3, known_strategies=frozenset({AC, AD}), population_size=6
             )
 
-    def test_the_file_wins_on_composition(self, tmp_path: Path) -> None:
-        """A file whose mix contradicts the widgets overrides them (Design 8)."""
+    def test_the_file_wins_on_composition_at_the_founding_seam(self) -> None:
+        """The engine's file-wins overwrite, tested at its own level (Design 8).
+
+        Since #126, a CONFIG whose composition disagrees with its file never
+        validates, so this defence-in-depth seam is unreachable through the
+        app — but it still protects programmatically built inputs, where the
+        deal must follow the file, not the agents' built-with strategies.
+        """
         text = "kind: lattice_grid\nrows: 2\ncols: 2\n\n" + f"{AD} {AD}\n{AD} {AC}\n"
-        path = tmp_path / "painted.txt"
-        path.write_text(text, encoding="utf-8")
+        layout = parse_layout_file(text)
+        structure = _lattice(rows=2, cols=2)
         config = ExperimentConfig.model_validate(
             {
                 "mode": "evolution",
-                "seed": 1,
-                # The widgets say two of each; the file says three defectors.
                 "population": {"size": 4, "composition": {AC: 2, AD: 2}},
-                "structure": {
-                    "kind": "lattice",
-                    "rows": 2,
-                    "cols": 2,
-                    "initial_layout": "from_file",
-                    "layout_file": str(path),
-                },
                 "dynamics": {"generations": 1},
             }
         )
-        view = founding_view(config)
-        assert view is not None
-        assert view.placements == {0: AD, 1: AD, 2: AD, 3: AC}
+        agents = build_initial_population(config)  # built as two of each
+        occupancy = found_occupancy(
+            structure,
+            agents,
+            {AC: 2, AD: 2},
+            "from_file",
+            np.random.default_rng(0),
+            layout,
+        )
+        placements = {
+            site: strategy_name_of(next(a for a in agents if a.agent_id == agent_id).strategy)
+            for agent_id, site in occupancy.sites_by_agent().items()
+        }
+        assert placements == {0: AD, 1: AD, 2: AD, 3: AC}
 
     def test_from_file_without_a_path_is_a_config_error(self) -> None:
         """Only the missing-path direction can silently run the wrong experiment."""
@@ -415,22 +425,25 @@ class TestLayoutFile:
             )
 
     def test_a_missing_file_names_the_resolved_path(self, tmp_path: Path) -> None:
-        """The common failure is a relative path resolving somewhere unexpected."""
-        config = ExperimentConfig.model_validate(
-            {
-                "mode": "evolution",
-                "population": {"size": 4, "composition": {AC: 4}},
-                "structure": {
-                    "kind": "lattice",
-                    "rows": 2,
-                    "cols": 2,
-                    "initial_layout": "from_file",
-                    "layout_file": str(tmp_path / "nope.txt"),
-                },
-            }
-        )
-        with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
-            founding_view(config)
+        """The common failure is a relative path resolving somewhere unexpected.
+
+        Since #126 this fails at CONFIG VALIDATION — as a ValidationError the
+        app and CLI render as a plain sentence — not at founding time.
+        """
+        with pytest.raises(ValidationError, match=r"nope\.txt"):
+            ExperimentConfig.model_validate(
+                {
+                    "mode": "evolution",
+                    "population": {"size": 4, "composition": {AC: 4}},
+                    "structure": {
+                        "kind": "lattice",
+                        "rows": 2,
+                        "cols": 2,
+                        "initial_layout": "from_file",
+                        "layout_file": str(tmp_path / "nope.txt"),
+                    },
+                }
+            )
 
 
 class TestFounding:
@@ -738,7 +751,9 @@ class TestGridTemplates:
                 "seed": 1,
                 "population": {
                     "size": 24,
-                    "composition": {"always_defect": 15, "tit_for_tat": 9},
+                    # The island's true mix — #126 requires the composition
+                    # to EQUAL the file's implied one.
+                    "composition": {"always_defect": 18, "tit_for_tat": 6},
                 },
                 "structure": {
                     "kind": "lattice",
@@ -755,3 +770,157 @@ class TestGridTemplates:
         assert view.occupied == 24
         assert view.placements[7] == "tit_for_tat"  # island interior
         assert view.placements[0] == "always_defect"  # the sea
+
+
+class TestConfigTimeLayoutValidation:
+    """Every layout-file check fires at config validation (#126, Design 8).
+
+    Before #126 these checks lived at founding time inside the engine, so a
+    mistake surfaced in the app as a raw traceback. Now they are pydantic
+    validators: the app's Run button and the CLI both render them as plain
+    sentences, and Run is blocked while a from-file disagreement stands.
+    """
+
+    GOOD = "kind: lattice_grid\nrows: 2\ncols: 2\n\n" + f"{AC} {AC}\n{AD} {AD}\n"
+
+    @staticmethod
+    def _config_data(tmp_path: Path, text: str) -> dict[str, object]:
+        """Build raw config data around a scratch layout file.
+
+        Args:
+            tmp_path: pytest's per-test directory.
+            text: Layout-file contents.
+
+        Returns:
+            A dict ready for ``ExperimentConfig.model_validate``, matching
+            the file (two cooperators, two defectors on a 2x2 grid).
+        """
+        path = tmp_path / "scratch.txt"
+        path.write_text(text, encoding="utf-8")
+        return {
+            "mode": "evolution",
+            "seed": 1,
+            "population": {"size": 4, "composition": {AC: 2, AD: 2}},
+            "structure": {
+                "kind": "lattice",
+                "rows": 2,
+                "cols": 2,
+                "initial_layout": "from_file",
+                "layout_file": str(path),
+            },
+            "dynamics": {"generations": 1},
+        }
+
+    def test_a_matching_config_validates_and_founds(self, tmp_path: Path) -> None:
+        """The clean path: file and widgets agree, the run is buildable."""
+        config = ExperimentConfig.model_validate(self._config_data(tmp_path, self.GOOD))
+        view = founding_view(config)
+        assert view is not None
+        assert view.occupied == 4
+
+    def test_an_unresolvable_path_is_a_validation_error(self, tmp_path: Path) -> None:
+        """Missing file: a ValidationError naming the path — nothing escapes raw."""
+        data = self._config_data(tmp_path, self.GOOD)
+        data["structure"]["layout_file"] = str(tmp_path / "gone.txt")  # type: ignore[index]
+        with pytest.raises(ValidationError, match=r"gone\.txt"):
+            ExperimentConfig.model_validate(data)
+
+    def test_a_parse_failure_is_a_validation_error(self, tmp_path: Path) -> None:
+        """A malformed header fails at validation with the parser's message."""
+        broken = "kind: lattice_grid\nrows: 2\n\n. .\n. .\n"  # no cols line
+        with pytest.raises(ValidationError, match="missing its 'cols' header"):
+            ExperimentConfig.model_validate(self._config_data(tmp_path, broken))
+
+    def test_the_defect_state_dimension_mismatch_fails_at_validation(self) -> None:
+        """The exact observed defect: 12x12 pinned dims, the 4x6 island file.
+
+        Before #126 this raised a raw ValueError from founding inside
+        `PopulationDynamics.__init__` — a traceback in the app window. Now
+        it is a ValidationError at config time, which the app's Run handler
+        and the CLI already render as plain sentences; the engine is never
+        constructed.
+        """
+        data = {
+            "mode": "evolution",
+            "seed": 1,
+            "population": {"size": 24, "composition": {AD: 18, "tit_for_tat": 6}},
+            "structure": {
+                "kind": "lattice",
+                "rows": 12,
+                "cols": 12,
+                "initial_layout": "from_file",
+                "layout_file": "example_island.txt",
+            },
+            "dynamics": {"generations": 1},
+        }
+        with pytest.raises(ValidationError, match="4x6 but this run's grid is 12x12"):
+            ExperimentConfig.model_validate(data)
+
+    def test_an_unregistered_token_fails_with_its_position(self, tmp_path: Path) -> None:
+        """Token, line, cell, and the valid names — the #122 error content."""
+        typo = self.GOOD.replace(AD, "always_defcet")
+        with pytest.raises(ValidationError, match=r"'always_defcet' \(line 6, cell 1\)"):
+            ExperimentConfig.model_validate(self._config_data(tmp_path, typo))
+
+    def test_fewer_than_two_agents_fails_at_validation(self, tmp_path: Path) -> None:
+        """A near-empty file cannot found a run."""
+        sparse = "kind: lattice_grid\nrows: 2\ncols: 2\n\n" + f"{AC} .\n. .\n"
+        data = self._config_data(tmp_path, sparse)
+        data["population"] = {"size": 2, "composition": {AC: 2}}
+        with pytest.raises(ValidationError, match="at least 2"):
+            ExperimentConfig.model_validate(data)
+
+    @pytest.mark.parametrize(
+        ("size", "composition"),
+        [
+            (4, {AC: 1, AD: 3}),  # same size, different mixture
+            (6, {AC: 3, AD: 3}),  # different size, same ratio
+            (4, {AC: 2, "tit_for_tat": 2}),  # different strategy set
+        ],
+    )
+    def test_composition_disagreement_fails_and_points_at_populate(
+        self, tmp_path: Path, size: int, composition: dict[str, int]
+    ) -> None:
+        """Size-only, mixture-only, or both: one message, naming both sides.
+
+        This is the guard that keeps config.yaml honest (hard rule 8): a
+        from-file run can never record a composition other than the one
+        that actually runs. The message points at the one-click fix.
+        """
+        data = self._config_data(tmp_path, self.GOOD)
+        data["population"] = {"size": size, "composition": composition}
+        with pytest.raises(ValidationError, match="Populate the Population section from the file"):
+            ExperimentConfig.model_validate(data)
+
+    def test_ignored_layouts_are_never_validation_errors(self, tmp_path: Path) -> None:
+        """#34's rule: the checks run only where the file is consumed."""
+        data = self._config_data(tmp_path, self.GOOD)
+        data["structure"]["layout_file"] = str(tmp_path / "gone.txt")  # type: ignore[index]
+        # A generated layout ignores the stale path entirely...
+        data["structure"]["initial_layout"] = "random"  # type: ignore[index]
+        ExperimentConfig.model_validate(data)
+        # ...and tournament mode ignores structure altogether.
+        data["structure"]["initial_layout"] = "from_file"  # type: ignore[index]
+        data["mode"] = "tournament"
+        data["tournament_cycles"] = 1
+        ExperimentConfig.model_validate(data)
+
+    def test_a_recorded_folder_still_reloads_its_own_copy(self, tmp_path: Path) -> None:
+        """load_config resolves beside-config BEFORE validating (#126).
+
+        A recorded folder stores its layout copy under a bare name; the
+        validator reads the file, so resolution must happen on the raw data
+        first — otherwise every recorded from-file folder would fail to
+        reload.
+        """
+        import yaml
+
+        from pdsim.config.experiment import load_config
+
+        (tmp_path / "layout.txt").write_text(self.GOOD, encoding="utf-8")
+        data = self._config_data(tmp_path, self.GOOD)
+        data["structure"]["layout_file"] = "layout.txt"  # type: ignore[index]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        reloaded = load_config(config_path)
+        assert Path(reloaded.structure.layout_file or "") == tmp_path / "layout.txt"

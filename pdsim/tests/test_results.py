@@ -752,3 +752,36 @@ class TestStructurePersistence:
         assert Path(reloaded.structure.layout_file or "").is_file()
         source.unlink()
         assert load_run(folder) is not None
+
+    def test_populate_then_run_completes_end_to_end(self, tmp_path: Path) -> None:
+        """The #126 happy path: the populated widgets' exact numbers, run through.
+
+        This is the configuration the app's populate button produces from
+        the shipped island template — matching mixture, matching dims. The
+        run must validate, complete, copy the template into the run folder
+        (leaving the original in grid_templates/), and round-trip.
+        """
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 3,
+                "population": {
+                    "size": 24,
+                    "composition": {"always_defect": 18, "tit_for_tat": 6},
+                },
+                "match": {"length_mode": "fixed", "rounds_per_match": 2},
+                "structure": {
+                    "kind": "lattice",
+                    "rows": 4,
+                    "cols": 6,
+                    "initial_layout": "from_file",
+                    "layout_file": "example_island.txt",
+                },
+                "dynamics": {"generations": 2},
+            }
+        )
+        folder, live = _record(config, tmp_path)
+        assert live.periods  # the run completed
+        assert (folder / LAYOUT_FILE_NAME).is_file()
+        assert Path("grid_templates/example_island.txt").is_file()  # copy, not move
+        assert load_run(folder).timeseries.periods == live.periods

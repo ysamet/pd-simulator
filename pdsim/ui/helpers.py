@@ -594,6 +594,47 @@ def layout_population_mismatch(
     return layout.occupied_count, file_counts
 
 
+def layout_file_dimension_mismatch(values: Mapping[str, ParamValue]) -> str | None:
+    """Compare a layout file's header dimensions against the resolved grid.
+
+    The panel-side twin of the #126 config validator's dimension check, so
+    the problem shows BESIDE the widgets before Run is ever pressed — the
+    same pre-Run visibility the #124 composition warning already has.
+
+    Args:
+        values: Widget values keyed by registry key (``structure.rows`` /
+            ``cols`` may be blank — they resolve exactly as the run would
+            resolve them).
+
+    Returns:
+        A message naming both sizes and the fixes, or ``None`` when the
+        dimensions agree, no file is named, or the file cannot be read (the
+        panel already warns about unreadable files separately).
+    """
+    from pdsim.core.layouts import read_layout_file, resolve_layout_path
+
+    layout_file = values.get("structure.layout_file")
+    size = values.get("population.size")
+    if not layout_file or not isinstance(size, int):
+        return None
+    try:
+        layout = read_layout_file(resolve_layout_path(str(layout_file)))
+    except (FileNotFoundError, ValueError):
+        return None
+    rows, cols = resolve_lattice_dimensions(
+        values.get("structure.rows"),  # type: ignore[arg-type]
+        values.get("structure.cols"),  # type: ignore[arg-type]
+        size,
+    )
+    if (layout.rows, layout.cols) == (rows, cols):
+        return None
+    return (
+        f"The layout file is {layout.rows}x{layout.cols} but this run's grid "
+        f"resolves to {rows}x{cols}. Set Lattice rows to {layout.rows} and "
+        f"columns to {layout.cols}, or edit the file's header to match the grid."
+    )
+
+
 def collect_strategy_params(
     values: Mapping[str, ParamValue],
 ) -> dict[str, dict[str, ParamValue]]:

@@ -589,3 +589,61 @@ class TestLayoutPopulationMismatch:
         """The app shows this as the grid warning, same as founding would."""
         with pytest.raises(FileNotFoundError):
             helpers.layout_population_mismatch(str(tmp_path / "absent.txt"), 4, {})
+
+
+class TestLayoutFileDimensionMismatch:
+    """The panel-side dimension check behind the pre-Run warning (#126)."""
+
+    def _values(self, tmp_path: Path, **overrides: object) -> dict[str, object]:
+        """Widget values naming a 2x3 scratch layout file.
+
+        Args:
+            tmp_path: pytest's per-test directory.
+            **overrides: Extra widget values merged in.
+
+        Returns:
+            A values mapping for the helper.
+        """
+        path = tmp_path / "scratch.txt"
+        path.write_text(
+            "kind: lattice_grid\nrows: 2\ncols: 3\n\n"
+            "always_defect always_defect always_defect\n"
+            "tit_for_tat tit_for_tat tit_for_tat\n",
+            encoding="utf-8",
+        )
+        values: dict[str, object] = {
+            "structure.layout_file": str(path),
+            "structure.rows": 2,
+            "structure.cols": 3,
+            "population.size": 6,
+        }
+        values.update(overrides)
+        return values
+
+    def test_agreement_returns_none(self, tmp_path: Path) -> None:
+        """Matching dimensions: nothing to warn about."""
+        assert helpers.layout_file_dimension_mismatch(self._values(tmp_path)) is None
+
+    def test_a_mismatch_names_both_sizes_and_the_fixes(self, tmp_path: Path) -> None:
+        """The message mirrors the #126 validator's dimension check."""
+        message = helpers.layout_file_dimension_mismatch(
+            self._values(tmp_path, **{"structure.rows": 12, "structure.cols": 12})
+        )
+        assert message is not None
+        assert "2x3" in message and "12x12" in message
+        assert "Set Lattice rows to 2" in message
+
+    def test_blank_dimensions_resolve_the_way_the_run_would(self, tmp_path: Path) -> None:
+        """Auto rows/cols compare via the same resolver the engine uses.
+
+        N=6 auto-resolves to the most-square 2x3 — matching the file, so no
+        warning; at N=6 with a 3x2 file the auto pair (2x3) would mismatch.
+        """
+        values = self._values(tmp_path, **{"structure.rows": None, "structure.cols": None})
+        assert helpers.layout_file_dimension_mismatch(values) is None
+
+    def test_an_unreadable_file_is_someone_elses_warning(self, tmp_path: Path) -> None:
+        """File problems are reported by the panel's existing warning path."""
+        values = self._values(tmp_path)
+        values["structure.layout_file"] = str(tmp_path / "gone.txt")
+        assert helpers.layout_file_dimension_mismatch(values) is None

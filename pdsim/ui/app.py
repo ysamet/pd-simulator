@@ -642,6 +642,12 @@ def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int])
             except (FileNotFoundError, ValueError) as error:
                 st.warning(f"The grid cannot be drawn: {error}")
                 return
+            # Dimensions get the same pre-Run visibility as the composition
+            # offer (#126): Run is blocked by config validation while either
+            # disagreement stands, so say so here, beside the widgets.
+            dimension_message = helpers.layout_file_dimension_mismatch(values)
+            if dimension_message:
+                st.warning(dimension_message)
             if mismatch is not None:
                 file_size, file_counts = mismatch
                 file_mix = ", ".join(f"{name} {count}" for name, count in file_counts.items())
@@ -659,6 +665,7 @@ def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int])
                     on_click=_populate_from_layout_file,
                     args=(file_size, file_counts),
                 )
+            if dimension_message or mismatch is not None:
                 return
     try:
         config = helpers.grid_preview_config(values, composition)

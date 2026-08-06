@@ -995,6 +995,100 @@ class ExperimentConfig(_RegistryBackedModel):
         return self
 
     @model_validator(mode="after")
+    def _check_layout_file_agrees(self) -> Self:
+        """Validate a from-file layout against the run it will found (M11a, #126).
+
+        Spec Design 8 names the layout-file checks as VALIDATORS, so they
+        belong here — at config-validation time, where the app's Run button
+        and the CLI already render failures as plain sentences — not at
+        founding time inside the engine, where a mistake surfaced as a raw
+        traceback. The composition-equality half is what keeps a recorded
+        ``config.yaml`` honest (hard rule 8): with it, a from-file run can
+        never record a composition other than the one that actually runs.
+
+        Runs only when the layout file is actually consumed — evolution
+        mode, lattice, ``from_file`` — because ignored parameters are never
+        validation errors (#34). The engine's own founding-time checks stay
+        as defence in depth for programmatically built configs.
+
+        Reading the file here is read-to-VALIDATE, not read-to-derive:
+        #119(d)'s rejection stands — no derived default reads file contents
+        — while a cross-check validator consults the file precisely to
+        confirm the widgets agree with it, deriving nothing.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If the file is missing or unreadable, malformed,
+                sized differently from the resolved grid, names an
+                unregistered strategy, places fewer than two agents, or
+                implies a composition different from the configured one.
+                Every message says how to fix it; the composition message
+                points at the app's one-click populate button.
+        """
+        structure = self.structure
+        if (
+            self.mode != "evolution"
+            or structure.kind != "lattice"
+            or structure.initial_layout != "from_file"
+        ):
+            return self
+        # Lazy import, as elsewhere in this module: config -> core at
+        # module scope would put an import cycle one refactor away.
+        from pdsim.core.layouts import (
+            read_layout_file,
+            resolve_layout_path,
+            validate_layout_file,
+        )
+        from pdsim.core.strategies import all_strategy_names
+
+        path = resolve_layout_path(structure.layout_file or "")
+        try:
+            layout = read_layout_file(path)
+        except FileNotFoundError as error:
+            # pydantic wraps ValueError into a ValidationError; a raw
+            # FileNotFoundError would escape as a traceback instead.
+            raise ValueError(str(error)) from None
+        # rows/cols are plain numbers by now — the before-validator resolved
+        # them — so the dimension check compares against the real grid.
+        validate_layout_file(
+            layout,
+            rows=int(structure.rows or 0),
+            cols=int(structure.cols or 0),
+            known_strategies=frozenset(all_strategy_names()),
+            # Self-consistent on purpose: size disagreement is reported by
+            # the composition check below, whose message knows the fix.
+            population_size=layout.occupied_count,
+        )
+        if layout.occupied_count < 2:
+            raise ValueError(
+                f"Layout file {structure.layout_file!r} places "
+                f"{layout.occupied_count} agent(s); a run needs at least 2. "
+                "Name more cells, or choose a generated layout."
+            )
+        file_counts = layout.strategy_counts()
+        widget_counts = {
+            name: self.population.composition[name] for name in sorted(self.population.composition)
+        }
+        if file_counts != widget_counts:
+
+            def _mix(counts: dict[str, int]) -> str:
+                return ", ".join(f"{name} {count}" for name, count in counts.items())
+
+            raise ValueError(
+                "The layout file and the Population section disagree: the file "
+                f"places {layout.occupied_count} agents ({_mix(file_counts)}), "
+                f"while the population is {self.population.size} "
+                f"({_mix(widget_counts)}). The file decides both the arrangement "
+                "and the mixture, so in the app press 'Populate the Population "
+                "section from the file' to adopt the file's numbers in one "
+                "click — or switch structure.initial_layout away from "
+                "'from_file' to keep the numbers you typed."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _check_strategy_params(self) -> Self:
         """Validate overrides against the strategy roster and their specs.
 
@@ -1039,16 +1133,20 @@ def load_config(path: str | Path) -> ExperimentConfig:
         path: Path to a YAML file with the :class:`ExperimentConfig` layout.
 
     Returns:
-        The validated configuration. A relative ``structure.layout_file``
-        that is not found from the working directory but IS found beside
-        this config file is rewritten to that path — which is what lets a
-        recorded run folder, carrying its own copy of the layout, re-run
-        from anywhere (hard rule 8; M11a spec Design 8).
+        The validated configuration. A ``structure.layout_file`` is resolved
+        per the #122 rule BEFORE validation — bare names prefer the copy
+        beside this config file (a recorded folder is self-contained, hard
+        rule 8), then ``grid_templates/`` — so the from-file validator
+        (#126) checks the file the engine will actually read, and a
+        recorded run folder re-runs from anywhere.
 
     Raises:
         FileNotFoundError: If the file does not exist.
         ValueError: If the file is not a YAML mapping at the top level.
-        pydantic.ValidationError: If any value is missing, unknown, or invalid.
+        pydantic.ValidationError: If any value is missing, unknown, or
+            invalid — including every layout-file problem (missing,
+            malformed, wrong dimensions, unknown tokens, or a composition
+            that disagrees with the file).
     """
     config_path = Path(path)
     text = config_path.read_text(encoding="utf-8")
@@ -1061,26 +1159,21 @@ def load_config(path: str | Path) -> ExperimentConfig:
             f"Config file {path} must contain a YAML mapping (key: value pairs) at the "
             f"top level, got {type(data).__name__}."
         )
-    config = ExperimentConfig.model_validate(data)
-    layout_file = config.structure.layout_file
-    if layout_file:
-        # One resolution rule everywhere (#122): bare names prefer the copy
-        # beside this config (a recorded folder is self-contained, hard
-        # rule 8) and otherwise mean grid_templates/; paths resolve as
-        # given, falling back to beside-config. Rewriting here pins the
-        # resolved path into the config the engine actually receives.
-        # Imported lazily: config -> core at module scope would put an
-        # import cycle one refactor away.
-        from pdsim.core.layouts import resolve_layout_path
+    structure_section = data.get("structure")
+    if isinstance(structure_section, dict):
+        layout_file = structure_section.get("layout_file")
+        if layout_file and isinstance(layout_file, str):
+            # Resolution must precede validation: the #126 validator reads
+            # the file, and only THIS function knows the config's own folder
+            # — where a recorded run keeps its layout copy under a bare
+            # name. Imported lazily: config -> core at module scope would
+            # put an import cycle one refactor away.
+            from pdsim.core.layouts import resolve_layout_path
 
-        resolved = resolve_layout_path(layout_file, config_dir=config_path.parent)
-        if str(resolved) != layout_file and resolved.is_file():
-            config = config.model_copy(
-                update={
-                    "structure": config.structure.model_copy(update={"layout_file": str(resolved)})
-                }
-            )
-    return config
+            resolved = resolve_layout_path(layout_file, config_dir=config_path.parent)
+            if str(resolved) != layout_file and resolved.is_file():
+                structure_section["layout_file"] = str(resolved)
+    return ExperimentConfig.model_validate(data)
 
 
 def save_config(config: ExperimentConfig, path: str | Path) -> Path:

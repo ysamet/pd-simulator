@@ -150,6 +150,40 @@ class TestFailures:
         assert main(["definitely/not/a/file.yaml"]) == 1
         assert "error:" in capsys.readouterr().err
 
+    def test_layout_file_mismatch_prints_the_validation_message(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The defect state through the CLI: a plain sentence, no traceback (#126).
+
+        A 12x12 grid against the shipped 4x6 island template must fail at
+        config validation and print the same message the app shows — the
+        engine (whose founding-time checks remain as defence in depth) is
+        never reached.
+        """
+        bad = (
+            "mode: evolution\n"
+            "seed: 1\n"
+            "population:\n"
+            "  size: 24\n"
+            "  composition: {always_defect: 18, tit_for_tat: 6}\n"
+            "structure:\n"
+            "  kind: lattice\n"
+            "  rows: 12\n"
+            "  cols: 12\n"
+            "  initial_layout: from_file\n"
+            "  layout_file: example_island.txt\n"
+            "dynamics:\n"
+            "  generations: 1\n"
+        )
+        path = tmp_path / "mismatched.yaml"
+        path.write_text(bad, encoding="utf-8")
+        code = main([str(path), "--out", str(tmp_path / "runs")])
+        assert code == 1
+        error_output = capsys.readouterr().err
+        assert "4x6 but this run's grid is 12x12" in error_output
+        assert "Traceback" not in error_output
+        assert not (tmp_path / "runs").exists()  # no run was started
+
     def test_ctrl_c_discards_the_partial_run(
         self,
         tmp_path: Path,

@@ -2777,3 +2777,65 @@ block — the frame stops meaning anything); and amending `stripes` to span
 the grid's full width in sparse worlds so the two are categorically
 different — that is a Design 8 semantics change and belongs to the design
 layer, flagged in the handback rather than taken here.
+
+**#126 — 2026-08-04 — Every layout-file check moves to CONFIG-VALIDATION
+time, composition equality becomes a validator (the hard-rule-8 keeper),
+and reading the file there is read-to-VALIDATE, which #119(d)'s
+read-to-derive rejection does not cover (M11a Phase B follow-up 2).** THE
+DEFECT, from the owner's manual validation: 12x12 pinned dimensions,
+`initial_layout = from_file`, the 4x6 `example_island.txt`, populate offer
+declined, Run pressed — a raw ValueError with a full traceback rendered in
+the app, raised from `validate_layout_file` at FOUNDING time inside
+`PopulationDynamics.__init__`. Every other configuration mistake in the
+app produces a plain validation sentence; and worse, Run was not blocked
+while a from-file disagreement stood, so any mismatch the engine happened
+to tolerate would let `config.yaml` record a composition that is not what
+ran — a hard-rule-8 lie in the recorded config. Spec Design 8 names these
+checks as VALIDATORS and its sweep-axis rule demands rejection "at spec
+validation", so config-time placement is the spec's intent, not a
+deviation. DECIDED: a new `ExperimentConfig` after-validator
+(`_check_layout_file_agrees`) runs when the file is consumed — evolution
+mode, lattice, `from_file`; ignored parameters are never validation errors
+(#34) — and checks, in order: the value resolves (per the #122 rule) to a
+readable file (FileNotFoundError is converted to ValueError so pydantic
+wraps it — nothing escapes raw); the file parses (the #123
+comma/whitespace and blank-field rules); header dimensions match the
+RESOLVED rows/cols (the before-validator has already turned blanks into
+numbers); every token is a registered strategy (the #122 message: token,
+line, cell, valid names); at least two agents are placed; and COMPOSITION
+EQUALITY — the configured composition must equal the file's implied one,
+with a message naming both sides and pointing at the app's one-click
+"Populate the Population section from the file" button. Equality of the
+count dicts subsumes the size check, so one message covers size-only,
+mixture-only, and both (each pinned by a parametrised test). CHANNELS: the
+app's Run handler and the CLI already render ValidationError as plain
+sentences, so both lit up with no new display code — the CLI is confirmed
+by a test that the defect state prints the message, exits 1, starts no
+run, and shows no traceback. The panel additionally gained pre-Run
+DIMENSION visibility (`helpers.layout_file_dimension_mismatch`, resolving
+blank rows/cols exactly as the run would), the same beside-the-widgets
+treatment the #124 composition offer already had; #124's flow is otherwise
+unchanged. ORDERING CONSEQUENCE in `load_config`: the #122 beside-config
+resolution now happens on the RAW mapping BEFORE `model_validate`, because
+the validator reads the file and only `load_config` knows the config's own
+folder — without the reorder, every recorded from-file folder would fail
+to reload its own `layout.txt` copy (pinned by test). ENGINE checks stay
+as defence in depth for programmatically built configs and become
+unreachable through the app and CLI; the Design 8 "file wins on
+composition" founding seam is likewise now reachable only
+programmatically, and its test moved to the `found_occupancy` level to say
+so. The sweep-axis rejection was verified already at sweep-spec validation
+(`sweep_validation_messages`) — nothing to move. THE #119(d) DISTINCTION,
+stated so a later reader does not conclude it was quietly overturned:
+#119(d) rejected READ-TO-DERIVE — deriving N (and with it the auto grid
+dimensions and K's default) from file contents inside a before-validator —
+and that rejection stands: every derived default remains a pure function
+of widget values and never of file contents. This validator is
+READ-TO-VALIDATE: it consults the file precisely to confirm the widgets
+agree with it, derives nothing, and converts every read failure (missing,
+unreadable, unparseable) into a validation error rather than letting an
+exception escape. Alternative rejected: catching the engine's exception in
+the app and reformatting it — that leaves validation timing wrong, keeps
+the recorded-config hazard one code path away (any caller that skips the
+pretty-printer records the lie), and masks genuine engine bugs behind a
+formatter that cannot tell them from configuration mistakes.
