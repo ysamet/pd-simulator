@@ -138,9 +138,19 @@ run data exists.
     wired to nothing). **B landed 2026-08-03** (#116-#120 — occupancy,
     the seven founding layouts plus the layout file, schema 5's `site_id`
     column, the grid renderer; VT-2 and VT-3 answered, and #114's
-    shifted-weight spread measured and found to PLATEAU rather than grow).
-    After B, structure exists and is visible but nothing reads it. **C —
-    local birth, the riskiest phase — is next.**
+    shifted-weight spread measured and found to PLATEAU rather than grow;
+    follow-ups #121-#126). **C — local birth — landed 2026-08-06**
+    (#127-#136): occupancy live in all three engines (death frees a
+    site, birth occupies one, newborn `site_id` real from birth), the
+    amended #80 birth step (contest permutation, kernel placement,
+    place-before-pay live, blocked parents counted and shown live),
+    `birth_radius`/`birth_decay`/`placement_contest`/`boundary_order`,
+    K's site-count derived default with the K-family validators, the
+    stake+overhead fix (#129), the localised `fixed_n` draws with the
+    R = 1 Ohtsuki reduction (#132), VT-4 runtime-confirmed (#130), four
+    negative + three positive golden masters with the counting-wrapper
+    no-draw pins (#133; the fourth positive golden moved to Phase D,
+    #128); 950 tests passing. **D — local interaction — is next.**
 
     Calibration-guide residue (DECISIONS #113–#115) folded into the
     remaining phases: Phase B measures the #114 shifted-weight spread;
@@ -242,6 +252,11 @@ run data exists.
   distance as a structure-supplied metric. Purely additive after M18 and
   needs nothing from M12-M18, so it can be pulled forward without
   renumbering pain provided M11a honours the forward-guards.
+  **TASK (spec Design 12, #135): register `site_capacity` as a tunable
+  registry parameter and remove M11a's pinned-at-1 validator** —
+  answering the three deferred questions #135 records (the
+  distance-zero kernel weight, the mixed-cell colour, and what k means
+  under occupancy-dependent neighbourhood sizes) before the knob ships.
 
 ## v3+ — Real-world scenario modeling
 

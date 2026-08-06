@@ -484,16 +484,21 @@ class TestGridPreview:
     def test_the_defect_itself_a_failing_section_elsewhere_cannot_hide_the_grid(self) -> None:
         """Regression pin for the observed disappearance (#121).
 
-        N = 400 with the default K = 200: the FULL config fails validation
-        under `energy_economy` (K >= N is checked exactly there), and that
+        N = 400 with K = 200: the FULL config fails validation under
+        `energy_economy` (K >= N is checked exactly there), and that
         failure once took the preview down with it. The preview config must
         build anyway, because the grid never reads the dynamics section.
+        (#121's session hit this with K's then-DEFAULT of 200; since Phase
+        C a blank K auto-resolves to the site count, so the defect state
+        now needs the same 200 set explicitly — the pin is unchanged in
+        substance.)
         """
         values = helpers.default_widget_values()
         values["run.mode"] = "evolution"
         values["structure.kind"] = "lattice"
         values["population.size"] = 400
         values["dynamics.reproduction_mode"] = "energy_economy"
+        values["dynamics.carrying_capacity"] = 200
         composition = {"always_cooperate": 200, "always_defect": 200}
         with pytest.raises(ValidationError):
             helpers.build_config(values, composition)  # the full panel fails...

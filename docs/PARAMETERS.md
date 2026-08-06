@@ -210,6 +210,32 @@ How the starting population is ARRANGED on the grid. It decides arrangement only
 
 The layout file that paints the starting world cell by cell. Read only when the initial layout is 'from_file'; leave it empty otherwise. A BARE FILENAME (no slash or backslash) is looked up in the project's grid_templates folder, which ships with a README and worked examples; a value containing a path separator, or an absolute path, is used exactly as given. The file is a picture of the grid: a short header of 'kind: lattice_grid', 'rows:' and 'cols:' lines, then one line per grid row, one token per cell — separated by spaces, or by commas (if any grid line contains a comma, the whole file is read comma-separated). A token is either a strategy's MACHINE NAME spelled exactly as registered (such as 'always_defect' — the app lists the current names beside this box) or a full stop '.' for a cell left empty; in the comma style an empty field between commas is an error, not an empty cell. The file's row and column counts must match the grid's, and it must place exactly as many agents as the population size — but WHICH strategy sits in each cell is entirely the file's decision, so the population-mix widgets no longer control the arrangement or the mixture. When the Population section disagrees with the file, the app points out the difference and offers to fill the section in from the file with one click, so nothing needs retyping. A copy of the file is saved into the run folder, so a recorded run can always be re-run even if the original file later moves or changes.
 
+#### `structure.birth_radius` — Birth radius (R)
+
+- **Type:** whole number
+- **Allowed values:** at least 1; may be empty (= off/unlimited)
+- **Default:** `1`
+
+How far from its parent a newborn can be placed, in grid distance (the neighbourhood shape above decides what distance means). At birth, the empty sites within this radius of the parent are the candidate homes; if EVERY site in reach is occupied, the parent is BLOCKED this round — it pays nothing, keeps its energy, stays eligible, and simply tries again next generation (the Economy panel counts blocked parents so this reads as the mechanism it is, not as a stall). At 1 — the default — children land right next to their parents, the classic Hammond–Axelrod setting and the one that makes family clusters form. Leave empty for unlimited reach: a child can then land on any empty site on the grid. IMPORTANT under the fixed-size ('fixed_n' Moran) population mode: this radius and the decay below define WHO COMPETES to fill a freed site — the set of neighbours whose fitness contest decides the replacement — which is exactly the neighbour count k that the b/c > k cooperation threshold counts. That is why the pair stays live under 'fixed_n' even though nobody breeds freely there. Ignored under the 'well_mixed' structure.
+
+*Learn more:* Hammond & Axelrod 2006 place offspring in the immediate neighbourhood; Ohtsuki et al. 2006 derive b/c > k, where k counts the competitors for a vacated site.
+
+#### `structure.birth_decay` — Birth decay (β)
+
+- **Type:** number
+- **Allowed values:** 0 to 20
+- **Default:** `0.0`
+
+How steeply a newborn's placement prefers sites CLOSER to its parent, within the birth radius. This is the decay β of the reach kernel: a candidate site at distance d is weighted exp(−β·d). At 0 — the default — every empty site within the radius is equally likely; higher values keep children ever closer to home even where the radius technically allows more distance. IRRELEVANT at a birth radius of 1: all candidates then sit at the same distance, so every β gives the same behaviour. Under the fixed-size ('fixed_n' Moran) population mode this decay also weights the competition for a freed site — nearer neighbours are likelier to win it. Ignored under the 'well_mixed' structure.
+
+#### `structure.placement_contest` — Placement contest
+
+- **Type:** choice
+- **Allowed values:** one of: `random`, `energy_priority`
+- **Default:** `random`
+
+Who places first when several parents breed at the same generation boundary — the order matters on a lattice, because an earlier parent can take the last empty site in a neighbourhood another parent wanted. 'random' — the default — shuffles the admitted parents once and lets each place in turn: reproduction order is luck (the Hammond–Axelrod convention), so wealth decides only WHO MAY BREED (via the reproduction threshold), never who wins contested ground. 'energy_priority' lets the RICHEST admitted parent place first: an advantage that COMPOUNDS spatially — a good neighbourhood raises earnings, which wins more contested cells, which acquires more good territory — a substantive modelling claim to switch on deliberately, not to inherit silently. Only matters under a synchronous energy-economy run on a lattice; everywhere else births never contend (an asynchronous run resolves one birth at a time, and a well-mixed world has no cells to contest).
+
 ### Dynamics
 
 #### `dynamics.generations` — Generations
@@ -379,10 +405,10 @@ Interest earned on energy carried between generations, in the energy economy: ca
 #### `dynamics.carrying_capacity` — Carrying capacity (K)
 
 - **Type:** whole number
-- **Allowed values:** at least 1
-- **Default:** `200`
+- **Allowed values:** at least 1; may be empty (= off/unlimited)
+- **Default:** empty (no limit)
 
-The most agents the world can hold, in the energy economy. Births only fill seats left below this cap — at capacity, nobody new gets in until deaths free room, and the richest would-be parents are admitted first. It is the well-mixed model's stand-in for physical room; once the population gets a spatial structure (a later milestone), capacity may instead emerge from the number of sites.
+The most agents the world can hold, in the energy economy. Births only fill seats left below this cap — at capacity, nobody new gets in until deaths free room, and the richest would-be parents are admitted first. Leave blank for automatic: on a lattice the capacity becomes the NUMBER OF GRID SITES (the grid decides — the zero-effort spatial setting), while in a well-mixed world, where there is no grid to decide, blank falls back to the standard 200. On a lattice an explicit value BELOW the site count leaves deliberate slack — the population then parks below a full grid, and the occupied region can drift, cluster, and migrate as births and deaths reshape it. The capacity can never exceed the site count: the grid is the outer bound, this cap an optional tighter one.
 
 #### `dynamics.base_hazard` — Base hazard
 
@@ -409,6 +435,16 @@ How steeply the death chance climbs with age, in the energy economy: each genera
 - **Default:** `0`
 
 A hard age cap, in the energy economy: an agent that reaches this age dies at the next generation boundary, no matter what. 0 means no cap. With a cap set and the senescence factor left blank, the death chance rises smoothly to certainty exactly at this age.
+
+#### `dynamics.boundary_order` — Boundary order
+
+- **Type:** choice
+- **Allowed values:** one of: `death_first`, `birth_first`
+- **Default:** `death_first`
+
+The order of deaths and births at each synchronous generation boundary. 'death_first' — the default, and this platform's behaviour in every earlier version — applies deaths first, then lets survivors breed into the room the deaths freed. 'birth_first' is Hammond & Axelrod's period order: reproduction runs first, then the death phase. Two real consequences, both pushing the population DOWN relative to 'death_first'. (1) Births are rationed against the PRE-death population: free seats under the carrying capacity are counted before the dead have vacated theirs, so FEWER births are admitted — with capacity 200, 180 alive and 20 deaths, death-first admits 40 births where birth-first admits only 20. That is a different demographic regime, not a phase offset, and it is present even without a lattice. (2) Newborns go through the death phase in their own birth round — the age-mortality coin included — so a child can die the very round it was born. A 'birth_first' run sitting at a visibly lower population is correct, not broken. On a lattice the choice additionally decides WHICH sites are empty when children are placed: deaths-first lets newborns fill the interior graves the dead just left, while births-first offers only the cells that were already empty — the frontier. Only read under the synchronous time model.
+
+*Learn more:* Hammond & Axelrod 2006 run immigration → interaction → reproduction → death; their ethnocentrism result lives on the frontier this ordering creates.
 
 #### `dynamics.async_population` — Async population mode
 

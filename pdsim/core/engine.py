@@ -160,6 +160,7 @@ def _run_evolution(
             rounds_played=report.rounds_played,
             cooperation=report.cooperation,
             agents=report.agents,
+            blocked_parents=report.blocked_parents,
         )
         if not dynamics.population:
             break  # extinction: the run ends here (economy mode only)
@@ -222,6 +223,7 @@ def _run_async(
             cooperation=report.cooperation,
             agents=report.agents,
             gen_equiv_time=report.gen_equiv_time,
+            blocked_parents=report.blocked_parents,
         )
     # At least one period always emits (generations >= 1 guarantees the
     # clock crosses 1.0 or the run went extinct with a final partial

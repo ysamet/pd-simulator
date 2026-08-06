@@ -14,6 +14,7 @@ from pdsim.config.experiment import (
     GameConfig,
     PopulationConfig,
     StructureConfig,
+    resolve_carrying_capacity,
     resolve_lattice_dimensions,
 )
 
@@ -505,3 +506,128 @@ class TestStructureSection:
             _minimal_config(structure={"kind": "hex_grid"})
         with pytest.raises(ValidationError, match=r"structure\.rows"):
             _minimal_config(structure={"rows": 0})
+
+
+class TestPhaseCValidators:
+    """The M11a Phase C config layer: K's auto default and the lattice caps."""
+
+    def test_resolve_carrying_capacity(self) -> None:
+        """The pure rule: explicit wins; blank = site count, or the fallback."""
+        assert resolve_carrying_capacity(150, 400) == 150
+        assert resolve_carrying_capacity(None, 400) == 400
+        assert resolve_carrying_capacity(None, None) == 200
+
+    def test_blank_k_on_a_lattice_resolves_to_the_site_count(self) -> None:
+        """'The grid decides' is the zero-effort path (#106, the #78 idiom)."""
+        cfg = _minimal_config(
+            structure={"kind": "lattice", "rows": 10, "cols": 12},
+            dynamics={"reproduction_mode": "energy_economy"},
+        )
+        assert cfg.dynamics.carrying_capacity == 120
+
+    def test_blank_k_well_mixed_falls_back_to_the_old_default(self) -> None:
+        """No grid to decide: blank K means the pre-M11a 200 (hard rule 8)."""
+        cfg = _minimal_config(dynamics={"reproduction_mode": "energy_economy"})
+        assert cfg.dynamics.carrying_capacity == 200
+
+    def test_saved_yaml_holds_a_plain_capacity(self, tmp_path: Path) -> None:
+        """The auto rule can never retroactively change a stored run."""
+        cfg = _minimal_config(structure={"kind": "lattice"})  # N=100 -> 10x10
+        path = save_config(cfg, tmp_path / "config.yaml")
+        assert "carrying_capacity: 100" in path.read_text(encoding="utf-8")
+        assert load_config(path) == cfg
+
+    def test_k_above_the_site_count_is_rejected_when_consumed(self) -> None:
+        """The grid is the outer bound; K may only tighten it (#106)."""
+        with pytest.raises(ValidationError, match="only 100 sites"):
+            _minimal_config(
+                structure={"kind": "lattice", "rows": 10, "cols": 10},
+                dynamics={"reproduction_mode": "energy_economy", "carrying_capacity": 150},
+            )
+
+    def test_k_above_the_site_count_is_ignored_under_imitation(self) -> None:
+        """Ignored parameters are never validation errors (#34)."""
+        cfg = _minimal_config(
+            structure={"kind": "lattice", "rows": 10, "cols": 10},
+            dynamics={"carrying_capacity": 150},
+        )
+        assert cfg.dynamics.carrying_capacity == 150
+
+    def test_population_above_the_site_count_is_rejected(self) -> None:
+        """Every agent needs a site; the message names both numbers."""
+        with pytest.raises(ValidationError, match="only 64 sites"):
+            _minimal_config(structure={"kind": "lattice", "rows": 8, "cols": 8})  # N=100
+
+    def test_population_above_the_site_count_is_ignored_in_tournament(self) -> None:
+        """Tournament runs ignore structure wholesale (#34)."""
+        cfg = _minimal_config(
+            mode="tournament", structure={"kind": "lattice", "rows": 8, "cols": 8}
+        )
+        assert cfg.population.size == 100
+
+    def test_fixed_n_on_a_lattice_needs_full_occupancy(self) -> None:
+        """N = site count exactly: site recycling is the only Moran placement."""
+        with pytest.raises(ValidationError, match="exactly 121 agents"):
+            _minimal_config(
+                structure={"kind": "lattice", "rows": 11, "cols": 11},
+                dynamics={"time_model": "asynchronous", "async_population": "fixed_n"},
+            )
+
+    def test_fixed_n_at_exactly_the_site_count_is_accepted(self) -> None:
+        """A full grid is the fixed_n lattice's one legal shape."""
+        cfg = _minimal_config(
+            structure={"kind": "lattice", "rows": 10, "cols": 10},
+            dynamics={"time_model": "asynchronous", "async_population": "fixed_n"},
+        )
+        assert cfg.population.size == cfg.structure.rows * cfg.structure.cols
+
+    def test_variable_n_needs_no_full_occupancy(self) -> None:
+        """The equality rule is fixed_n's alone; variable_n keeps slack."""
+        cfg = _minimal_config(
+            structure={"kind": "lattice", "rows": 11, "cols": 11},
+            dynamics={"time_model": "asynchronous", "async_population": "variable_n"},
+        )
+        assert cfg.dynamics.carrying_capacity == 121  # blank K -> site count
+
+    def test_stake_plus_overhead_above_threshold_is_rejected(self) -> None:
+        """The tightened guarantee: the parent pays σ AND overhead (ADVISORIES)."""
+        with pytest.raises(ValidationError, match=r"\(400\.0\).*\(150\.0\).*550.*\(500\.0\)"):
+            _minimal_config(
+                dynamics={
+                    "reproduction_mode": "energy_economy",
+                    "reproduction_threshold": 500.0,
+                    "offspring_stake": 400.0,
+                    "reproduction_overhead": 150.0,
+                }
+            )
+
+    def test_stake_plus_overhead_at_threshold_is_accepted(self) -> None:
+        """σ + overhead = θ leaves the parent at exactly 0 — alive (#80)."""
+        cfg = _minimal_config(
+            dynamics={
+                "reproduction_mode": "energy_economy",
+                "reproduction_threshold": 500.0,
+                "offspring_stake": 400.0,
+                "reproduction_overhead": 100.0,
+            }
+        )
+        assert cfg.dynamics.reproduction_overhead == 100.0
+
+    def test_stake_plus_overhead_is_ignored_where_theta_is_not_a_gate(self) -> None:
+        """Imitation and fixed_n never read θ as a birth bar (#34, #97g)."""
+        _minimal_config(
+            dynamics={
+                "reproduction_threshold": 500.0,
+                "offspring_stake": 400.0,
+                "reproduction_overhead": 150.0,
+            }
+        )
+        _minimal_config(
+            dynamics={
+                "time_model": "asynchronous",
+                "async_population": "fixed_n",
+                "reproduction_threshold": 500.0,
+                "offspring_stake": 400.0,
+                "reproduction_overhead": 150.0,
+            }
+        )

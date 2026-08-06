@@ -44,6 +44,7 @@ __all__ = [
     "PopulationConfig",
     "StructureConfig",
     "load_config",
+    "resolve_carrying_capacity",
     "resolve_initial_energy",
     "resolve_lattice_dimensions",
     "resolve_senescence_factor",
@@ -142,6 +143,41 @@ def resolve_lattice_dimensions(
     if cols is None:
         return rows, math.ceil(population_size / rows)
     return rows, cols
+
+
+WELL_MIXED_CAPACITY_DEFAULT = 200
+"""What a blank carrying capacity resolves to when no lattice decides it.
+
+The pre-M11a registry default, kept as the aspatial fallback so every
+existing config and every untouched panel behaves exactly as before the
+capacity became a derived default (hard rule 8).
+"""
+
+
+def resolve_carrying_capacity(carrying_capacity: int | None, site_count: int | None) -> int:
+    """Resolve the ``dynamics.carrying_capacity`` derived default (M11a Phase C).
+
+    ``None`` means "auto": on a lattice the capacity becomes the site count
+    — the grid decides, the zero-effort spatial setting (#106) — and in a
+    well-mixed world, where there is no grid to decide, it falls back to
+    :data:`WELL_MIXED_CAPACITY_DEFAULT`. A pure free function (the #78 /
+    spec Design 11 pattern) so the parameter panel can call the same
+    arithmetic at paint time and can never drift from the validator; the
+    resolved plain number is what ``save_config`` writes.
+
+    Args:
+        carrying_capacity: The configured value, or ``None`` for auto.
+        site_count: The lattice's site count (rows × cols), or ``None``
+            when the run has no lattice.
+
+    Returns:
+        The carrying capacity K the run actually uses.
+    """
+    if carrying_capacity is not None:
+        return carrying_capacity
+    if site_count is not None:
+        return site_count
+    return WELL_MIXED_CAPACITY_DEFAULT
 
 
 def _registry_field(key: str) -> FieldInfo:
@@ -401,6 +437,17 @@ class StructureConfig(_RegistryBackedModel):
             the per-strategy counts are already resolved (#67).
         layout_file: Path to a hand-authored layout file, read only under
             ``initial_layout = "from_file"`` and ``None`` otherwise.
+        birth_radius: Support radius R of the birth kernel (M11a Phase C):
+            how far from its parent a newborn can land. ``None`` means
+            unlimited reach. Under ``fixed_n`` this pair defines the set
+            of competitors for a freed site instead (spec Design 7).
+        birth_decay: Decay β of the birth kernel — how steeply placement
+            prefers sites closer to the parent. Irrelevant at R = 1.
+        placement_contest: Who places first when several synchronous births
+            contend for neighbourhood room — ``"random"`` (one shuffle of
+            the admitted parents, Hammond–Axelrod's reproduction order) or
+            ``"energy_priority"`` (richest places first). Consumed only
+            under synchronous + lattice + ``energy_economy`` (#107).
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
@@ -411,6 +458,9 @@ class StructureConfig(_RegistryBackedModel):
         "boundary": "structure.boundary",
         "initial_layout": "structure.initial_layout",
         "layout_file": "structure.layout_file",
+        "birth_radius": "structure.birth_radius",
+        "birth_decay": "structure.birth_decay",
+        "placement_contest": "structure.placement_contest",
     }
 
     kind: str = _registry_field("structure.kind")
@@ -420,6 +470,9 @@ class StructureConfig(_RegistryBackedModel):
     boundary: str = _registry_field("structure.boundary")
     initial_layout: str = _registry_field("structure.initial_layout")
     layout_file: str | None = _registry_field("structure.layout_file")
+    birth_radius: int | None = _registry_field("structure.birth_radius")
+    birth_decay: float = _registry_field("structure.birth_decay")
+    placement_contest: str = _registry_field("structure.placement_contest")
 
     @model_validator(mode="after")
     def _check_layout_file(self) -> Self:
@@ -504,8 +557,22 @@ class DynamicsConfig(_RegistryBackedModel):
         capital_return_rate: r — interest on energy carried between
             generations (carried-in energy is multiplied by 1 + r).
         carrying_capacity: K — the population cap; births only fill seats
-            below it. Must be at least the starting population size
-            (checked at the experiment level).
+            below it. Must be at least the starting population size and,
+            on a lattice, at most the site count (both checked at the
+            experiment level). ``None`` in the raw input means "auto = the
+            lattice's site count, or 200 in a well-mixed world" and is
+            resolved to a plain number at experiment validation (see
+            :func:`resolve_carrying_capacity`); like the lattice
+            dimensions, ``None`` survives only in a standalone-built
+            section, where no structure is in sight.
+        boundary_order: The order of deaths and births at each synchronous
+            generation boundary (M11a Phase C, #107) —
+            ``"death_first"`` (the frozen #80 sequence: deaths land, then
+            survivors breed into the freed room) or ``"birth_first"``
+            (Hammond–Axelrod's period order: births first — rationed
+            against the pre-death population, so fewer are admitted — then
+            the death phase, which newborns face in their birth round).
+            Never read under the asynchronous time model.
         base_hazard: Per-boundary death chance at age 0 (the mortality trio,
             with the two below).
         senescence_factor: Per-generation multiplier on the death chance.
@@ -564,6 +631,7 @@ class DynamicsConfig(_RegistryBackedModel):
         "reproduction_overhead": "dynamics.reproduction_overhead",
         "capital_return_rate": "dynamics.capital_return_rate",
         "carrying_capacity": "dynamics.carrying_capacity",
+        "boundary_order": "dynamics.boundary_order",
         "base_hazard": "dynamics.base_hazard",
         "senescence_factor": "dynamics.senescence_factor",
         "max_age": "dynamics.max_age",
@@ -599,7 +667,11 @@ class DynamicsConfig(_RegistryBackedModel):
     engagement_cost: float = _registry_field("dynamics.engagement_cost")
     reproduction_overhead: float = _registry_field("dynamics.reproduction_overhead")
     capital_return_rate: float = _registry_field("dynamics.capital_return_rate")
-    carrying_capacity: int = _registry_field("dynamics.carrying_capacity")
+    # int | None like the lattice dimensions: the experiment-level resolver
+    # always writes a plain number into a full config (hard rule 8); None
+    # survives only in a standalone-built section.
+    carrying_capacity: int | None = _registry_field("dynamics.carrying_capacity")
+    boundary_order: str = _registry_field("dynamics.boundary_order")
     base_hazard: float = _registry_field("dynamics.base_hazard")
     senescence_factor: float = _registry_field("dynamics.senescence_factor")
     max_age: int = _registry_field("dynamics.max_age")
@@ -654,7 +726,14 @@ class DynamicsConfig(_RegistryBackedModel):
 
     @model_validator(mode="after")
     def _check_stake_fits_threshold(self) -> Self:
-        """Check σ ≤ θ: a parent must survive its own reproduction (M10a).
+        """Check σ + overhead ≤ θ: a parent survives its own reproduction.
+
+        The parent pays the offspring stake PLUS the reproduction overhead
+        at each birth, so the threshold must cover their SUM — checking σ
+        alone (the M10a check this tightens; ``docs/ADVISORIES.md`` "Not an
+        advisory", discharged in M11a Phase C) let a parent at exactly θ
+        end the boundary at −overhead and die of insolvency one boundary
+        later, silently breaking the documented guarantee.
 
         Runs only when θ actually gates births — under the synchronous
         ``"energy_economy"`` mode, or under the asynchronous time model
@@ -669,19 +748,23 @@ class DynamicsConfig(_RegistryBackedModel):
             The model, unchanged.
 
         Raises:
-            ValueError: If the offspring stake exceeds the reproduction
-                threshold while the birth machinery consumes them.
+            ValueError: If stake plus overhead exceeds the reproduction
+                threshold while the birth machinery consumes them. The
+                message names all three quantities.
         """
         consumed = (
             self.time_model == "synchronous" and self.reproduction_mode == "energy_economy"
         ) or (self.time_model == "asynchronous" and self.async_population == "variable_n")
-        if consumed and self.offspring_stake > self.reproduction_threshold:
+        total = self.offspring_stake + self.reproduction_overhead
+        if consumed and total > self.reproduction_threshold:
             raise ValueError(
-                f"dynamics.offspring_stake is {self.offspring_stake}, which is more "
-                f"than dynamics.reproduction_threshold ({self.reproduction_threshold}). "
-                "The stake a parent pays its newborn cannot exceed the energy bar "
-                "for breeding, or reproduction would kill the parent. Lower the "
-                "stake (or raise the threshold)."
+                f"dynamics.offspring_stake ({self.offspring_stake}) plus "
+                f"dynamics.reproduction_overhead ({self.reproduction_overhead}) "
+                f"is {total}, which is more than dynamics.reproduction_threshold "
+                f"({self.reproduction_threshold}). A breeding parent pays stake "
+                "AND overhead, so their sum cannot exceed the energy bar for "
+                "breeding — or reproduction would kill the parent. Lower the "
+                "stake or the overhead (or raise the threshold)."
             )
         return self
 
@@ -781,25 +864,29 @@ class ExperimentConfig(_RegistryBackedModel):
     @model_validator(mode="before")
     @classmethod
     def _resolve_structure_dimensions(cls, data: object) -> object:
-        """Resolve blank lattice rows/cols into plain numbers (M11a).
+        """Resolve blank rows/cols — and, from them, a blank K (M11a).
 
         The cross-section counterpart of ``DynamicsConfig``'s derived
-        defaults: the auto rule reads the population size, which lives in a
-        different section, so it must run here on the full experiment where
-        both sections are visible. It runs regardless of ``structure.kind``
-        — like every #78 derived default, the stored config always holds
-        plain numbers, so the auto rule can never retroactively change a
-        saved run (hard rule 8). Anything malformed (a missing population,
-        a non-integer size) is passed through untouched so pydantic's own
-        field validation reports it with its usual message.
+        defaults: the auto rules read values from OTHER sections (rows/cols
+        read the population size; the carrying capacity reads the resolved
+        site count), so they must run here on the full experiment where
+        every section is visible — and in this order, dimensions first,
+        because K's auto rule consumes their result. Both run regardless of
+        ``structure.kind`` — like every #78 derived default, the stored
+        config always holds plain numbers, so an auto rule can never
+        retroactively change a saved run (hard rule 8). Anything malformed
+        (a missing population, a non-integer size) is passed through
+        untouched so pydantic's own field validation reports it with its
+        usual message.
 
         Args:
             data: The raw input mapping (or a non-mapping, passed through
                 untouched).
 
         Returns:
-            The mapping with ``structure.rows`` and ``structure.cols``
-            always present as numbers.
+            The mapping with ``structure.rows``, ``structure.cols``, and
+            ``dynamics.carrying_capacity`` present as plain numbers
+            wherever the inputs allow them to be resolved.
         """
         if not isinstance(data, dict):
             return data
@@ -807,13 +894,14 @@ class ExperimentConfig(_RegistryBackedModel):
         structure = data.get("structure")
         if isinstance(structure, StructureConfig):
             current_rows, current_cols = structure.rows, structure.cols
+            kind = structure.kind
         elif isinstance(structure, dict):
             current_rows, current_cols = structure.get("rows"), structure.get("cols")
+            kind = structure.get("kind", registry.get_spec("structure.kind").default)
         elif structure is None:
             current_rows = current_cols = None
+            kind = registry.get_spec("structure.kind").default
         else:
-            return data
-        if current_rows is not None and current_cols is not None:
             return data
 
         def valid_dimension(value: object) -> bool:
@@ -824,30 +912,66 @@ class ExperimentConfig(_RegistryBackedModel):
                 isinstance(value, int) and not isinstance(value, bool) and value >= 1
             )
 
-        if not (valid_dimension(current_rows) and valid_dimension(current_cols)):
-            return data
-
-        population = data.get("population")
-        if isinstance(population, PopulationConfig):
-            size = population.size
-        elif isinstance(population, dict):
-            raw_size = population.get("size")
-            size = registry.get_spec("population.size").default if raw_size is None else raw_size
-        else:
-            return data
-        if isinstance(size, bool) or not isinstance(size, int) or size < 1:
-            return data
-
-        rows, cols = resolve_lattice_dimensions(current_rows, current_cols, size)
         resolved = dict(data)
-        if isinstance(structure, StructureConfig):
-            # model_copy (new concept): the way to "change" a frozen pydantic
-            # model — it builds a new instance with the listed fields replaced.
-            resolved["structure"] = structure.model_copy(update={"rows": rows, "cols": cols})
-        elif isinstance(structure, dict):
-            resolved["structure"] = {**structure, "rows": rows, "cols": cols}
+        rows, cols = current_rows, current_cols
+        if (
+            (current_rows is None or current_cols is None)
+            and valid_dimension(current_rows)
+            and valid_dimension(current_cols)
+        ):
+            population = data.get("population")
+            if isinstance(population, PopulationConfig):
+                size = population.size
+            elif isinstance(population, dict):
+                raw = population.get("size")
+                size = registry.get_spec("population.size").default if raw is None else raw
+            else:
+                size = None
+            if not isinstance(size, bool) and isinstance(size, int) and size >= 1:
+                rows, cols = resolve_lattice_dimensions(current_rows, current_cols, size)
+                if isinstance(structure, StructureConfig):
+                    # model_copy (new concept): the way to "change" a frozen
+                    # pydantic model — it builds a new instance with the
+                    # listed fields replaced.
+                    resolved["structure"] = structure.model_copy(
+                        update={"rows": rows, "cols": cols}
+                    )
+                elif isinstance(structure, dict):
+                    resolved["structure"] = {**structure, "rows": rows, "cols": cols}
+                else:
+                    resolved["structure"] = {"rows": rows, "cols": cols}
+
+        # The carrying-capacity step (M11a Phase C): blank K resolves off
+        # the site count the dimensions above just settled — or off nothing,
+        # in a well-mixed world, where the aspatial fallback applies.
+        dynamics = data.get("dynamics")
+        if isinstance(dynamics, DynamicsConfig):
+            current_k: object = dynamics.carrying_capacity
+        elif isinstance(dynamics, dict):
+            current_k = dynamics.get("carrying_capacity")
+        elif dynamics is None:
+            current_k = None
         else:
-            resolved["structure"] = {"rows": rows, "cols": cols}
+            return resolved
+        if current_k is None:
+            site_count = (
+                rows * cols
+                if (
+                    kind == "lattice"
+                    and valid_dimension(rows)
+                    and valid_dimension(cols)
+                    and rows is not None
+                    and cols is not None
+                )
+                else None
+            )
+            capacity = resolve_carrying_capacity(None, site_count)
+            if isinstance(dynamics, DynamicsConfig):
+                resolved["dynamics"] = dynamics.model_copy(update={"carrying_capacity": capacity})
+            elif isinstance(dynamics, dict):
+                resolved["dynamics"] = {**dynamics, "carrying_capacity": capacity}
+            else:
+                resolved["dynamics"] = {"carrying_capacity": capacity}
         return resolved
 
     @model_validator(mode="after")
@@ -946,6 +1070,7 @@ class ExperimentConfig(_RegistryBackedModel):
         if (
             self.mode == "evolution"
             and consumed
+            and self.dynamics.carrying_capacity is not None
             and self.dynamics.carrying_capacity < self.population.size
         ):
             raise ValueError(
@@ -1085,6 +1210,141 @@ class ExperimentConfig(_RegistryBackedModel):
                 "section from the file' to adopt the file's numbers in one "
                 "click — or switch structure.initial_layout away from "
                 "'from_file' to keep the numbers you typed."
+            )
+        return self
+
+    # The three lattice-bound checks below are deliberately defined AFTER
+    # _check_layout_file_agrees: pydantic runs after-validators in definition
+    # order, and a from-file config whose numbers disagree should get the
+    # layout validator's message — the one that knows about the one-click
+    # populate button — not a generic size complaint.
+
+    @model_validator(mode="after")
+    def _check_population_fits_lattice(self) -> Self:
+        """Check N ≤ site count: every agent needs a site (M11a Phase C).
+
+        Every site holds at most one agent (capacity is pinned at 1 —
+        Design 12), so a founding population larger than the grid cannot be
+        placed. Before this validator the mistake surfaced as a raw
+        founding-time error inside the engine; the #126 discipline — a user
+        must never see a traceback for a configuration mistake — puts it
+        here. Tournament runs ignore structure entirely (#34), so only
+        evolution mode checks.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If a lattice run's population exceeds its site
+                count. The message names both numbers.
+        """
+        structure = self.structure
+        if self.mode != "evolution" or structure.kind != "lattice":
+            return self
+        if structure.rows is None or structure.cols is None:
+            return self
+        site_count = structure.rows * structure.cols
+        if self.population.size > site_count:
+            raise ValueError(
+                f"population.size is {self.population.size}, but the "
+                f"{structure.rows}x{structure.cols} lattice has only "
+                f"{site_count} sites and every site holds at most one agent. "
+                "Enlarge the grid (or leave rows/columns blank to auto-size "
+                "it), or shrink the population."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_capacity_fits_lattice(self) -> Self:
+        """Check K ≤ site count: the grid is the outer bound (M11a, #106).
+
+        The carrying capacity is an optional INNER cap under a lattice — a
+        K below the site count leaves deliberate slack the occupied region
+        can drift through — but a K above it promises room the world does
+        not have. Runs only when K is actually consumed (the same predicate
+        as the K ≥ N check above: sync economy, or async ``variable_n``;
+        ``fixed_n`` ignores K wholesale per #97d), because ignored
+        parameters are never validation errors (#34).
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If a lattice run's carrying capacity exceeds its
+                site count. The message names both numbers.
+        """
+        structure = self.structure
+        consumed = (
+            self.dynamics.time_model == "synchronous"
+            and self.dynamics.reproduction_mode == "energy_economy"
+        ) or (
+            self.dynamics.time_model == "asynchronous"
+            and self.dynamics.async_population == "variable_n"
+        )
+        if (
+            self.mode != "evolution"
+            or not consumed
+            or structure.kind != "lattice"
+            or structure.rows is None
+            or structure.cols is None
+            or self.dynamics.carrying_capacity is None
+        ):
+            return self
+        site_count = structure.rows * structure.cols
+        if self.dynamics.carrying_capacity > site_count:
+            raise ValueError(
+                f"dynamics.carrying_capacity is {self.dynamics.carrying_capacity}, "
+                f"but the {structure.rows}x{structure.cols} lattice has only "
+                f"{site_count} sites — the grid is the outer bound on the "
+                "population, and the capacity can only tighten it. Lower the "
+                "capacity to at most the site count (or leave it blank to let "
+                "the grid decide)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_fixed_n_fills_lattice(self) -> Self:
+        """Check N = site count under ``fixed_n`` + lattice (M11a, Design 1).
+
+        The fixed-size Moran engine keeps every site occupied at all times:
+        a death frees exactly one site and the newborn has nowhere else to
+        go, which is what makes site recycling the only possible Moran
+        placement (the textbook death-birth corner arises structurally,
+        from full occupancy, rather than from an imposed rule). A
+        population above the site count cannot be placed; one below it
+        would leave permanent holes the Moran replacement could never fill
+        or move.
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If an async ``fixed_n`` lattice run's population
+                differs from its site count. The message states why
+                equality is required.
+        """
+        structure = self.structure
+        if (
+            self.mode != "evolution"
+            or self.dynamics.time_model != "asynchronous"
+            or self.dynamics.async_population != "fixed_n"
+            or structure.kind != "lattice"
+            or structure.rows is None
+            or structure.cols is None
+        ):
+            return self
+        site_count = structure.rows * structure.cols
+        if self.population.size != site_count:
+            raise ValueError(
+                f"population.size is {self.population.size}, but a 'fixed_n' "
+                f"run on a {structure.rows}x{structure.cols} lattice needs "
+                f"exactly {site_count} agents — one per site. Full occupancy "
+                "is what makes site recycling the only possible Moran "
+                "placement (a death frees exactly one site and the newborn "
+                "takes it); with holes in the grid the fixed-size replacement "
+                "would have nowhere coherent to happen. Match the population "
+                "to the site count, or leave rows/columns blank to auto-size "
+                "the grid to the population."
             )
         return self
 

@@ -548,10 +548,11 @@ def _grid_area(
     and the seed, so what the panel shows and what the engine founds cannot
     drift apart.
 
-    Phase B scope, said plainly to the user rather than left to be inferred:
-    this is the FOUNDING arrangement. Births and deaths do not move anyone
-    yet — local birth is Phase C — so the picture does not change as a run
-    proceeds.
+    This is the FOUNDING arrangement — the panel preview and the results
+    browser both show generation 0. During a live economy run the run area
+    additionally renders the CURRENT occupancy from the latest snapshot
+    (Phase C: births claim sites and deaths free them, so the picture
+    genuinely moves — the snapshot is the render state, Design 10).
 
     Args:
         config: The run's configuration.
@@ -837,6 +838,48 @@ def _run_live(
         chart_left, chart_right = col_left.empty(), col_right.empty()
         chart_coop = st.empty()  # full-width, below the pair (M9b)
         chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
+        # The blocked-parents readout (M11a Phase C, spec Design 4): live
+        # only where the local placement gate exists — a lattice economy.
+        blocked_note = st.empty()
+        show_blocked = economy_helpers.blocked_parents_visible(config)
+        # The LIVE grid (Phase C): the latest snapshot IS the render state
+        # (Design 10), so a lattice run with per-agent data redraws its
+        # occupancy as periods finish — this is what lets V5's drifting
+        # frontier actually be watched. Imitation runs have empty snapshots
+        # and keep the founding preview above instead (nothing moves,
+        # #116).
+        grid_live = st.empty()
+
+        def _draw_blocked() -> None:
+            """Refresh the blocked-parents metric from the live series."""
+            numbers = economy_helpers.blocked_parents_metric(timeseries.blocked_parents)
+            if show_blocked and numbers is not None:
+                latest, total = numbers
+                blocked_note.metric(
+                    "Blocked parents this generation",
+                    latest,
+                    delta=f"run total {total}",
+                    delta_color="off",
+                    help=ECONOMY_HELP["blocked_parents"],
+                )
+
+        def _draw_live_grid(draw_id: int) -> None:
+            """Redraw the current occupancy from the latest period snapshot."""
+            if config.structure.kind != "lattice" or not timeseries.agent_snapshots:
+                return
+            placements = {
+                snapshot.site_id: snapshot.strategy
+                for snapshot in timeseries.agent_snapshots[-1]
+                if snapshot.site_id is not None
+            }
+            if not placements or config.structure.rows is None or config.structure.cols is None:
+                return
+            grid_live.plotly_chart(
+                charts.grid_chart(config.structure.rows, config.structure.cols, placements),
+                width="stretch",
+                key=f"live_grid_{draw_id}",
+            )
+
         if config.dynamics.time_model == "asynchronous":
             st.caption(GEN_EQUIV_AXIS_NOTE)
         capacity = economy_helpers.chart_carrying_capacity(config)
@@ -877,6 +920,8 @@ def _run_live(
                     economy=chart_economy,
                     carrying_capacity=capacity,
                 )
+                _draw_blocked()
+                _draw_live_grid(draws)
                 progress.caption(f"{period_label} {event.index + 1} finished")
                 last_redraw = time.monotonic()
                 if delay > 0:
@@ -892,6 +937,8 @@ def _run_live(
             economy=chart_economy,
             carrying_capacity=capacity,
         )
+        _draw_blocked()
+        _draw_live_grid(draws + 1)
         note = f"Results of the last run (seed {config.seed})"
         if stopped:
             st.warning("Run stopped — the charts show progress up to the stop.")

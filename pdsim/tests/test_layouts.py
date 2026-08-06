@@ -561,12 +561,14 @@ class TestFounding:
         view = founding_view(config)
         assert view is not None
         first = next(e for e in engine.run(config) if isinstance(e, GenerationFinished))
-        placed = [s for s in first.agents if s.site_id is not None]
-        # fixed_n replaces agents as it goes; the surviving founders still
+        # fixed_n replaces agents as it goes; the surviving FOUNDERS still
         # carry their founding sites, and under a mutation-free run their
-        # strategies are exactly what the deal put there.
-        assert placed
-        for snapshot in placed:
+        # strategies are exactly what the deal put there. Newborns carry
+        # sites too since Phase C, but theirs are recycled seats, not
+        # founding ones — so the replay pin reads founders only.
+        founders = [s for s in first.agents if s.site_id is not None and s.parent_id is None]
+        assert founders
+        for snapshot in founders:
             assert view.placements[snapshot.site_id] == snapshot.strategy
 
 
@@ -616,34 +618,16 @@ class TestWellMixedIsUntouched:
         assert layout_consumes_rng("lattice", layout)
         assert not layout_consumes_rng("well_mixed", layout)
 
-    def test_a_deterministic_lattice_run_matches_the_well_mixed_stream(self) -> None:
-        """The exit condition, as an executable assertion.
-
-        Nothing reads the structure yet, and a deterministic layout consumes
-        no randomness — so a lattice run and a well-mixed run at the same
-        seed must produce the same composition trajectory. When Phase C
-        wires local birth, this test is expected to start failing and should
-        be retired then, not weakened now.
-        """
-
-        def trajectory(kind: str) -> list[dict[str, int]]:
-            config = ExperimentConfig.model_validate(
-                {
-                    "mode": "evolution",
-                    "seed": 5,
-                    "population": {"size": 16, "composition": {AC: 8, AD: 8}},
-                    "match": {"length_mode": "fixed", "rounds_per_match": 3},
-                    "structure": {"kind": kind, "rows": 4, "cols": 4, "initial_layout": "stripes"},
-                    "dynamics": {"generations": 4, "mutation_rate": 0.1},
-                }
-            )
-            return [
-                event.composition
-                for event in engine.run(config)
-                if isinstance(event, GenerationFinished)
-            ]
-
-        assert trajectory("lattice") == trajectory("well_mixed")
+    # RETIRED (M11a Phase C): test_a_deterministic_lattice_run_matches_the_
+    # well_mixed_stream pinned the Phase B exit condition — "nothing reads
+    # the structure", asserted as a lattice run matching its well-mixed
+    # twin. That claim is false in general since local birth landed (an
+    # economy lattice run draws placement kernels), and true only in the
+    # imitation corner the fixture happened to use — where it is now
+    # asserted more sharply by the no-draw pin (test_local_birth.py:
+    # sync imitation + lattice consumes zero contest draws) and by the
+    # Phase C golden masters (test_phase_c_goldens.py), which seal the
+    # well-mixed streams byte-for-byte instead of comparing trajectories.
 
 
 class TestCommaSeparator:

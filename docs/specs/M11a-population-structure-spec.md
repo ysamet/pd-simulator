@@ -1,4 +1,4 @@
-Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120)
+Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120; Phase C implemented 2026-08-06, see DECISIONS #127-#136 — the fourth positive golden master moved to Phase D per #128)
 
 # M11a — Population structure (sites, local birth, local interaction)
 

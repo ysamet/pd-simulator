@@ -35,18 +35,42 @@ match order):
     3. the mutation phase (per slot: coin only when μ > 0, then a roster
        index only when the coin hits — see ``reproduction.py``).
 
-RNG draw order per generation, energy economy (M10a, DECISIONS #80):
+RNG draw order per generation, energy economy (M10a DECISIONS #80, amended
+by M11a Phase C per #107 — the spec's Design 9 diff):
     1. the match phase — identical to the above,
     2. the mortality sub-phase — ONLY when age-mortality is active: exactly
        one coin per living agent, in ascending agent-id order,
        unconditionally (even at p = 0.0 or 1.0),
-    3. the birth phase — one μ-mutation draw per admitted parent, in
-       ascending PARENT-id order (coin only when μ > 0, roster index only
-       when it hits, per ``reproduction.py``).
+    3. the birth phase — admission by energy priority is RNG-FREE, then:
+       a. the CONTEST PERMUTATION — ONLY when the three-way gate holds
+          (synchronous + lattice + ``energy_economy``): one
+          ``rng.permutation`` over the admitted set, drawn regardless of
+          the ``placement_contest`` setting so flipping that widget can
+          never shift the stream (numpy fact, pinned by test: at admitted
+          sizes 0 and 1 the call advances no generator state, but it is
+          made);
+       b. per admitted parent, in iteration order — the permutation under
+          ``placement_contest = "random"``, energy-descending under
+          ``"energy_priority"``, ascending parent id when the gate is off:
+          the PLACEMENT KERNEL DRAW — only on a lattice: one draw via
+          ``neighbourhood_sample`` over the empty sites within the birth
+          kernel (no draw when no site is in reach — the parent is
+          BLOCKED, pays nothing, and stays eligible), then σ payment on
+          success, passport id, and the μ-mutation draw (coin only when
+          μ > 0, roster index only when it hits, per ``reproduction.py``).
 Everything else at the boundary (energy update, insolvency deaths, capacity
-admission, placement) is deterministic and consumes no RNG. With
-age-mortality off and μ = 0, an economy generation consumes exactly the
-match-phase draws.
+admission) is deterministic and consumes no RNG. With age-mortality off,
+μ = 0, and no lattice, an economy generation consumes exactly the
+match-phase draws — every Phase C draw exists only when its governing flag
+makes it meaningful (the #80/#99 active-flag idiom), which is what keeps
+every well-mixed run byte-identical to its pre-M11a stream.
+
+``dynamics.boundary_order`` (M11a Phase C, #107) decides which phase runs
+first: ``"death_first"`` is the frozen #80 sequence above; ``"birth_first"``
+is Hammond–Axelrod's period order — the birth phase runs first (its slot
+ration reads the PRE-death population, so fewer births are admitted), then
+the death phase, which newborns face — age-mortality coin included — in
+their own birth round.
 
 Any change to either order changes every seeded run's history — treat it as
 a breaking change requiring a DECISIONS entry.
@@ -79,6 +103,7 @@ from pdsim.core.occupancy import Occupancy
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
 from pdsim.core.strategies import create_strategy, strategy_name_of
+from pdsim.core.structure import SiteId, neighbourhood_sample
 
 CooperationTable = dict[tuple[str, str], tuple[float, int]]
 """Per (actor strategy, opponent strategy): (cooperation rate, actions counted).
@@ -172,6 +197,11 @@ class GenerationReport:
             this recording period, in occurrence order (M10b) — the engine
             flushes them into the stream immediately before this period's
             ``GenerationFinished``. Always empty in synchronous reports.
+        blocked_parents: How many admitted parents failed the LOCAL gate
+            this period (M11a Phase C, Design 4): they cleared the capacity
+            gate but found no empty site within the birth kernel's reach,
+            paid nothing, and stay eligible. Always 0 without a lattice —
+            well-mixed placement never fails.
     """
 
     index: int
@@ -182,6 +212,7 @@ class GenerationReport:
     agents: tuple[AgentSnapshot, ...] = ()
     gen_equiv_time: float | None = None
     demographic_events: tuple[DemographicEvent, ...] = ()
+    blocked_parents: int = 0
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -483,12 +514,22 @@ class EconomyDynamics:
             agent.age = age
             agent.parent_id = None
         self._population = founders
-        # Founding placement (M11a Phase B), before any other draw. Births and
-        # deaths do NOT maintain this yet — local birth is Phase C — so a
-        # newborn's site id is None and a dead agent's site is not reclaimed.
-        # That is this phase's exit condition (nothing reads the structure),
-        # not an oversight: the founding arrangement is what Phase B ships.
+        # Founding placement (M11a Phase B), before any other draw. Since
+        # Phase C the occupancy is LIVE: a death vacates its site, a birth
+        # occupies one, and a newborn's site id is real from the moment it
+        # exists (closing #120(c)'s honest gap).
         self._occupancy = found_population(config, founders, rng)
+        # The Phase C birth knobs. The kernel pair and the contest are read
+        # only on a lattice; without one, none of their draws exist (the
+        # #80/#99 active-flag idiom).
+        structure = config.structure
+        self._birth_radius = structure.birth_radius
+        self._birth_decay = structure.birth_decay
+        self._placement_contest = structure.placement_contest
+        # Blocked parents this generation (Design 4): admitted at the global
+        # gate, refused at the local one. Reset every boundary; reported so
+        # correct viscosity does not read as a stall.
+        self._blocked_parents = 0
         # Monotonic passport counter: ids are never reused, so lineage and
         # the id-ordered RNG contract stay exact across deaths.
         self._next_id = len(founders)
@@ -506,12 +547,11 @@ class EconomyDynamics:
 
     @property
     def occupancy(self) -> Occupancy | None:
-        """Who sits where at founding, or ``None`` for a well-mixed run.
+        """Who sits where right now, or ``None`` for a well-mixed run.
 
-        Phase B founds this and then leaves it alone: births and deaths do
-        not maintain it until local birth lands in Phase C, so after the
-        first boundary it describes the founding arrangement rather than the
-        live population.
+        Live since Phase C: deaths vacate sites and births occupy them, so
+        at any moment this maps exactly the living population — every agent
+        holds a site from birth to death (agents do not move until M11b).
 
         Returns:
             The occupancy, or ``None`` when the world has no structure.
@@ -535,14 +575,15 @@ class EconomyDynamics:
     def step(self, on_match: Callable[[MatchResult], None] | None = None) -> GenerationReport:
         """Advance exactly one generation (the M10a boundary sequence).
 
-        The nine steps, in the frozen order (see the module docstring's
-        economy RNG contract): match phase → report-as-played → energy
-        update → age mortality → insolvency deaths → births (capacity
-        admission, then id-ordered stakes/ids/mutation) → age increment →
-        score-only reset → post-boundary snapshot. Deaths happen before
-        births (the cull frees room, survivors breed into it — a deliberate
-        deviation from Hammond–Axelrod's birth-before-death period order,
-        DECISIONS #80).
+        The nine steps (see the module docstring's economy RNG contract):
+        match phase → report-as-played → energy update → the death and
+        birth phases in the ``dynamics.boundary_order`` order → age
+        increment → score-only reset → post-boundary snapshot. Under the
+        default ``death_first`` this is #80's frozen sequence exactly —
+        deaths free room, survivors breed into it; ``birth_first`` restores
+        Hammond–Axelrod's period order (M11a Phase C, #107): fewer births
+        are admitted (the ration reads the pre-death population) and
+        newborns face the death phase in their own birth round.
 
         Args:
             on_match: Optional read-only observer called with each finished
@@ -589,56 +630,33 @@ class EconomyDynamics:
                 agent.energy, agent.score, engagement.matches(agent.agent_id), dynamics
             )
 
-        # 4. Age mortality — one coin per living agent in ascending id
-        #    order, unconditionally, whenever the sub-phase is active (even
-        #    at p = 0.0 or 1.0): the RNG stream depends only on the active
-        #    flag and the population size, never on hazard values.
-        survivors = list(self._population)
-        if age_mortality_active(dynamics):
-            survivors = []
-            for agent in self._population:  # ascending id order — the invariant
-                dies = self._rng.random() < mortality_probability(agent.age, dynamics)
-                if not dies:
-                    survivors.append(agent)
+        # 4-6. The death and birth phases, in the configured order (M11a
+        #    Phase C, #107). `death_first` is the frozen #80 sequence: the
+        #    cull frees room, survivors breed into it. `birth_first` is
+        #    Hammond-Axelrod's period order: births run first — their slot
+        #    ration reads the PRE-death population, because the slots
+        #    computation reads whatever list exists at that moment (VT-4's
+        #    post-deaths branch, left deliberately as-is) — and the death
+        #    phase then runs over survivors AND newborns alike, so a child
+        #    faces the age-mortality coin in the round it was born.
+        self._blocked_parents = 0
+        if dynamics.boundary_order == "birth_first":
+            living = list(self._population)
+            newborns = self._birth_phase(living)
+            merged = sorted(living + newborns, key=lambda agent: agent.agent_id)
+            survivors = self._death_phase(merged)
+            next_population = list(survivors)
+        else:
+            survivors = self._death_phase(list(self._population))
+            newborns = self._birth_phase(survivors)
+            next_population = survivors + newborns
 
-        # 5. Insolvency deaths — deterministic; STRICTLY negative. An agent
-        #    that just paid its stake can sit at exactly 0 and survives
-        #    empty-handed to earn again — reproduction is not suicidal at
-        #    the margin.
-        survivors = [agent for agent in survivors if agent.energy >= 0]
-
-        # 6. Births — threshold, then the two gates. TWO DISTINCT ORDERINGS:
-        #    admit_births decides THE SET by energy priority (energy desc,
-        #    id asc); the loop below then iterates that set in ascending
-        #    PARENT-id order, because id order is the RNG-reproducibility
-        #    contract for the mutation draws. One birth per parent per
-        #    generation, even at e ≥ 2θ.
-        eligible = [a for a in survivors if a.energy >= dynamics.reproduction_threshold]
-        slots = max(0, dynamics.carrying_capacity - len(survivors))
-        admitted = admit_births(eligible, slots)
-        newborns: list[Agent] = []
-        for parent in sorted(admitted, key=lambda agent: agent.agent_id):
-            # Placement BEFORE payment: place_offspring never fails in the
-            # well-mixed M10a world, but pay-then-place would bequeath M11
-            # the bug where a blocked parent is charged for a child never
-            # born.
-            if not place_offspring(survivors, parent):
-                continue
-            parent.energy -= dynamics.offspring_stake + dynamics.reproduction_overhead
-            child_id = self._next_id
-            self._next_id += 1
-            newborns.append(
-                Agent(
-                    agent_id=child_id,
-                    strategy=self._reproduction.offspring_strategy(parent.strategy, self._rng),
-                    memory_depth=self._config.population.memory_depth,
-                    energy=dynamics.offspring_stake,
-                    age=0,
-                    parent_id=parent.agent_id,
-                )
-            )
-
-        # 7. Age increment — survivors only; newborns enter at 0.
+        # 7. Age increment — everyone who went through the death phase ages.
+        #    Under death_first that is the pre-birth survivors only, so a
+        #    newborn enters the next generation at age 0; under birth_first
+        #    a surviving newborn has already faced the death phase and
+        #    enters at age 1 — its lifetime coin sequence p(0), p(1), ...
+        #    starts one boundary earlier, which is exactly the H-A exposure.
         for agent in survivors:
             agent.age += 1
 
@@ -650,7 +668,7 @@ class EconomyDynamics:
         # The invariant, enforced explicitly: ascending id order. Survivors
         # are already ascending and newborn ids all exceed theirs, but the
         # boundary sorts rather than trusting insertion order.
-        self._population = sorted(survivors + newborns, key=lambda agent: agent.agent_id)
+        self._population = sorted(next_population, key=lambda agent: agent.agent_id)
 
         # 9. Snapshot the post-boundary population — the exact set entering
         #    the next generation, with the energy its next update reads as
@@ -676,9 +694,163 @@ class EconomyDynamics:
             rounds_played=rounds,
             cooperation=cooperation.table(),
             agents=agents,
+            blocked_parents=self._blocked_parents,
         )
         self._generation += 1
         return report
+
+    def _death_phase(self, candidates: list[Agent]) -> list[Agent]:
+        """Apply the mortality coins and the insolvency cull (#80 steps 4-5).
+
+        Age mortality first — one ``rng.random()`` coin per candidate in
+        ascending id order, unconditionally, whenever the sub-phase is
+        active (even at p = 0.0 or 1.0): the stream depends only on the
+        active flag and the candidate count, never on hazard values. Then
+        insolvency, deterministic and STRICTLY negative: an agent that just
+        paid its stake can sit at exactly 0 and survives empty-handed —
+        reproduction is not suicidal at the margin. Every death vacates its
+        site (Phase C: the occupancy is live).
+
+        Args:
+            candidates: The agents facing the reaper, in ascending id
+                order. Under ``death_first`` these are the pre-birth
+                living; under ``birth_first`` they include this boundary's
+                newborns, which is Hammond-Axelrod's newborn exposure.
+
+        Returns:
+            The survivors, in the same (ascending id) order.
+        """
+        dynamics = self._config.dynamics
+        survivors = list(candidates)
+        if age_mortality_active(dynamics):
+            survivors = []
+            for agent in candidates:  # ascending id order — the invariant
+                dies = self._rng.random() < mortality_probability(agent.age, dynamics)
+                if dies:
+                    self._free_site(agent)
+                else:
+                    survivors.append(agent)
+        alive: list[Agent] = []
+        for agent in survivors:
+            if agent.energy >= 0:
+                alive.append(agent)
+            else:
+                self._free_site(agent)
+        return alive
+
+    def _birth_phase(self, living: list[Agent]) -> list[Agent]:
+        """Run the amended #80 step 6: admission, contest, placement, birth.
+
+        Admission is unchanged — ``admit_births`` decides THE SET by energy
+        priority, RNG-free. Iteration then follows :meth:`_contest_order`,
+        and each parent in turn faces the LOCAL gate: on a lattice, one
+        kernel draw over the empty sites within the birth radius of its own
+        site; an empty result means the parent is BLOCKED — it pays NO
+        stake, stays eligible next period, and keeps accumulating (the
+        place-before-pay branch of #80, load-bearing at last). Payment,
+        passport id, μ-mutation draw, and site occupation follow only on
+        placement success. One birth per parent per generation, even at
+        e ≥ 2θ.
+
+        Args:
+            living: The population the ration is computed against — the
+                post-death survivors under ``death_first``, the pre-death
+                living under ``birth_first`` (the slots computation reads
+                whatever list exists at that moment; VT-4).
+
+        Returns:
+            The newborns, in iteration order (their ids ascend with it).
+        """
+        dynamics = self._config.dynamics
+        eligible = [a for a in living if a.energy >= dynamics.reproduction_threshold]
+        slots = max(0, dynamics.carrying_capacity - len(living))
+        admitted = admit_births(eligible, slots)
+        newborns: list[Agent] = []
+        for parent in self._contest_order(admitted):
+            if self._occupancy is None:
+                # The well-mixed structural gate: never fails here, kept as
+                # the seam for programmatic callers (#80's stub, still the
+                # defence against a pay-then-place regression).
+                if not place_offspring(living, parent):
+                    continue
+                site_id: SiteId | None = None
+            else:
+                origin = self._occupancy.site_of(parent.agent_id)
+                assert origin is not None  # every living agent holds a site
+                drawn = neighbourhood_sample(
+                    self._occupancy.structure,
+                    origin,
+                    radius=self._birth_radius,
+                    decay=self._birth_decay,
+                    size=1,
+                    rng=self._rng,
+                    eligible=self._occupancy.empty_sites(),
+                )
+                if not drawn:
+                    # The local gate failed (Design 4): no empty site within
+                    # reach. No stake leaves the parent; it stays eligible
+                    # and keeps accumulating — correct viscosity, counted so
+                    # the Economy panel can say so.
+                    self._blocked_parents += 1
+                    continue
+                site_id = drawn[0]
+            parent.energy -= dynamics.offspring_stake + dynamics.reproduction_overhead
+            child_id = self._next_id
+            self._next_id += 1
+            newborn = Agent(
+                agent_id=child_id,
+                strategy=self._reproduction.offspring_strategy(parent.strategy, self._rng),
+                memory_depth=self._config.population.memory_depth,
+                energy=dynamics.offspring_stake,
+                age=0,
+                parent_id=parent.agent_id,
+            )
+            if site_id is not None and self._occupancy is not None:
+                self._occupancy.occupy(site_id, newborn.agent_id)
+            newborns.append(newborn)
+        return newborns
+
+    def _contest_order(self, admitted: list[Agent]) -> list[Agent]:
+        """Decide the birth-iteration order (Design 9's three orderings).
+
+        ``admit_births`` decided THE SET (energy desc, id asc); this method
+        decides the ITERATION, and the two must never conflate. Under the
+        three-way gate — synchronous + lattice + ``energy_economy``; this
+        class is the first and third, so the lattice is the live half — the
+        CONTEST PERMUTATION is drawn unconditionally, regardless of the
+        ``placement_contest`` setting: Design 9's inventory gates the
+        insertion on the conjunction alone, so flipping the contest widget
+        can never shift the stream (the #80 active-flag idiom). The
+        permutation applies to the ID-ORDERED admitted list (Defining
+        principle 5) — applying it to the energy-sorted admission list is
+        the named #107 trap, a "random" contest quietly anchored to wealth.
+
+        Args:
+            admitted: The admitted parents, in admission (energy-priority)
+                order.
+
+        Returns:
+            The parents in iteration order: the permutation under
+            ``placement_contest = "random"``, energy-descending under
+            ``"energy_priority"``, ascending parent id when the gate is
+            off (the untouched #80 contract).
+        """
+        if self._occupancy is None:
+            return sorted(admitted, key=lambda agent: agent.agent_id)
+        base = sorted(admitted, key=lambda agent: agent.agent_id)
+        permutation = self._rng.permutation(len(base))
+        if self._placement_contest == "energy_priority":
+            return list(admitted)
+        return [base[int(index)] for index in permutation]
+
+    def _free_site(self, agent: Agent) -> None:
+        """Vacate a dying agent's site, if the world has sites.
+
+        Args:
+            agent: The agent that just died.
+        """
+        if self._occupancy is not None:
+            self._occupancy.remove_agent(agent.agent_id)
 
 
 @dataclass(frozen=True, slots=True)

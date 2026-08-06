@@ -84,6 +84,16 @@ ECONOMY_HELP: dict[str, str] = {
         "which case nobody ever reaches the cap — allowed, just worth "
         "knowing."
     ),
+    "blocked_parents": (
+        "A BLOCKED parent cleared the capacity gate (it holds enough energy "
+        "to breed and won a free seat) but found every site within its birth "
+        "radius occupied — so it paid nothing, keeps its energy, stays "
+        "eligible, and simply tries again. An agent sitting at several times "
+        "the breeding bar and not breeding is therefore CORRECT, not stuck: "
+        "being unable to spend reproductive wealth because the neighbourhood "
+        "is full is exactly what spatial viscosity means, and it is the "
+        "mechanism that lets clusters keep their shape."
+    ),
 }
 """The single source for the Economy panel's inline (?) explainer texts."""
 
@@ -303,3 +313,48 @@ def chart_carrying_capacity(config: ExperimentConfig) -> float | None:
     if config.mode == "evolution" and config.dynamics.reproduction_mode == "energy_economy":
         return float(config.dynamics.carrying_capacity)
     return None
+
+
+def blocked_parents_visible(config: ExperimentConfig) -> bool:
+    """Whether the blocked-parents readout applies to this run (M11a Phase C).
+
+    Blocked parents exist exactly where the LOCAL placement gate exists:
+    an evolution run on a lattice whose birth machinery is θ-driven — the
+    synchronous energy economy, or the asynchronous ``variable_n`` mode.
+    ``fixed_n`` never blocks (the freed seat always exists), imitation
+    never births, and a well-mixed world never refuses a placement.
+
+    Args:
+        config: The run's config.
+
+    Returns:
+        True when the readout should be shown.
+    """
+    if config.mode != "evolution" or config.structure.kind != "lattice":
+        return False
+    dynamics = config.dynamics
+    if dynamics.time_model == "asynchronous":
+        return dynamics.async_population == "variable_n"
+    return dynamics.reproduction_mode == "energy_economy"
+
+
+def blocked_parents_metric(blocked: list[int]) -> tuple[int, int] | None:
+    """The numbers behind the live blocked-parents readout (Design 4, #89(e)).
+
+    A parent walled in at five times the breeding bar, paying nothing and
+    accumulating, is CORRECT viscosity — but it reads as a bug unless the
+    app says "blocked: no site in reach". Streamlit-free so the arithmetic
+    is unit-testable; the explanation itself lives in
+    ``ECONOMY_HELP["blocked_parents"]`` (the §12 single-source rule).
+
+    Args:
+        blocked: The per-period blocked-parent counts so far (the
+            timeseries' live series).
+
+    Returns:
+        ``(latest period's count, run total)``, or ``None`` before any
+        period has finished.
+    """
+    if not blocked:
+        return None
+    return blocked[-1], sum(blocked)

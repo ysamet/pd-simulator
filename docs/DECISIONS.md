@@ -2839,3 +2839,288 @@ the app and reformatting it — that leaves validation timing wrong, keeps
 the recorded-config hazard one code path away (any caller that skips the
 pretty-printer records the lie), and masks genuine engine bugs behind a
 formatter that cannot tell them from configuration mistakes.
+
+**#127 — 2026-08-06 — Sparse `stripes` becomes a centred FULL-WIDTH
+horizontal band (design-layer decision carried into the repo; implementation
+assigned to Phase E).** #125 fixed `central_block` but explicitly flagged
+the companion question — whether sparse `stripes` should span the grid's
+full width — to the design layer rather than deciding it there. The design
+layer has now decided: when N is below the site count, `stripes` uses a
+CENTRED, FULL-WIDTH HORIZONTAL BAND as its footprint — every column
+occupied, band height ≈ ceil(N / cols), centred vertically, with the
+existing run-length row-major dealing unchanged inside it — so that sparse
+stripes read as stripes rather than as a blob. ONLY `stripes` changes:
+`blocks`, `checkerboard`, and `patches` keep the #119(a) centred
+Chebyshev-ball footprint (their purposes — compact runs, maximal
+interleaving, organic patches — are served by a compact blob), and
+`central_block` keeps its #125 rectangle. Rationale: `stripes`' purpose
+(spec Design 8) is broad horizontal bands, and a blob footprint destroys
+exactly the property the layout is named for; the band restores it at the
+cost of the footprint no longer being the same function across the
+patterned layouts — a cost accepted because footprint-uniformity was an
+implementation convenience (#119(a)), never a design commitment.
+Implementation is assigned to Phase E, alongside the other layout-adjacent
+polish; nothing in Phase C implements it. This entry exists so the decision
+reaches the repo now rather than living only in a chat session.
+
+**#128 — 2026-08-06 — The fourth positive golden master (sync imitation +
+lattice) moves from Phase C to Phase D (a scheduling correction, not a
+design change).** The spec's Design 9 lists four new positive golden
+masters and V7 schedules golden masters for Phase C. But the
+sync-imitation-plus-lattice golden is described by the spec itself as "the
+interaction-only case — structure expressed purely through who plays whom",
+and who-plays-whom is `matching.spatial_interaction` — Phase D machinery.
+Recorded in Phase C, that golden would pin a run in which the lattice
+affects nothing, and Phase D would discard and re-record it immediately.
+DECIDED: Phase C records three positive goldens (sync economy + lattice;
+async `fixed_n` + lattice + `death_birth`; async `variable_n` + lattice);
+the fourth is recorded in Phase D when the behaviour it seals exists. The
+spec is not edited (frozen, #62).
+
+**#129 — 2026-08-06 — The reproduction validator tightens to
+`offspring_stake + reproduction_overhead <= reproduction_threshold`,
+discharging the ADVISORIES.md "Not an advisory" item (M11a Phase C; a
+behaviour change — previously-legal configs become illegal).** The old
+check compared σ alone against θ, but a breeding parent pays σ PLUS the
+overhead, so with overhead 150, stake 400 and threshold 500 a parent at
+exactly θ ended the boundary at −50 and died of insolvency one boundary
+later — silently breaking the documented parent-survives-its-own-
+reproduction guarantee. The check now compares the SUM, the message names
+all three quantities, and the guarantee is restored — which Phase C's
+`birth_first` order actively leans on: there the insolvency cull runs
+AFTER stake payment in the same boundary, so without this fix a
+just-bred parent could be culled by its own reproduction within one
+generation. Scope of the break checked and reported: no shipped scenario
+sets a non-zero overhead, and the one test fixture that does (overhead 50
+against θ 500, σ 400) already satisfies the tightened rule — nothing
+shipped had to change. The gate stays consumed-only (#34): imitation and
+`fixed_n` (which lets parents go negative by design, #97g) are untouched.
+The ADVISORIES.md section now carries its discharge note pointing here.
+
+**#130 — 2026-08-06 — VT-4 answered at RUNTIME: `slots = K − survivors`
+reads the APPLIED post-death list, so `birth_first` rations births against
+the pre-death population (M11a Phase C; completes the code-inspection
+evidence the spec held apart from verification).** The probe (temporary,
+never shipped): well-mixed sync economy at the risk reading's worked
+scale — K = 200, 180 founders, hazard tuned to ≈ 20 deaths per boundary,
+everyone always above θ — identical config and seed under both orders.
+OBSERVED: at the first boundary both orders drew 16 founder deaths;
+`death_first` admitted 36 births (slots = 200 − 164, the post-death
+list), `birth_first` admitted 20 (slots = 200 − 180 — no post-death list
+exists yet, so the ration reads the pre-death living). Subsequent
+generations: `death_first` sat pinned at 200 (deaths 30 → 30 births,
+14 → 14); `birth_first` sat visibly lower at 184 / 169 / 179. The
+registry help text for `dynamics.boundary_order` states both effects —
+the smaller ration AND the newborn death-phase exposure — with the
+worked numbers, and closes with "a `birth_first` run sitting at a
+visibly lower population is correct, not broken". The slots computation
+is deliberately left AS IS (the spec's phase plan pins it): reading
+whatever list exists at that moment IS the documented second effect, not
+a bug to fix.
+
+**#131 — 2026-08-06 — `dynamics.boundary_order` as implemented: under
+`birth_first` the newborns join the death phase as full members, and a
+surviving newborn ages to 1 in its birth round (M11a Phase C; the one
+micro-decision the spec left open, plus the H-A fidelity record).**
+`death_first` is #80's frozen sequence executing byte-identically (pinned
+by the negative goldens). `birth_first` runs the birth phase against the
+pre-death living, merges the newborns into the population in ascending id
+order, and runs the death phase — age-mortality coins (one per living
+agent INCLUDING newborns, ascending id, the newborns last since their ids
+are highest) then insolvency — over the merged list; the age increment
+and score reset then also cover surviving newborns. CONSEQUENCE decided
+here: a surviving `birth_first` newborn enters its first played
+generation at age 1, its lifetime coin sequence p(0), p(1), ... starting
+one boundary earlier than a `death_first` newborn's — one extra exposure,
+which is exactly Hammond & Axelrod's ordering, kept deliberately faithful
+so their results remain reproducible (owner-confirmed 2026-08-05).
+Alternative rejected: keeping newborns out of the increment, which would
+make them face p(0) twice — a doubled exposure no model in the lineage
+has. Under async the parameter is never read; under sync imitation no
+boundary of deaths and births exists, so it is consumed nowhere there
+(the greying that expresses "live under all sync, greyed under async" is
+Phase E's predicate table). FORWARD NOTE, recorded so the option stays
+findable: a sub-toggle letting newborns SKIP the age-mortality coin in
+their birth round was raised by the owner and deliberately NOT built —
+if H-A fidelity ever needs relaxing, that is the knob to add, with its
+own DECISIONS entry.
+
+**#132 — 2026-08-06 — Design 7 as implemented: the `fixed_n` breeder and
+victim draws localise through the birth kernel; R = 1 recovers Ohtsuki
+exactly; sync imitation's comparison partner stays GLOBAL on scope
+grounds, handed to M12 (M11a Phase C; resolves the spec's Open Question
+1).** Under `death_birth` + lattice the victim draw is untouched (global,
+per `fixed_n_death_rule`) and the BREEDER draw is substituted in place:
+candidates are the freed site's occupied sites within the birth kernel
+(`birth_radius`/`birth_decay` — under full occupancy, every site within
+reach), weighted `exp(−β·d) × (e_i − min(e))` via `neighbourhood_sample`'s
+`site_weights` hook — the #63 shift computed over the CANDIDATE set and
+applied BEFORE the multiplication, uniform fallback on the COMBINED
+vector, #112(b) partial-zero clamp semantics. At R = 1 every candidate
+sits at distance 1, the kernel factors cancel out of the normalisation,
+and the draw reduces EXACTLY to fitness-proportional over the neighbours
+— the Ohtsuki corner, pinned by a draw-for-draw test against a plain #63
+roulette over the neighbour set. Under `birth_death` + lattice the
+breeder draw is untouched (global fitness-proportional) and the VICTIM
+localises to the breeder's neighbours within the birth kernel:
+`pure_random` becomes one kernel draw (uniform over the neighbours at
+β = 0), `energy_decides` stays deterministic and draws nothing (poorest
+candidate, ties to lowest id — the #80 active-flag idiom carried over).
+Both are SUBSTITUTIONS — same position, same single draw, changed
+candidate set and weights — so neither Moran rule gains or loses a draw
+(spec Design 9), and the newborn always takes the freed site: under the
+N = site-count validator full occupancy makes site recycling the only
+possible placement (Design 1), so no placement draw exists in `fixed_n`.
+THE EXPLICIT DECLINE, stated as the spec's docs obligations require:
+synchronous IMITATION's `SelectionRule` comparison partner remains drawn
+from the WHOLE population under a lattice — a scope-grounds decline, not
+an omission (making imitation local is a genuine mechanism change to the
+stable sync selection path, and M12 reopens imitation anyway for
+in-group/out-group spread; the same shape as #110's
+examined-not-triggered checkpoint). `structure.kind`'s `lattice` help
+text says so where the choice is made.
+
+**#133 — 2026-08-06 — The Phase C RNG contract as implemented: the
+contest permutation is drawn under the three-way gate REGARDLESS of the
+contest setting, applies to the id-ordered admitted list, and the
+placement kernel draw is data-conditional; blocked parents travel as a
+LIVE-only event field; the golden masters pin an explicit field list
+(M11a Phase C; amends #80 per #107, the spec's Design 9 diff).**
+(a) THE PERMUTATION. Drawn whenever synchronous + lattice +
+`energy_economy` holds — the inventory's gate — even under
+`placement_contest = energy_priority`, where its result is unused: gating
+it on the contest CHOICE would make the stream depend on a widget that
+only reorders iteration, and Design 6's draw-unconditionally fork already
+settled that trade (a wasted draw costs nothing; a stream that shifts
+with a setting costs debugging afternoons). It applies to the admitted
+set listed in ASCENDING PARENT-ID order (principle 5) — never to the
+energy-sorted admission list, the #107 trap the three-orderings fixture
+pins (all three orders pairwise different; iteration follows the
+permutation alone under `random`, energy-descending under
+`energy_priority`, parent-id ascending with the gate off). Numpy fact
+recorded for the contract's honesty: `Generator.permutation` at sizes 0
+and 1 advances no bit-generator state (probed on numpy 2.5), so the
+"call always happens" contract is physically a no-op in generations that
+admit fewer than two parents — the counting-wrapper pins count CALLS,
+not state movement. (b) THE PLACEMENT DRAW. One `neighbourhood_sample`
+draw per iterated parent, over the empty sites within the birth kernel
+of the parent's own site; when NO eligible site is in reach the
+primitive returns empty BEFORE drawing, so a blocked parent consumes no
+RNG — the draw count is a deterministic function of the occupancy
+history, the #26 data-conditional precedent (threshold_cloning), not a
+reproducibility hazard. Blocked means: no stake, no μ draw, eligible
+next period (async: refractory anchor untouched). (c) THE BLOCKED
+CHANNEL. `GenerationReport`/`GenerationFinished` gain
+`blocked_parents: int = 0` — populated by the sync economy per
+generation and by async `variable_n` per recording window — and the app
+shows it as a live Economy metric (`ECONOMY_HELP["blocked_parents"]` is
+the §12 single source). Deliberately NOT persisted: recorded folders
+stay byte-identical (the #82/#100 additive-field precedent), and
+persisting would widen `timeseries.parquet` with a column meaningless
+for every non-lattice run (#47c's shape). A later milestone can promote
+it with schema thought; the results browser therefore does not show it.
+(d) THE GOLDEN TECHNIQUE. Four negative goldens (sync imitation, sync
+economy, async `variable_n`, async `fixed_n`; all well-mixed) were
+captured from the PRE-Phase-C engine and three positive goldens (#128)
+from the finished one, each at two grains: a round-granularity
+event-stream digest over an EXPLICIT per-event-type field list (so an
+additive default-valued field cannot break a pin, while any changed
+value inside the pinned fields does), and a content-grain run-folder
+digest (parquet values in canonical CSV; summary.json minus its volatile
+fields) that EXCLUDES `config.yaml` — the file legitimately grows a line
+per newly registered parameter, as it did at M10a/M10b — with the
+recorded config covered instead by a reload-and-re-run-to-the-pinned-
+stream assertion. (e) TEST RETIREMENTS, per the Phase B baton and
+#120(f)'s retire-with-replacement rule: `test_results.py::
+test_newborns_have_no_site_in_phase_b` failed on Phase C's arrival
+exactly as predicted and is replaced by
+`test_newborns_carry_real_sites_from_birth` (the inverted assertion,
+plus round-trip); `test_layouts.py::
+test_a_deterministic_lattice_run_matches_the_well_mixed_stream` did NOT
+fail — recorded honestly: its fixture was an IMITATION run, and
+imitation has no births for local birth to touch — but is retired
+anyway, because the general claim its name and docstring pinned
+("a deterministic-layout lattice run matches its well-mixed twin") is
+false as of Phase C for economy runs; the surviving imitation corner is
+asserted more sharply by the no-draw pin (zero contest draws under sync
+imitation + lattice) and the golden masters.
+
+**#134 — 2026-08-06 — Carrying capacity becomes the third derived
+default: blank K = the lattice's site count, or 200 in a well-mixed
+world; the K-family validators land, including an N ≤ site-count check
+the spec did not list (M11a Phase C; #106's design, #78's idiom).**
+`dynamics.carrying_capacity` is now nullable with a BLANK registry
+default, so the untouched panel's zero-effort path on a lattice is "the
+grid decides" (K = site count) exactly as Design 1 requires. Blank in a
+WELL-MIXED world resolves to 200 — the old registry default, kept as the
+aspatial fallback so every existing config and every untouched
+well-mixed panel behaves identically to pre-Phase-C (hard rule 8; old
+YAMLs stored explicit numbers and never notice). Alternative rejected:
+a validation error for blank-K-without-a-lattice — an error where a
+sensible resolution exists contradicts the derived-default philosophy
+(#112(a)'s reasoning). The resolution is a pure free function
+(`resolve_carrying_capacity`, the `resolve_initial_energy` pattern)
+running in the same experiment-level before-validator as the lattice
+dimensions — dimensions first, K off their result — and `config.yaml`
+always stores a plain number. VALIDATORS: K ≤ site count when K is
+consumed (the grid is the outer bound, K an optional inner one; error
+names both numbers); `fixed_n` + lattice requires N = site count exactly
+(full occupancy is what makes site recycling the only possible Moran
+placement; the message says why); and — an EXTENSION beyond the spec's
+list, recorded as such — N ≤ site count for every evolution-mode lattice
+run, because without it an imitation-mode overfull grid still surfaced
+as a raw founding-time error inside the engine, and #126's discipline
+(no reachable traceback for a configuration mistake) covers imitation
+runs too; nothing previously RUNNABLE becomes illegal, since such
+configs crashed at founding. ORDERING: the three lattice checks are
+defined AFTER the #126 layout-file validator, so a from-file config
+whose numbers disagree gets the message that knows about the one-click
+populate button rather than a generic size complaint. Consequences
+absorbed in tests: the #121 regression pin now sets K = 200 explicitly
+(the defect state is no longer constructible from the default, which is
+the fix working); the lattice persistence fixture pins K = 9 on its 3×3
+grid (its inherited well-mixed K = 40 would no longer reload).
+
+**#135 — 2026-08-06 — `site_capacity`: the field shipped pinned at 1 in
+Phase A; the knob is M19's — recorded now with its three deferred
+questions, closing a Phase A/B documentation gap (spec Design 12's
+mandatory record).** The `Site` record has carried a `capacity` field
+since Phase A, validated equal to 1 (`SITE_CAPACITY`), and the placement
+seam reads `occupants < capacity` — so M19's capacity-above-1 is a
+registry entry plus the removal of one validator, never a migration of
+the seam (#104's forward-guard). No registry parameter exists because a
+widget with exactly one legal value cannot be operated. The deferral is
+not on effort grounds: capacity > 1 forces three questions M11a has no
+answers to, recorded verbatim so M19 inherits them — (1) what the reach
+kernel does at distance zero (co-residents sit at d = 0, and
+exp(−β·0) = 1 is the MAXIMUM weight for every β — allowing capacity > 1
+without confronting this would smuggle in "housemates are always the
+most-preferred partners" as an arithmetic side-effect); (2) what colour
+a cell holding one cooperator and one defector is (blending softens
+cluster boundaries — the very signal the Hammond–Axelrod story is
+about — so M19 likely wants both a blended and a dominant-strategy
+view); (3) what k IS when neighbourhood size becomes
+occupancy-dependent and changes every generation, which costs the
+b/c > k comparison its fixed reference point. ROADMAP's M19 entry now
+carries the explicit registration task line (also added this session —
+the same gap). This entry should have been written with #112; logged
+now rather than silently backfilled.
+
+**#136 — 2026-08-06 — The live run view renders the CURRENT occupancy
+from the latest snapshot (M11a Phase C; Design 10's "the snapshot is the
+render state" made literal, and the piece V5 needs to be watchable).**
+Phase B's renderer shows the FOUNDING arrangement — the panel preview and
+the results browser replay generation 0 from (config, seed), which is
+right for them. But V5 asks the owner to WATCH the occupied region drift
+under a K below the site count, and nothing displayed occupancy after
+generation 0. ADDED: during a live lattice run whose periods carry
+per-agent snapshots (sync economy; async both modes), the run area
+redraws the grid from the latest period's `site_id`/strategy pairs on
+the same wall-clock-throttled cadence as the charts (#94), reusing the
+existing `grid_chart`. Imitation runs have empty snapshots and keep the
+founding preview — correct, since nothing moves after founding (#116).
+No new machinery: the snapshot was designed as the render state (Design
+10/#120(b)); this is the first consumer to read it live. The results
+browser is unchanged (it still shows founding — rendering a recorded
+run's FINAL occupancy from `agents.parquet` is a nicety deferred to
+Phase E with the rest of the rendering polish).

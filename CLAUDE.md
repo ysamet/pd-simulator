@@ -247,13 +247,21 @@ plus the registry's Structure geometry block, wired to no engine code —
 landed 2026-08-01 (#112). **Phase B** — occupancy, founding via the seven
 initial layouts plus the layout file, the two registry entries, site-id
 persistence at schema 5, and the grid renderer — landed 2026-08-03
-(#116-#120); VT-2 and VT-3 are answered there, along with #114's
-shifted-weight measurement. After Phase B structure exists and is visible
-but **nothing reads it**: behaviour is unchanged and a lattice run with a
-deterministic layout still matches its well-mixed twin. Next up:
-**Phase C — local birth, the riskiest phase** (`place_offspring` becomes
-structure-aware; `birth_radius`/`birth_decay`; `placement_contest`;
-`boundary_order`; VT-4; the stake-plus-overhead validation fix from the
-spec's phase-task ledger; the blocked-parents Economy readout; the
-Design 9 RNG amendments and golden masters). Design everything to not
-block the v2/v3 extensions listed in `docs/DESIGN.md` §6.
+(#116-#120, follow-ups #121-#126); VT-2 and VT-3 are answered there.
+**Phase C — local birth — landed 2026-08-06 (#127-#136)**: occupancy is
+LIVE in all three engines (death frees a site, birth occupies one,
+newborn `site_id` real from birth); the amended #80 birth step (contest
+permutation under the three-way gate, kernel placement, place-before-pay
+live, blocked parents counted and shown live in the app);
+`birth_radius`/`birth_decay`/`placement_contest`/`boundary_order`; K's
+site-count derived default plus the K-family validators; the
+stake+overhead fix (#129); the localised `fixed_n` breeder/victim draws
+with the R = 1 Ohtsuki reduction (#132); VT-4 runtime-confirmed (#130);
+four negative + three positive golden masters and the counting-wrapper
+no-draw pins (#133 — the fourth positive golden is Phase D's, #128).
+Next up: **Phase D — local interaction** (`matching.spatial_interaction`;
+`interaction_radius`/`interaction_decay`; the `SpatialKernel(Matcher)`
+sync adapter; the async partner draw through the same primitive; the k
+clamp; the matcher.py docstring correction; VT-6(b); the fourth positive
+golden). Design everything to not block the v2/v3 extensions listed in
+`docs/DESIGN.md` §6.

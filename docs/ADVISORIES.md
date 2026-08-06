@@ -67,6 +67,11 @@ together rather than one retrofitted into the other.
 
 ## Not an advisory
 
+**Status: DISCHARGED 2026-08-06 (M11a Phase C, DECISIONS #129).** The
+validator now checks the sum, the message names all three quantities, and no
+shipped scenario or fixture violated the tightened rule. Kept below for the
+record only.
+
 **Reproduction threshold below stake plus overhead.** This is a hard invariant
 with a documented guarantee attached — the parent-survives-its-own-reproduction
 property — not a judgement call. The existing validator checks

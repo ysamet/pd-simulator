@@ -221,6 +221,15 @@ class GenerationFinished:
             honest "this run has no event-time clock" (and the M10a
             additive-field precedent: synchronous payloads stay
             byte-identical).
+        blocked_parents: How many admitted parents failed the LOCAL
+            placement gate this period (M11a Phase C, spec Design 4):
+            cleared the capacity gate, found no empty site within the
+            birth kernel's reach, paid nothing, and stay eligible. Always
+            0 without a lattice (well-mixed placement never fails), and 0
+            under imitation and ``fixed_n`` (no θ-births exist there). A
+            LIVE readout for the Economy panel — deliberately not
+            persisted (the additive-field precedent again: recorded
+            folders are unchanged).
     """
 
     index: int
@@ -230,6 +239,7 @@ class GenerationFinished:
     cooperation: dict[tuple[str, str], tuple[float, int]] = field(default_factory=dict)
     agents: tuple[AgentSnapshot, ...] = ()
     gen_equiv_time: float | None = None
+    blocked_parents: int = 0
 
 
 @dataclass(frozen=True, slots=True)

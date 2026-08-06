@@ -51,23 +51,43 @@ any change is a breaking change requiring a DECISIONS entry):
          age-mortality is active (the #80 active-flag idiom), one
          ``rng.random()`` per agent whose integer age crossed this event,
          in ascending id order, unconditional even at p = 0 or 1;
-         (b) age-cap and insolvency deaths — deterministic, no RNG;
-         (c) births — ``admit_births`` (RNG-free, energy priority), then
-         one μ-mutation draw per admitted parent in ascending PARENT-id
-         order (the #80 two-orderings contract, verbatim: admission
-         decides *the set* by energy priority; id order is the RNG
-         contract).
+         (b) age-cap and insolvency deaths — deterministic, no RNG (each
+         death vacates its site when the run has a lattice — M11a Phase
+         C); (c) births — ``admit_births`` (RNG-free, energy priority),
+         then per admitted parent in ascending PARENT-id order (the #80
+         two-orderings contract, verbatim): ON A LATTICE, the placement
+         kernel draw via ``neighbourhood_sample`` over the empty sites
+         within the birth kernel — an empty result means the parent is
+         BLOCKED: no stake, refractory anchor untouched, eligible again
+         next event (M11a Phase C, the amended-#99 insertion; without a
+         lattice no such draw exists) — then one μ-mutation draw. No
+         contest permutation exists here: async resolves births one
+         event at a time, in id order (Design 5's confinement).
        - ``fixed_n``: (a) the rule roll — only when
          ``moran_rule = "random"``: one ``rng.random()`` against the
          normalised birth-death weight, the FIRST demographic draw of the
-         event; (b) per the selected rule — ``death_birth``: death draw
-         (one ``rng.integers`` over the living population — only under
-         ``pure_random``; ``energy_decides`` is deterministic and draws
-         nothing) → fitness-proportional breeder draw (one ``rng.choice``
-         over the remaining candidates, the #63 shift idiom) → μ-mutation
-         draw(s); ``birth_death``: fitness-proportional breeder draw over
-         everyone → victim draw (one ``rng.integers`` over the others —
-         only under ``pure_random``) → μ-mutation draw(s).
+         event, pinned and untouched by M11a; (b) per the selected rule —
+         ``death_birth``: death draw over the WHOLE living population
+         (one ``rng.integers`` — only under ``pure_random``;
+         ``energy_decides`` is deterministic and draws nothing) →
+         fitness-proportional breeder draw — well-mixed: one
+         ``rng.choice`` over the remaining candidates (the #63 shift
+         idiom); ON A LATTICE the same-position draw is SUBSTITUTED
+         (M11a Phase C, Design 7): candidates are the freed site's
+         occupied neighbours within the BIRTH kernel, weighted
+         ``exp(−β·d) × shifted-fitness`` (the #63 shift over the
+         candidate set, applied before the multiplication; uniform
+         fallback on the combined vector; #112(b) partial-zero clamp) —
+         → μ-mutation draw(s); ``birth_death``: fitness-proportional
+         breeder draw over everyone (unchanged) → victim draw — well
+         mixed: one ``rng.integers`` over the others (only under
+         ``pure_random``); ON A LATTICE the victim localises to the
+         breeder's neighbours within the birth kernel (``pure_random``:
+         one kernel draw; ``energy_decides``: deterministic poorest
+         neighbour, ties to lowest id, no draw) — → μ-mutation draw(s).
+         The newborn always takes the freed site — under full occupancy
+         (N = site count, validated) it is the only empty site, so site
+         recycling is the only possible Moran placement (Design 1).
 
     6. clock arithmetic, recording, and period emission — no RNG (#35).
 
@@ -132,6 +152,7 @@ from pdsim.core.reproduction import StrategySwitchReproduction
 # copy that could drift from it.
 from pdsim.core.selection import _logistic
 from pdsim.core.strategies import strategy_name_of
+from pdsim.core.structure import SiteId, neighbourhood_sample, sites_within
 
 _EPS = 1e-9
 """Float tolerance for clock comparisons.
@@ -195,9 +216,20 @@ class AsyncDynamics:
             agent.parent_id = None
         self._population = founders
         # Founding placement (M11a Phase B): once per run, before the clock
-        # starts, and gated so a well-mixed run draws nothing. Occupancy is
-        # not maintained by the demographic events yet — Phase C does that.
+        # starts, and gated so a well-mixed run draws nothing. Live since
+        # Phase C: every death vacates its site and every birth occupies
+        # one, so the mapping always describes the living population.
         self._occupancy = found_population(config, founders, rng)
+        # The Phase C birth kernel (read only on a lattice). Under
+        # variable_n it bounds where a newborn can land; under fixed_n it
+        # defines the COMPETITOR SET for a freed seat (Design 7) — which is
+        # the k the b/c > k threshold counts.
+        self._birth_radius = config.structure.birth_radius
+        self._birth_decay = config.structure.birth_decay
+        # Blocked parents this recording window (Design 4): cleared the
+        # global gate, found no site in reach. variable_n only — fixed_n
+        # never blocks (the freed site always exists).
+        self._window_blocked = 0
         # Monotonic passport counter (M10a): ids are never reused.
         self._next_id = len(founders)
         # The generation-equivalent clock (spec Design 5) and event counter.
@@ -524,6 +556,9 @@ class AsyncDynamics:
             )
             del self._birth_time[agent.agent_id]
             del self._breeding_anchor[agent.agent_id]
+            if self._occupancy is not None:
+                # Phase C: death frees a site the next birth can take.
+                self._occupancy.remove_agent(agent.agent_id)
         self._population = survivors
 
     def _births(self) -> None:
@@ -536,6 +571,15 @@ class AsyncDynamics:
         placement-check → σ+overhead payment → passport id → μ-mutation
         draw (the #80 two-orderings contract, verbatim; placement is
         checked BEFORE the stake is paid).
+
+        On a lattice the placement check is the same kernel draw the
+        synchronous birth step makes (M11a Phase C, the amended-#99
+        insertion): one ``neighbourhood_sample`` over the empty sites
+        within the birth kernel of the parent's own site. An empty result
+        means the parent is BLOCKED — no stake leaves it, its refractory
+        anchor is untouched, and it tries again next event. No contest
+        permutation exists here: births resolve one event at a time, in id
+        order (Design 5's confinement, pinned by the no-draw tests).
         """
         dynamics = self._dynamics
         eligible = [
@@ -548,8 +592,26 @@ class AsyncDynamics:
         admitted = admit_births(eligible, slots)
         newborns: list[Agent] = []
         for parent in sorted(admitted, key=lambda agent: agent.agent_id):
-            if not place_offspring(self._population, parent):
-                continue
+            if self._occupancy is None:
+                if not place_offspring(self._population, parent):
+                    continue
+                site_id: SiteId | None = None
+            else:
+                origin = self._occupancy.site_of(parent.agent_id)
+                assert origin is not None  # every living agent holds a site
+                drawn = neighbourhood_sample(
+                    self._occupancy.structure,
+                    origin,
+                    radius=self._birth_radius,
+                    decay=self._birth_decay,
+                    size=1,
+                    rng=self._rng,
+                    eligible=self._occupancy.empty_sites(),
+                )
+                if not drawn:
+                    self._window_blocked += 1
+                    continue
+                site_id = drawn[0]
             parent.energy -= dynamics.offspring_stake + dynamics.reproduction_overhead
             self._breeding_anchor[parent.agent_id] = self._time
             child_id = self._next_id
@@ -565,6 +627,8 @@ class AsyncDynamics:
                     parent_id=parent.agent_id,
                 )
             )
+            if site_id is not None and self._occupancy is not None:
+                self._occupancy.occupy(site_id, child_id)
             self._birth_time[child_id] = self._time
             self._breeding_anchor[child_id] = self._time
             self._pending.append(
@@ -595,12 +659,21 @@ class AsyncDynamics:
         - ``death_birth``: the victim is selected from the whole living
           population (per ``fixed_n_death_rule``) and dies with cause
           ``"random_moran"`` (the cause names the Moran death SLOT, not
-          the selection rule); the remaining population competes
-          fitness-proportionally for the emptied seat.
+          the selection rule); then the competition for the emptied seat —
+          fitness-proportional over the remaining population well-mixed,
+          or, on a lattice (M11a Phase C, Design 7), over the FREED SITE's
+          occupied neighbours within the birth kernel, weighted
+          ``exp(−β·d) × shifted-fitness``.
         - ``birth_death``: the breeder is drawn fitness-proportionally
           from the whole population; its offspring replaces one of the
-          OTHER agents (per ``fixed_n_death_rule``), cause
-          ``"replacement"``.
+          OTHER agents — per ``fixed_n_death_rule`` well-mixed, or, on a
+          lattice, one of the breeder's neighbours within the birth
+          kernel — cause ``"replacement"``.
+
+        Each lattice localisation is a SUBSTITUTION: the same-position
+        draw with a changed candidate set and weights, so neither rule
+        gains or loses a draw (spec Design 9). The newborn always takes
+        the freed site — the only empty one under full occupancy.
 
         In both orders the death precedes the birth in occurrence (the
         seat empties, then fills), so the period buffer records death
@@ -616,15 +689,29 @@ class AsyncDynamics:
             bd_share = weight_bd / (weight_bd + weight_db)
             rule = "birth_death" if self._rng.random() < bd_share else "death_birth"
         if rule == "death_birth":
+            # Victim draw UNCHANGED by M11a: global, per fixed_n_death_rule.
             victim = self._select_victim(self._population)
-            self._remove_agent(victim, cause="random_moran")
-            parent = self._proportional_parent(self._population)
+            freed_site = self._remove_agent(victim, cause="random_moran")
+            if freed_site is None:
+                parent = self._proportional_parent(self._population)
+            else:
+                # The Design 7 substitution: the freed site's neighbours
+                # within the birth kernel compete — the Ohtsuki picture.
+                parent = self._localised_breeder(freed_site)
         else:
+            # Breeder draw UNCHANGED by M11a: global, fitness-proportional.
             parent = self._proportional_parent(self._population)
-            others = [agent for agent in self._population if agent.agent_id != parent.agent_id]
-            victim = self._select_victim(others)
-            self._remove_agent(victim, cause="replacement")
-        self._moran_birth(parent)
+            if self._occupancy is None:
+                others = [a for a in self._population if a.agent_id != parent.agent_id]
+                victim = self._select_victim(others)
+            else:
+                # The Design 7 substitution: the offspring displaces one of
+                # the breeder's neighbours within the birth kernel (the
+                # candidate sites exclude the breeder's own, so the breeder
+                # can never replace itself — #97(c)'s rule, kept).
+                victim = self._localised_victim(parent)
+            freed_site = self._remove_agent(victim, cause="replacement")
+        self._moran_birth(parent, freed_site)
 
     def _select_victim(self, candidates: list[Agent]) -> Agent:
         """Pick the dying agent per ``fixed_n_death_rule`` (spec Design 3).
@@ -668,13 +755,17 @@ class AsyncDynamics:
         probabilities = [weight / total for weight in weights] if total > 0 else None
         return candidates[int(self._rng.choice(len(candidates), p=probabilities))]
 
-    def _remove_agent(self, victim: Agent, cause: str) -> None:
+    def _remove_agent(self, victim: Agent, cause: str) -> SiteId | None:
         """Remove one agent from the population, recording its death.
 
         Args:
             victim: The agent to remove.
             cause: The :class:`DeathEvent` cause (``"random_moran"`` or
                 ``"replacement"`` — the fixed_n taxonomy).
+
+        Returns:
+            The site the victim vacated (Phase C: death frees a site), or
+            ``None`` in a well-mixed run.
         """
         self._population = [
             agent for agent in self._population if agent.agent_id != victim.agent_id
@@ -689,8 +780,101 @@ class AsyncDynamics:
                 gen_equiv_time=self._time,
             )
         )
+        if self._occupancy is not None:
+            return self._occupancy.remove_agent(victim.agent_id)
+        return None
 
-    def _moran_birth(self, parent: Agent) -> None:
+    def _localised_breeder(self, freed_site: SiteId) -> Agent:
+        """Draw the breeder from the freed site's neighbourhood (Design 7).
+
+        The Design 9 SUBSTITUTION for :meth:`_proportional_parent` under
+        ``death_birth`` on a lattice: candidates are the freed site's
+        OCCUPIED sites within the birth kernel (under full occupancy that
+        is every site within reach), and the weight on each is
+        ``exp(−β·d) × (e_i − min(e))`` — the kernel's distance factor
+        times the #63 non-negative shift, the shift computed over the
+        CANDIDATE set and applied BEFORE the multiplication, with the
+        uniform fallback firing on the COMBINED vector and #112(b)'s
+        partial-zero clamp semantics via ``neighbourhood_sample``. At
+        R = 1 every candidate sits at the same distance, so the distance
+        factors cancel and the draw reduces EXACTLY to
+        fitness-proportional over the neighbours — Ohtsuki's setting
+        recovered as a corner, not approximated (pinned by test).
+
+        Args:
+            freed_site: The site the victim just vacated.
+
+        Returns:
+            The neighbouring agent that wins the seat.
+        """
+        occupancy = self._occupancy
+        assert occupancy is not None  # only called on the lattice path
+        structure = occupancy.structure
+        candidate_sites = tuple(
+            site
+            for site in sites_within(structure, freed_site, self._birth_radius)
+            if occupancy.is_occupied(site)
+        )
+        by_id = {agent.agent_id: agent for agent in self._population}
+        occupants = {site: by_id[occupancy.agent_at(site)] for site in candidate_sites}
+        floor = min(agent.energy for agent in occupants.values())
+        site_weights = {site: agent.energy - floor for site, agent in occupants.items()}
+        drawn = neighbourhood_sample(
+            structure,
+            freed_site,
+            radius=self._birth_radius,
+            decay=self._birth_decay,
+            size=1,
+            rng=self._rng,
+            eligible=frozenset(candidate_sites),
+            site_weights=site_weights,
+        )
+        return occupants[drawn[0]]
+
+    def _localised_victim(self, breeder: Agent) -> Agent:
+        """Pick the victim from the breeder's neighbourhood (Design 7).
+
+        The Design 9 SUBSTITUTION for :meth:`_select_victim` under
+        ``birth_death`` on a lattice: the candidate set is the breeder's
+        occupied sites within the birth kernel (never its own site — the
+        breeder cannot replace itself, #97(c)). ``pure_random`` becomes
+        one kernel draw, distance-weighted by ``exp(−β·d)`` (uniform over
+        the neighbours at β = 0); ``energy_decides`` stays deterministic
+        and draws nothing — the poorest candidate, ties to the lowest id —
+        exactly the #80 active-flag idiom the well-mixed rule follows.
+
+        Args:
+            breeder: The agent whose offspring displaces a neighbour.
+
+        Returns:
+            The neighbouring agent to die.
+        """
+        occupancy = self._occupancy
+        assert occupancy is not None  # only called on the lattice path
+        structure = occupancy.structure
+        origin = occupancy.site_of(breeder.agent_id)
+        assert origin is not None  # every living agent holds a site
+        candidate_sites = tuple(
+            site
+            for site in sites_within(structure, origin, self._birth_radius)
+            if occupancy.is_occupied(site)
+        )
+        by_id = {agent.agent_id: agent for agent in self._population}
+        occupants = {site: by_id[occupancy.agent_at(site)] for site in candidate_sites}
+        if self._dynamics.fixed_n_death_rule == "pure_random":
+            drawn = neighbourhood_sample(
+                structure,
+                origin,
+                radius=self._birth_radius,
+                decay=self._birth_decay,
+                size=1,
+                rng=self._rng,
+                eligible=frozenset(candidate_sites),
+            )
+            return occupants[drawn[0]]
+        return min(occupants.values(), key=lambda agent: (agent.energy, agent.agent_id))
+
+    def _moran_birth(self, parent: Agent, freed_site: SiteId | None) -> None:
         """Fill the emptied seat with the breeder's offspring (fixed_n).
 
         The Option B seam holds in fixed_n too: the structural gate is
@@ -700,10 +884,17 @@ class AsyncDynamics:
         unconditionally — even into a negative balance, legal here — and
         the newborn starts at σ with a fresh passport id, ``parent_id``
         set, empty histories, and the μ-mutation draw via the registry's
-        unchanged semantics (μ applies to economy newborns).
+        unchanged semantics (μ applies to economy newborns). On a lattice
+        the newborn takes the FREED site — under full occupancy
+        (N = site count, validated) it is the only empty one, so site
+        recycling is the only possible Moran placement (Design 1); no
+        placement draw exists here.
 
         Args:
-            parent: The breeder selected by :meth:`_proportional_parent`.
+            parent: The breeder (global draw well-mixed; the localised
+                neighbourhood draw on a lattice).
+            freed_site: The site the victim vacated, or ``None`` in a
+                well-mixed run.
         """
         dynamics = self._dynamics
         if not place_offspring(self._population, parent):
@@ -720,6 +911,8 @@ class AsyncDynamics:
             age=0,
             parent_id=parent.agent_id,
         )
+        if freed_site is not None and self._occupancy is not None:
+            self._occupancy.occupy(freed_site, child_id)
         self._birth_time[child_id] = self._time
         self._breeding_anchor[child_id] = self._time
         self._pending.append(
@@ -784,11 +977,13 @@ class AsyncDynamics:
             agents=agents,
             gen_equiv_time=self._time,
             demographic_events=tuple(self._pending),
+            blocked_parents=self._window_blocked,
         )
         self._period += 1
         self._window_payoff = {}
         self._window_rounds = {}
         self._window_cooperation = _CooperationTally()
         self._window_events = 0
+        self._window_blocked = 0
         self._pending = []
         return report

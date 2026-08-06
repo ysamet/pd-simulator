@@ -202,26 +202,42 @@ for an agent's whole life** (an economy agent is a persistent creature; the
 reset per generation. GrimTrigger is lifetime-grim; `memory_depth` is the
 history-copy cost bound.
 
-The boundary sequence (`EconomyDynamics.step()`, frozen in DECISIONS #80):
+The boundary sequence (`EconomyDynamics.step()`, frozen in DECISIONS #80;
+amended by M11a Phase C per #107 — the amendment gated so every well-mixed
+run is byte-identical to its pre-M11a stream, pinned by golden masters):
 match phase (unchanged) → report-as-played → **energy update**
-(`e ← e·(1+r) + score − L − engagement·matches`, deterministic) → **age
-mortality** (one coin per living agent in ascending id order, only when the
-mortality trio is active) → **insolvency deaths** (`e < 0`, strictly
-negative, deterministic) → **births** (eligible at `e ≥ θ`; free seats
+(`e ← e·(1+r) + score − L − engagement·matches`, deterministic) → the
+**death phase** (age mortality: one coin per living agent in ascending id
+order, only when the mortality trio is active; then insolvency deaths,
+`e < 0`, strictly negative, deterministic — each death vacates its site
+on a lattice) and the **birth phase** (eligible at `e ≥ θ`; free seats
 under carrying capacity K filled by energy-priority admission, RNG-free;
-ids and μ-draws assigned in parent-id order; parent pays σ + overhead,
-child starts at σ) → age increment → score-only reset → per-agent snapshot
-of the post-boundary population. Deaths precede births (a deliberate
-deviation from Hammond–Axelrod's period order, #80). All births and deaths
-are computed against one frozen end-of-generation snapshot — the
-generation stays atomic. Mortality: hazard `base_hazard ×
-senescence_factor^age` capped at 1, plus a hard `max_age`; founder ages are
-staggered to the steady-state distribution when age-mortality is active.
+then per parent — in parent-id order well-mixed, in the contest order
+under sync + lattice + economy (#107/#133): the placement check, which on
+a lattice is one kernel draw over the empty sites within the birth
+radius and can FAIL — a blocked parent pays nothing and stays eligible
+(Design 4's two gates; #133) — then σ + overhead payment, passport id,
+μ-draw, and site occupation; child starts at σ) — the two phases in the
+order `dynamics.boundary_order` picks: `death_first` (the #80 default;
+deaths free room, survivors breed into it) or `birth_first`
+(Hammond–Axelrod's order: births are rationed against the pre-death
+population, so fewer are admitted — VT-4, runtime-confirmed #130 — and
+newborns face the death phase in their birth round, #131) → age
+increment → score-only reset → per-agent snapshot of the post-boundary
+population. All births and deaths are computed against one frozen
+end-of-generation snapshot — the generation stays atomic. Mortality:
+hazard `base_hazard × senescence_factor^age` capped at 1, plus a hard
+`max_age`; founder ages are staggered to the steady-state distribution
+when age-mortality is active.
 
-Derived defaults (the registry's first, DECISIONS #78): `initial_energy`
-blank = the offspring stake; `senescence_factor` blank = the value reaching
-certain death exactly at `max_age`. Both resolve to plain numbers at config
-validation, so stored `config.yaml` files never contain the auto rule.
+Derived defaults (DECISIONS #78): `initial_energy` blank = the offspring
+stake; `senescence_factor` blank = the value reaching certain death
+exactly at `max_age`; `carrying_capacity` blank = the lattice's site
+count, or 200 in a well-mixed world (#134). All resolve to plain numbers
+at config validation, so stored `config.yaml` files never contain the
+auto rule. The reproduction validator requires
+`offspring_stake + reproduction_overhead ≤ reproduction_threshold`
+(#129), so a parent always survives its own reproduction.
 
 Under variable N, `random_k` clamps its draw to `min(k, N−1)` — a no-op in
 every fixed-N regime, so pre-M10a seeded histories are untouched (#81); a
@@ -409,7 +425,32 @@ option: under a lattice the ordering is no longer a phase offset but a
 different model, because it decides whether newborns fill scattered
 interior graves (deaths-first) or only frontier cells (births-first) — and
 the frontier is where the ethnocentrism mechanism lives. Greyed under
-async, which has no boundary to order.
+async, which has no boundary to order. As implemented (#131, #133): the
+contest permutation is drawn whenever the three-way gate holds regardless
+of the contest setting (so flipping the widget never shifts the stream),
+it applies to the ID-ORDERED admitted list — never the energy-sorted
+admission list — and under `birth_first` newborns go through the death
+phase as full members (coin included; a survivor enters its first played
+generation at age 1), with births rationed against the pre-death
+population (VT-4, runtime-confirmed #130).
+
+**Where the Moran breeder comes from under a lattice** (spec Design 7,
+implemented per #132). The async `fixed_n` draws LOCALISE through the
+BIRTH kernel: under `death_birth` the victim draw stays global and the
+breeder is drawn from the freed site's occupied neighbours within
+`birth_radius`, weighted `exp(−β·d) ×` the #63-shifted energy (shift over
+the candidate set, before the multiplication; uniform fallback on the
+combined vector); under `birth_death` the breeder draw stays global and
+the victim localises to the breeder's neighbours (`pure_random` = one
+kernel draw; `energy_decides` = poorest neighbour, deterministic). Each
+is a SUBSTITUTION — same position, same single draw, changed candidates
+and weights — and the newborn takes the freed site. At R = 1 the distance
+factors cancel and the breeder draw is EXACTLY fitness-proportional over
+the neighbours: Ohtsuki's setting recovered as a corner, which is why the
+birth pair stays live under `fixed_n` — it defines the competitor set
+whose size is the k in b/c > k. Synchronous IMITATION's comparison
+partner stays GLOBAL under a lattice — an explicit scope-grounds decline
+handed to M12, not an omission (#132).
 
 **Local interaction** (#108). `matching.spatial_interaction` (bool,
 default off). Off: today's behaviour, `matching.matcher` picks round_robin
@@ -646,7 +687,11 @@ event-time types M10b added (async runs only — see below):
   PERIOD: one `GenerationFinished` per period under the configured
   recording cadence, its composition/snapshots describing the living
   population at the recording point (#96), and `RunFinished.completed`
-  counting periods (its grain follows the cadence).
+  counting periods (its grain follows the cadence). Since M11a Phase C it
+  also carries `blocked_parents: int` — how many admitted parents failed
+  the local placement gate this period (always 0 off-lattice) — a
+  LIVE-only field feeding the Economy panel's readout, deliberately not
+  persisted (#133).
 - **`BirthEvent` / `DeathEvent` / `ImitationEvent`** (M10b, async only —
   #82/#95): explicit event-time records with `event_index`,
   `gen_equiv_time`, agent identity, and cause (`threshold`/`moran` for

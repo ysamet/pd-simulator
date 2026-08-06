@@ -121,6 +121,10 @@ class RunTimeseries:
         self.demographic_events: list[tuple[DemographicEvent, ...]] = []
         self.mean_energy: dict[str, list[float | None]] = {}
         self.mean_age: dict[str, list[float | None]] = {}
+        # Blocked parents per period (M11a Phase C): a LIVE series only —
+        # the field is not persisted, so a loaded run shows all zeros and
+        # the app reads this series only while streaming.
+        self.blocked_parents: list[int] = []
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -146,6 +150,10 @@ class RunTimeseries:
             self.gen_equiv_times.append(event.gen_equiv_time)
             self.demographic_events.append(tuple(self._pending_demographic))
             self._pending_demographic = []
+            # getattr with a default keeps events rebuilt by older loaders
+            # (which never set the field) loadable — the additive-field
+            # precedent (#82/#100).
+            self.blocked_parents.append(getattr(event, "blocked_parents", 0))
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)
@@ -193,6 +201,7 @@ class RunTimeseries:
             # same length as `periods`, whatever the mode.
             self.gen_equiv_times.append(None)
             self.demographic_events.append(())
+            self.blocked_parents.append(0)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)

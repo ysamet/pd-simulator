@@ -600,9 +600,12 @@ class TestStructurePersistence:
         """Build an economy config on a 3x3 lattice.
 
         Returns:
-            A validated config whose 6 founders occupy 6 of 9 sites.
+            A validated config whose 6 founders occupy 6 of 9 sites. K is
+            pinned to the site count — since Phase C the grid is the outer
+            bound (K ≤ sites, validated), so the well-mixed fixture's
+            K = 40 would no longer reload from its recorded config.
         """
-        config = _economy_config()
+        config = _economy_config(carrying_capacity=9)
         return config.model_copy(
             update={
                 "structure": config.structure.model_copy(
@@ -653,13 +656,16 @@ class TestStructurePersistence:
         ]
         assert placed  # founders carry their sites through the parquet
 
-    def test_newborns_have_no_site_in_phase_b(self, tmp_path: Path) -> None:
-        """The phase's exit condition, recorded honestly rather than papered over.
+    def test_newborns_carry_real_sites_from_birth(self, tmp_path: Path) -> None:
+        """Phase C closed #120(c)'s honest gap: a newborn's site is real.
 
-        Occupancy is founded at generation 0 and then left alone: local
-        birth is Phase C, so an agent born mid-run occupies no site and its
-        site id is null. Pinning it here means Phase C's arrival will show
-        up as this test failing, which is the moment to retire it.
+        This RETIRES ``test_newborns_have_no_site_in_phase_b`` (the #120(f)
+        retire-with-replacement precedent): the world that pin described —
+        occupancy founded at generation 0 and then left alone — ceased to
+        exist when local birth landed. What it protected is now asserted
+        the other way round and end to end: every recorded newborn carries
+        a real site id from the moment it exists, every period's placement
+        stays exclusive, and the record round-trips.
         """
         folder, live = _record(self._lattice_economy_config(), tmp_path)
         newborns = [
@@ -669,7 +675,7 @@ class TestStructurePersistence:
             if snapshot.parent_id is not None
         ]
         assert newborns  # the fixture does breed
-        assert all(snapshot.site_id is None for snapshot in newborns)
+        assert all(snapshot.site_id is not None for snapshot in newborns)
         assert load_run(folder).timeseries.agent_snapshots == live.agent_snapshots
 
     def test_an_imitation_lattice_run_records_no_agents_but_still_declares_5(

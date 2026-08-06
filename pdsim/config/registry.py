@@ -806,6 +806,105 @@ register(
     )
 )
 
+# --- The local-birth knobs (M11a Phase C). The birth pair parameterises the
+# reach kernel for newborn placement — and, under the fixed-size Moran mode,
+# for the competition to fill a freed site (spec Design 7). The contest
+# decides ordering where several synchronous births resolve at once.
+
+register(
+    ParameterSpec(
+        key="structure.birth_radius",
+        kind="int",
+        default=1,
+        minimum=1,
+        nullable=True,
+        label="Birth radius (R)",
+        section="Structure",
+        description=(
+            "How far from its parent a newborn can be placed, in grid "
+            "distance (the neighbourhood shape above decides what distance "
+            "means). At birth, the empty sites within this radius of the "
+            "parent are the candidate homes; if EVERY site in reach is "
+            "occupied, the parent is BLOCKED this round — it pays nothing, "
+            "keeps its energy, stays eligible, and simply tries again next "
+            "generation (the Economy panel counts blocked parents so this "
+            "reads as the mechanism it is, not as a stall). At 1 — the "
+            "default — children land right next to their parents, the "
+            "classic Hammond–Axelrod setting and the one that makes family "
+            "clusters form. Leave empty for unlimited reach: a child can "
+            "then land on any empty site on the grid. IMPORTANT under the "
+            "fixed-size ('fixed_n' Moran) population mode: this radius and "
+            "the decay below define WHO COMPETES to fill a freed site — the "
+            "set of neighbours whose fitness contest decides the "
+            "replacement — which is exactly the neighbour count k that the "
+            "b/c > k cooperation threshold counts. That is why the pair "
+            "stays live under 'fixed_n' even though nobody breeds freely "
+            "there. Ignored under the 'well_mixed' structure."
+        ),
+        learn_more=(
+            "Hammond & Axelrod 2006 place offspring in the immediate "
+            "neighbourhood; Ohtsuki et al. 2006 derive b/c > k, where k "
+            "counts the competitors for a vacated site."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.birth_decay",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        maximum=20.0,
+        label="Birth decay (β)",
+        section="Structure",
+        description=(
+            "How steeply a newborn's placement prefers sites CLOSER to its "
+            "parent, within the birth radius. This is the decay β of the "
+            "reach kernel: a candidate site at distance d is weighted "
+            "exp(−β·d). At 0 — the default — every empty site within the "
+            "radius is equally likely; higher values keep children ever "
+            "closer to home even where the radius technically allows more "
+            "distance. IRRELEVANT at a birth radius of 1: all candidates "
+            "then sit at the same distance, so every β gives the same "
+            "behaviour. Under the fixed-size ('fixed_n' Moran) population "
+            "mode this decay also weights the competition for a freed site "
+            "— nearer neighbours are likelier to win it. Ignored under the "
+            "'well_mixed' structure."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.placement_contest",
+        kind="choice",
+        default="random",
+        choices=("random", "energy_priority"),
+        label="Placement contest",
+        section="Structure",
+        description=(
+            "Who places first when several parents breed at the same "
+            "generation boundary — the order matters on a lattice, because "
+            "an earlier parent can take the last empty site in a "
+            "neighbourhood another parent wanted. 'random' — the default — "
+            "shuffles the admitted parents once and lets each place in "
+            "turn: reproduction order is luck (the Hammond–Axelrod "
+            "convention), so wealth decides only WHO MAY BREED (via the "
+            "reproduction threshold), never who wins contested ground. "
+            "'energy_priority' lets the RICHEST admitted parent place "
+            "first: an advantage that COMPOUNDS spatially — a good "
+            "neighbourhood raises earnings, which wins more contested "
+            "cells, which acquires more good territory — a substantive "
+            "modelling claim to switch on deliberately, not to inherit "
+            "silently. Only matters under a synchronous energy-economy run "
+            "on a lattice; everywhere else births never contend (an "
+            "asynchronous run resolves one birth at a time, and a "
+            "well-mixed world has no cells to contest)."
+        ),
+    )
+)
+
 # ---------------------------------------------------------------------------
 # Dynamics — selection and mutation (docs/DESIGN.md §2.7)
 # ---------------------------------------------------------------------------
@@ -1231,17 +1330,25 @@ register(
     ParameterSpec(
         key="dynamics.carrying_capacity",
         kind="int",
-        default=200,
+        default=None,
         minimum=1,
+        nullable=True,
         label="Carrying capacity (K)",
         section="Dynamics",
         description=(
             "The most agents the world can hold, in the energy economy. Births "
             "only fill seats left below this cap — at capacity, nobody new gets "
             "in until deaths free room, and the richest would-be parents are "
-            "admitted first. It is the well-mixed model's stand-in for physical "
-            "room; once the population gets a spatial structure (a later "
-            "milestone), capacity may instead emerge from the number of sites."
+            "admitted first. Leave blank for automatic: on a lattice the "
+            "capacity becomes the NUMBER OF GRID SITES (the grid decides — the "
+            "zero-effort spatial setting), while in a well-mixed world, where "
+            "there is no grid to decide, blank falls back to the standard 200. "
+            "On a lattice an explicit value BELOW the site count leaves "
+            "deliberate slack — the population then parks below a full grid, "
+            "and the occupied region can drift, cluster, and migrate as births "
+            "and deaths reshape it. The capacity can never exceed the site "
+            "count: the grid is the outer bound, this cap an optional tighter "
+            "one."
         ),
     )
 )
@@ -1301,6 +1408,51 @@ register(
             "age dies at the next generation boundary, no matter what. 0 means "
             "no cap. With a cap set and the senescence factor left blank, the "
             "death chance rises smoothly to certainty exactly at this age."
+        ),
+    )
+)
+
+# --- The synchronous boundary order (M11a Phase C, DECISIONS #107). Live
+# under ALL synchronous runs — the slots-rationing and newborn-exposure
+# effects exist even well-mixed (VT-4) — and never read under async, which
+# has no boundary to order.
+
+register(
+    ParameterSpec(
+        key="dynamics.boundary_order",
+        kind="choice",
+        default="death_first",
+        choices=("death_first", "birth_first"),
+        label="Boundary order",
+        section="Dynamics",
+        description=(
+            "The order of deaths and births at each synchronous generation "
+            "boundary. 'death_first' — the default, and this platform's "
+            "behaviour in every earlier version — applies deaths first, then "
+            "lets survivors breed into the room the deaths freed. "
+            "'birth_first' is Hammond & Axelrod's period order: reproduction "
+            "runs first, then the death phase. Two real consequences, both "
+            "pushing the population DOWN relative to 'death_first'. (1) "
+            "Births are rationed against the PRE-death population: free "
+            "seats under the carrying capacity are counted before the dead "
+            "have vacated theirs, so FEWER births are admitted — with "
+            "capacity 200, 180 alive and 20 deaths, death-first admits 40 "
+            "births where birth-first admits only 20. That is a different "
+            "demographic regime, not a phase offset, and it is present even "
+            "without a lattice. (2) Newborns go through the death phase in "
+            "their own birth round — the age-mortality coin included — so a "
+            "child can die the very round it was born. A 'birth_first' run "
+            "sitting at a visibly lower population is correct, not broken. "
+            "On a lattice the choice additionally decides WHICH sites are "
+            "empty when children are placed: deaths-first lets newborns "
+            "fill the interior graves the dead just left, while "
+            "births-first offers only the cells that were already empty — "
+            "the frontier. Only read under the synchronous time model."
+        ),
+        learn_more=(
+            "Hammond & Axelrod 2006 run immigration → interaction → "
+            "reproduction → death; their ethnocentrism result lives on the "
+            "frontier this ordering creates."
         ),
     )
 )
