@@ -34,10 +34,21 @@ any change is a breaking change requiring a DECISIONS entry):
     1. the focal draw — one ``rng.integers(N)`` (skipped entirely at
        N = 1: no partner exists, no pair draws are consumed — the #81
        lone-survivor thermodynamics in event-time),
-    2. the partner draw — one ``rng.choice(N-1, size=min(k, N-1),
-       replace=False)`` over the focal's others (the RandomK idiom + #81
-       clamp), skip-mapped around the focal; partners are met in drawn
-       order,
+    2. the partner draw — well-mixed (or lattice with
+       ``matching.spatial_interaction`` off): one ``rng.choice(N-1,
+       size=min(k, N-1), replace=False)`` over the focal's others (the
+       RandomK idiom + #81 clamp), skip-mapped around the focal; UNDER
+       lattice + ``spatial_interaction`` (the conjunction is the gate —
+       the lattice alone changes nothing here) the same-position draw is
+       SUBSTITUTED (M11a Phase D, spec Design 6): one
+       ``neighbourhood_sample`` call with the INTERACTION kernel
+       (``interaction_radius`` / ``interaction_decay``), ``size = k``,
+       over the occupied sites minus the focal's own — made
+       unconditionally per event even when the outcome is forced, with
+       the primitive's own empty-eligible corner (an isolated focal)
+       returning empty BEFORE drawing, so the focal plays nothing and no
+       partner RNG moves. Applies in BOTH async population modes. Either
+       way partners are met in drawn order,
     3. per match, in partner order: the #23 per-round match draws
        (unchanged), then — only when the imitation overlay is on — exactly
        two ``rng.random()`` draws per completed match in fixed order (#93):
@@ -226,6 +237,15 @@ class AsyncDynamics:
         # the k the b/c > k threshold counts.
         self._birth_radius = config.structure.birth_radius
         self._birth_decay = config.structure.birth_decay
+        # The Phase D interaction kernel. The gate is the CONJUNCTION
+        # lattice + `matching.spatial_interaction` (spec Design 9's
+        # inventory) — the lattice alone never touches the partner draw,
+        # which is what keeps the Phase C positive goldens valid.
+        self._spatial_interaction = self._occupancy is not None and (
+            config.matching.spatial_interaction
+        )
+        self._interaction_radius = config.structure.interaction_radius
+        self._interaction_decay = config.structure.interaction_decay
         # Blocked parents this recording window (Design 4): cleared the
         # global gate, found no site in reach. variable_n only — fixed_n
         # never blocks (the freed site always exists).
@@ -329,16 +349,30 @@ class AsyncDynamics:
         self._time += 1.0 / n
 
         # 1-3. The interaction bundle: focal draw, partner draw, matches.
+        # The partner draw has two forms behind ONE position in the event's
+        # draw order (M11a Phase D — a SUBSTITUTION, not an insertion):
+        # well-mixed (or toggle-off lattice), one uniform
+        # `rng.choice(n-1, ...)` skip-mapped around the focal; under
+        # lattice + `spatial_interaction`, one `neighbourhood_sample` call
+        # with the interaction kernel over the occupied sites minus the
+        # focal's own. Same single-draw shape, changed candidate set and
+        # weights — no draw gained or lost (#99/#133 discipline). Both
+        # async population modes route through this same bundle.
         if n >= 2:
             focal_index = int(self._rng.integers(n))
             focal = self._population[focal_index]
-            size = min(self._k, n - 1)
-            drawn = self._rng.choice(n - 1, size=size, replace=False)
-            for offset in drawn:
+            if self._spatial_interaction:
+                partners = self._spatial_partners(focal)
+            else:
+                size = min(self._k, n - 1)
+                drawn = self._rng.choice(n - 1, size=size, replace=False)
                 # Skip-map around the focal: offsets 0..N-2 index the
                 # others, uniformly, with exactly one draw array consumed.
-                partner_index = int(offset) if int(offset) < focal_index else int(offset) + 1
-                partner = self._population[partner_index]
+                partners = [
+                    self._population[int(offset) if int(offset) < focal_index else int(offset) + 1]
+                    for offset in drawn
+                ]
+            for partner in partners:
                 result = self._match.play(focal, partner)
                 self._record_match(result, focal, partner)
                 self._imitate(result, focal, partner)
@@ -369,6 +403,45 @@ class AsyncDynamics:
             self._next_boundary += 1.0
             return self._emit_period()
         return None
+
+    def _spatial_partners(self, focal: Agent) -> list[Agent]:
+        """Draw the focal's partners through the interaction kernel (Phase D).
+
+        One :func:`~pdsim.core.structure.neighbourhood_sample` call with
+        ``size = k`` over the occupied sites minus the focal's own — the
+        async image of :class:`~pdsim.core.matcher.SpatialKernel`, drawing
+        through the SAME primitive (one kernel, no duplication — spec
+        Design 6). The call happens unconditionally per event (the resolved
+        draw-unconditionally fork), the primitive clamps to the neighbours
+        that exist (#81), and with an EMPTY eligible set — an isolated
+        focal — it returns an empty tuple BEFORE drawing, so the focal
+        plays zero matches this event and consumes zero partner RNG.
+
+        Args:
+            focal: This event's focal agent.
+
+        Returns:
+            The drawn partners, in draw order (the order the matches play).
+        """
+        assert self._occupancy is not None  # gated by _spatial_interaction
+        origin = self._occupancy.site_of(focal.agent_id)
+        assert origin is not None  # every living agent holds a site
+        drawn = neighbourhood_sample(
+            self._occupancy.structure,
+            origin,
+            radius=self._interaction_radius,
+            decay=self._interaction_decay,
+            size=self._k,
+            rng=self._rng,
+            eligible=self._occupancy.occupied_sites() - {origin},
+        )
+        by_id = {agent.agent_id: agent for agent in self._population}
+        partners: list[Agent] = []
+        for site_id in drawn:
+            partner_id = self._occupancy.agent_at(site_id)
+            assert partner_id is not None  # eligible sites are occupied
+            partners.append(by_id[partner_id])
+        return partners
 
     def _record_match(self, result: MatchResult, focal: Agent, partner: Agent) -> None:
         """Apply one finished match's economics and window bookkeeping.

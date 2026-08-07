@@ -27,6 +27,15 @@ and ids are never reused), so **only scores reset; histories persist for an
 agent's lifetime** — #22's scope is per-mode, and the precedent is the
 tournament's cross-cycle memory (#34). See DECISIONS #79.
 
+The match phase's pairing draws come from the run's matcher. Under
+lattice + ``matching.spatial_interaction`` (M11a Phase D — the conjunction
+is the gate) the engine constructs ``SpatialKernel`` IN PLACE of the
+configured matcher, a SUBSTITUTION at the same stream position: one
+kernel draw per focal agent in ascending id order, made unconditionally
+even when k covers the whole neighbourhood, with the primitive's
+empty-eligible corner (an isolated focal) consuming no RNG. Toggle off,
+the configured matcher path is byte-for-byte the pre-Phase-D one.
+
 RNG draw order per generation, imitation (DECISIONS #32, extending #23's
 match order):
     1. the match phase (matcher order; per-round draws per #23),
@@ -98,7 +107,7 @@ from pdsim.core.events import AgentSnapshot, DemographicEvent
 from pdsim.core.game import Action, AgentId, PrisonersDilemma
 from pdsim.core.layouts import found_population
 from pdsim.core.match import Match, MatchResult
-from pdsim.core.matcher import build_matcher
+from pdsim.core.matcher import Matcher, SpatialKernel, build_matcher
 from pdsim.core.occupancy import Occupancy
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
@@ -246,6 +255,38 @@ def build_initial_population(config: ExperimentConfig) -> list[Agent]:
     return agents
 
 
+def _build_generation_matcher(config: ExperimentConfig, occupancy: Occupancy | None) -> Matcher:
+    """Choose a synchronous run's matcher — the M11a Phase D engine seam.
+
+    When the run has structure AND ``matching.spatial_interaction`` is on
+    (the conjunction is the gate — spec Design 9's inventory; the validator
+    guarantees the toggle only survives on a lattice), the
+    :class:`~pdsim.core.matcher.SpatialKernel` is constructed IN PLACE of
+    the configured matcher: partners then come from the interaction kernel
+    and ``matching.matcher`` is not consulted (round-robin has no local
+    analogue — spec Design 6). Otherwise the existing
+    :func:`~pdsim.core.matcher.build_matcher` path runs untouched, which is
+    what keeps every toggle-off run byte-identical (Defining principle 1).
+
+    Args:
+        config: The complete, validated experiment description.
+        occupancy: The run's occupancy from founding, or ``None`` for a
+            well-mixed run (which never builds a structure at all).
+
+    Returns:
+        The matcher this run's match phase should use.
+    """
+    if occupancy is not None and config.matching.spatial_interaction:
+        return SpatialKernel(
+            structure=occupancy.structure,
+            occupancy=occupancy,
+            radius=config.structure.interaction_radius,
+            decay=config.structure.interaction_decay,
+            k=config.matching.opponents_per_agent,
+        )
+    return build_matcher(config.matching)
+
+
 class PopulationDynamics:
     """Runs the synchronous-generations evolutionary loop for one experiment.
 
@@ -265,7 +306,6 @@ class PopulationDynamics:
         self._config = config
         self._rng = rng
         self._match = Match(PrisonersDilemma(config.game), config.match, rng)
-        self._matcher = build_matcher(config.matching)
         self._selection = build_selection_rule(config.dynamics)
         self._accounting = build_score_accounting(config.dynamics)
         self._reproduction = StrategySwitchReproduction(config)
@@ -274,6 +314,10 @@ class PopulationDynamics:
         # on a lattice with a stochastic layout. `None` on a well-mixed run,
         # which never builds a structure at all.
         self._occupancy = found_population(config, self._population, rng)
+        # The matcher is chosen AFTER founding because the Phase D seam
+        # needs the occupancy (construction consumes no RNG, so the order
+        # of these lines never touches the stream).
+        self._matcher = _build_generation_matcher(config, self._occupancy)
         self._generation = 0
 
     @property
@@ -500,7 +544,6 @@ class EconomyDynamics:
         self._config = config
         self._rng = rng
         self._match = Match(PrisonersDilemma(config.game), config.match, rng)
-        self._matcher = build_matcher(config.matching)
         self._reproduction = StrategySwitchReproduction(config)
         founders = build_initial_population(config)
         dynamics = config.dynamics
@@ -519,6 +562,11 @@ class EconomyDynamics:
         # occupies one, and a newborn's site id is real from the moment it
         # exists (closing #120(c)'s honest gap).
         self._occupancy = found_population(config, founders, rng)
+        # The matcher is chosen AFTER founding because the Phase D seam
+        # needs the occupancy (construction consumes no RNG). The kernel
+        # holds the LIVE occupancy, so as deaths free sites and births fill
+        # them, the partner pool follows automatically.
+        self._matcher = _build_generation_matcher(config, self._occupancy)
         # The Phase C birth knobs. The kernel pair and the contest are read
         # only on a lattice; without one, none of their draws exist (the
         # #80/#99 active-flag idiom).

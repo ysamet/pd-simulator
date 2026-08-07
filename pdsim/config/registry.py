@@ -394,6 +394,54 @@ register(
 # Matching — who plays whom each generation (docs/DESIGN.md §2.4)
 # ---------------------------------------------------------------------------
 
+# `spatial_interaction` is registered FIRST, above `matcher`, deliberately
+# (M11a spec Design 11): it is the gate, so `matcher` later greys off a
+# sibling that rendered BEFORE it — the clean direction, needing no
+# lookahead. The interaction radius and decay it governs live in the
+# Structure section (their keys are fixed by the spec's Parameters table).
+
+register(
+    ParameterSpec(
+        key="matching.spatial_interaction",
+        kind="bool",
+        default=False,
+        label="Spatial interaction",
+        section="Matching",
+        description=(
+            "Whether agents play their NEIGHBOURS instead of the whole "
+            "population. Off — the default — is exactly today's behaviour: "
+            "the matching scheme below picks partners from the entire "
+            "population, and distance plays no part. On: each agent's "
+            "partners are sampled from within the interaction radius by the "
+            "reach kernel (see the Structure section), and the matching "
+            "scheme is NOT consulted — round-robin has no local analogue "
+            "(there is no 'every pair plays once' inside overlapping "
+            "neighbourhoods), and the population-wide schemes are just this "
+            "kernel with unlimited radius. Instead, 'Opponents per agent' "
+            "(k) does the work: set k at or above the neighbourhood size to "
+            "PLAY ALL YOUR NEIGHBOURS (the classic Hammond–Axelrod "
+            "convention), and k simply CLAMPS to the neighbours that "
+            "actually exist rather than erroring — a corner cell with 3 "
+            "neighbours on a bounded Moore grid plays 3 matches at k = 8, "
+            "which is geometry, not a misconfiguration. One counting fact "
+            "worth knowing: partners are drawn per agent WITHOUT checking "
+            "who already drew whom, so A can pick B while B picks A and the "
+            "pair meets twice. At k at-or-above the neighbourhood size each "
+            "agent therefore plays roughly TWICE its neighbour count in "
+            "matches per generation (its own, plus being drawn by each "
+            "neighbour) — income is about double a naive reading. Requires "
+            "the lattice world structure: in a well-mixed world there is no "
+            "distance to sample within."
+        ),
+        learn_more=(
+            "Playing only your neighbours is what makes clustering matter: "
+            "cooperators inside a cluster keep cooperation's benefits among "
+            "themselves — spatial reciprocity, the mechanism this milestone "
+            "exists for."
+        ),
+    )
+)
+
 register(
     ParameterSpec(
         key="matching.matcher",
@@ -901,6 +949,60 @@ register(
             "on a lattice; everywhere else births never contend (an "
             "asynchronous run resolves one birth at a time, and a "
             "well-mixed world has no cells to contest)."
+        ),
+    )
+)
+
+# --- The local-interaction knobs (M11a Phase D). The interaction pair
+# parameterises the SAME reach kernel a second time — birth and interaction
+# are independent dials on the one structure (spec Design 2) — and both are
+# consulted only while `matching.spatial_interaction` (the gate, in the
+# Matching section) is on.
+
+register(
+    ParameterSpec(
+        key="structure.interaction_radius",
+        kind="int",
+        default=1,
+        minimum=1,
+        nullable=True,
+        label="Interaction radius (R)",
+        section="Structure",
+        description=(
+            "How far away a potential match PARTNER can be, in grid distance "
+            "(the neighbourhood shape above decides what distance means). "
+            "This is the hard edge of 'who is reachable as a partner': "
+            "agents beyond it are simply never met. At 1 — the default — "
+            "partners come from the immediate neighbourhood only, the "
+            "classic Hammond–Axelrod setting. Leave empty for unlimited "
+            "reach: every agent on the grid is then a candidate, with only "
+            "the decay below expressing locality. Only consulted while "
+            "'Spatial interaction' (in the Matching section) is on; ignored "
+            "otherwise, and ignored under the 'well_mixed' structure."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="structure.interaction_decay",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        maximum=20.0,
+        label="Interaction decay (β)",
+        section="Structure",
+        description=(
+            "How steeply partner choice prefers CLOSER agents, within the "
+            "interaction radius. This is the decay β of the reach kernel: a "
+            "candidate at distance d is weighted exp(−β·d). At 0 — the "
+            "default — every reachable agent is equally likely (a uniform "
+            "disc); higher values make distant partners reachable but "
+            "increasingly unlikely. IRRELEVANT at an interaction radius of "
+            "1: all candidates then sit at the same distance, so every β "
+            "gives the same behaviour. Only consulted while 'Spatial "
+            "interaction' (in the Matching section) is on; ignored "
+            "otherwise, and ignored under the 'well_mixed' structure."
         ),
     )
 )

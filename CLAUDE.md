@@ -258,10 +258,22 @@ site-count derived default plus the K-family validators; the
 stake+overhead fix (#129); the localised `fixed_n` breeder/victim draws
 with the R = 1 Ohtsuki reduction (#132); VT-4 runtime-confirmed (#130);
 four negative + three positive golden masters and the counting-wrapper
-no-draw pins (#133 — the fourth positive golden is Phase D's, #128).
-Next up: **Phase D — local interaction** (`matching.spatial_interaction`;
-`interaction_radius`/`interaction_decay`; the `SpatialKernel(Matcher)`
-sync adapter; the async partner draw through the same primitive; the k
-clamp; the matcher.py docstring correction; VT-6(b); the fourth positive
-golden). Design everything to not block the v2/v3 extensions listed in
-`docs/DESIGN.md` §6.
+no-draw pins (#133). **Phase D — local interaction — landed 2026-08-06
+(#137-#140)**: `matching.spatial_interaction` (Matching section, first,
+above `matcher`) with `interaction_radius`/`interaction_decay`; the thin
+`SpatialKernel(Matcher)` sync adapter and the async partner-draw
+substitution, both gated on lattice + toggle, both single calls into the
+Phase A `neighbourhood_sample` primitive; draw-unconditionally +
+empty-eligible RNG contract with no-call pins; the requires-lattice
+validator (tournament-ignored); the matcher.py docstring correction; the
+fourth positive golden recorded (#128 discharged); VT-6(b) measured
+EXACTLY 8 matches per agent per generation (#139); V6 run manually — no
+visible b/c > k separation at this engine's strong selection, reported
+to the design layer (#140). Zero golden re-recordings; 977 tests.
+Next up: **Phase E — polish** (opens with the `helpers.greying`
+conjunction inspection, then the full greying map as a predicate table
+across BOTH greying branches; the pixel-array rendering fallback and
+size floor; the four named scenarios; the bench structure column; the
+sparse-`stripes` full-width band, #127; the §12 54-item audit with
+coverage reported). Design everything to not block the v2/v3 extensions
+listed in `docs/DESIGN.md` §6.

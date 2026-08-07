@@ -1,4 +1,4 @@
-Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120; Phase C implemented 2026-08-06, see DECISIONS #127-#136 — the fourth positive golden master moved to Phase D per #128)
+Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120; Phase C implemented 2026-08-06, see DECISIONS #127-#136; Phase D implemented 2026-08-06, see DECISIONS #137-#140 — the #128-deferred fourth positive golden recorded, VT-6(b) answered exactly 8, V6 run by manual configuration with a muddy result reported to the design layer)
 
 # M11a — Population structure (sites, local birth, local interaction)
 

@@ -1,11 +1,19 @@
 """Matcher interface: who plays whom each generation (DESIGN §2.4).
 
-v1 ships RoundRobin (every pair plays once) and RandomK (each agent initiates
-matches against k sampled opponents — DECISIONS #57); the spatial kernel
-plugs into the same ABC later. The interface takes an ``rng`` (RandomK needs
-it; RoundRobin ignores it and consumes no draws) and full ``Agent`` objects
-(SpatialKernel will need ``agent.position``). Widening an ABC's signature
-after implementations exist breaks all of them, so the interface was
+v1 shipped RoundRobin (every pair plays once) and RandomK (each agent
+initiates matches against k sampled opponents — DECISIONS #57); M11a Phase D
+adds SpatialKernel, which plugs into the same ABC. The interface takes an
+``rng`` (the sampling matchers need it; RoundRobin ignores it and consumes
+no draws) and full ``Agent`` objects. The full-object choice was
+future-proofing that paid off, though not the way the original comment here
+predicted: an early plan gave agents a continuous ``position`` attribute,
+but that was dropped when the world became a graph of sites (DECISIONS
+#104) — an agent's location is its SITE, and ``SpatialKernel`` holds the
+structure and the occupancy at construction, so it looks agents' sites up
+by id rather than reading anything spatial off the ``Agent``. What the full
+objects actually buy is identity: pairings are (Agent, Agent) tuples the
+match runner can play directly. Widening an ABC's signature after
+implementations exist breaks all of them, so the interface was
 future-proofed from day one (hard rule 6).
 """
 
@@ -19,6 +27,8 @@ import numpy as np
 
 from pdsim.config.experiment import MatchingConfig
 from pdsim.core.agent import Agent
+from pdsim.core.occupancy import Occupancy
+from pdsim.core.structure import Structure, neighbourhood_sample
 
 
 class Matcher(ABC):
@@ -140,6 +150,115 @@ class RandomK(Matcher):
             others = [agent for agent in agents if agent is not initiator]
             drawn = rng.choice(len(others), size=min(self._k, len(others)), replace=False)
             pairs.extend((initiator, others[index]) for index in drawn)
+        return iter(pairs)
+
+
+class SpatialKernel(Matcher):
+    """Each agent initiates matches against k neighbours sampled by the reach kernel.
+
+    The synchronous adapter for local interaction (M11a Phase D, spec Design
+    6, #108): constructed by the engine IN PLACE of the configured matcher
+    when a synchronous lattice run has ``matching.spatial_interaction`` on.
+    Genuinely THIN — all sampling logic lives in
+    :func:`~pdsim.core.structure.neighbourhood_sample` (the one Phase A
+    primitive every locality shares); this class is plumbing: it walks the
+    agents, hands the primitive each focal's site, and maps the returned
+    sites back to agents.
+
+    Two behaviours are inherited from :class:`RandomK` DELIBERATELY — both
+    look like defects on first reading and neither is:
+
+    1. **No deduplication** (#57): agent A can draw B while B draws A, so a
+       pair can meet twice in one generation. Kept so income statistics stay
+       comparable to the well-mixed baseline (and with it the existing
+       ``len(agent._histories)`` sharp edge, unchanged).
+    2. **Clamp, don't raise** (#81): when k exceeds the number of reachable
+       occupied neighbours, the agent simply plays the neighbours that
+       exist — a corner cell with 3 neighbours under bounded Moore plays 3
+       matches at k = 8. Geometry, not a misconfiguration.
+
+    RNG contract (spec Design 6, the resolved draw-unconditionally fork):
+    exactly ONE ``neighbourhood_sample`` call per focal agent, in ascending
+    agent-id order, EVEN when k ≥ neighbourhood size and the outcome is
+    forced — the stream position is predictable from the config alone,
+    never from how full a neighbourhood happened to be. The one
+    data-conditional corner is the primitive's own existing contract: with
+    an EMPTY eligible set (an isolated focal — zero occupied neighbours in
+    reach) it returns an empty tuple BEFORE drawing, so an isolated agent
+    plays zero matches and consumes zero RNG — correct, and announced by
+    the founding-isolation readout rather than crashed on.
+    """
+
+    def __init__(
+        self,
+        structure: Structure,
+        occupancy: Occupancy,
+        radius: int | None,
+        decay: float,
+        k: int,
+    ) -> None:
+        """Create the kernel adapter over a run's structure and occupancy.
+
+        Args:
+            structure: The run's immutable topology (supplies the metric).
+            occupancy: The run's LIVE site bookkeeping, held by reference —
+                pairings always read the occupancy as it is at the moment
+                they are drawn, so births and deaths between generations
+                are seen automatically.
+            radius: ``structure.interaction_radius`` — support radius R of
+                the interaction kernel; ``None`` means unlimited reach.
+            decay: ``structure.interaction_decay`` — β, how steeply partner
+                preference falls with distance inside the radius.
+            k: ``matching.opponents_per_agent`` — how many partners each
+                focal agent draws (clamped to the reachable occupied
+                neighbours by the primitive).
+        """
+        self._structure = structure
+        self._occupancy = occupancy
+        self._radius = radius
+        self._decay = decay
+        self._k = k
+
+    def pairings(
+        self, agents: Sequence[Agent], rng: np.random.Generator
+    ) -> Iterator[tuple[Agent, Agent]]:
+        """Draw every pairing up front, then yield them in draw order.
+
+        Eager like :meth:`RandomK.pairings`, and for the same #57 reason:
+        the whole pairing sequence is drawn before the first match plays,
+        so pairing draws never interleave with in-match draws. Per focal
+        agent — walked in ascending id order (spec Defining principle 5) —
+        one :func:`~pdsim.core.structure.neighbourhood_sample` call with
+        ``size = k`` and ``eligible`` = the occupied sites minus the
+        focal's own; the drawn sites map back to agents through the
+        occupancy. Nothing else.
+
+        Args:
+            agents: The current population (any order; walked ascending).
+            rng: The run's seeded generator; consumes exactly one kernel
+                draw per focal agent whose eligible set is non-empty.
+
+        Returns:
+            An iterator over the (initiator, partner) pairs, in draw order.
+        """
+        by_id = {agent.agent_id: agent for agent in agents}
+        pairs: list[tuple[Agent, Agent]] = []
+        for focal in sorted(agents, key=lambda agent: agent.agent_id):
+            origin = self._occupancy.site_of(focal.agent_id)
+            assert origin is not None  # every living agent holds a site
+            drawn = neighbourhood_sample(
+                self._structure,
+                origin,
+                radius=self._radius,
+                decay=self._decay,
+                size=self._k,
+                rng=rng,
+                eligible=self._occupancy.occupied_sites() - {origin},
+            )
+            for site_id in drawn:
+                partner_id = self._occupancy.agent_at(site_id)
+                assert partner_id is not None  # eligible sites are occupied
+                pairs.append((focal, by_id[partner_id]))
         return iter(pairs)
 
 

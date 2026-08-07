@@ -293,21 +293,33 @@ class MatchingConfig(_RegistryBackedModel):
     """Who plays whom each generation (``docs/DESIGN.md`` §2.4).
 
     Attributes:
+        spatial_interaction: Whether partners are sampled from within the
+            interaction radius by the reach kernel (M11a Phase D, #108)
+            instead of from the whole population. Requires
+            ``structure.kind = "lattice"`` (checked at the experiment
+            level); while on, ``matcher`` is not consulted and
+            ``opponents_per_agent`` does the work (k clamps to the
+            neighbours that exist — the #81 idiom).
         matcher: Matching scheme name — ``"round_robin"`` (every pair plays
             once) or ``"random_k"`` (each agent initiates matches against k
-            randomly drawn opponents).
-        opponents_per_agent: k for the ``"random_k"`` scheme. Ignored — valid
-            but without effect, consuming no RNG draws — under
-            ``"round_robin"`` (the DECISIONS #34 ignored-parameter pattern).
-            Must be at most N - 1; checked at the experiment level, where the
-            population size is known.
+            randomly drawn opponents). Not consulted while
+            ``spatial_interaction`` is on (the DECISIONS #34 pattern).
+        opponents_per_agent: k for the ``"random_k"`` scheme and for spatial
+            interaction (where k at or above the neighbourhood size means
+            "play all your neighbours"). Ignored — valid but without
+            effect, consuming no RNG draws — under ``"round_robin"`` (the
+            DECISIONS #34 ignored-parameter pattern). Must be at most
+            N - 1; checked at the experiment level, where the population
+            size is known.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
+        "spatial_interaction": "matching.spatial_interaction",
         "matcher": "matching.matcher",
         "opponents_per_agent": "matching.opponents_per_agent",
     }
 
+    spatial_interaction: bool = _registry_field("matching.spatial_interaction")
     matcher: str = _registry_field("matching.matcher")
     opponents_per_agent: int = _registry_field("matching.opponents_per_agent")
 
@@ -409,10 +421,10 @@ class PopulationConfig(_RegistryBackedModel):
 class StructureConfig(_RegistryBackedModel):
     """The shape of the world: sites, lattice geometry, boundary (M11a, §2.12).
 
-    As of Phase B this section decides where founding agents live: a lattice
-    run builds its structure and lays its founders out at generation 0. It
-    still decides nothing else — who plays whom (Phase D) and where children
-    land (Phase C) remain global. The well-mixed engine does not route
+    As of Phase D this section decides all three localities: where founding
+    agents live (Phase B), where children land (Phase C — the birth kernel),
+    and — while ``matching.spatial_interaction`` is on — who plays whom
+    (Phase D — the interaction kernel). The well-mixed engine does not route
     through structure code at all, which is what keeps every pre-M11a run
     byte-identical (spec Defining principle 1).
 
@@ -448,6 +460,13 @@ class StructureConfig(_RegistryBackedModel):
             the admitted parents, Hammond–Axelrod's reproduction order) or
             ``"energy_priority"`` (richest places first). Consumed only
             under synchronous + lattice + ``energy_economy`` (#107).
+        interaction_radius: Support radius R of the interaction kernel
+            (M11a Phase D): how far away a match partner can be. ``None``
+            means unlimited reach. Consumed only while
+            ``matching.spatial_interaction`` is on.
+        interaction_decay: Decay β of the interaction kernel — how steeply
+            partner choice prefers closer agents. Irrelevant at R = 1.
+            Consumed only while ``matching.spatial_interaction`` is on.
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
@@ -461,6 +480,8 @@ class StructureConfig(_RegistryBackedModel):
         "birth_radius": "structure.birth_radius",
         "birth_decay": "structure.birth_decay",
         "placement_contest": "structure.placement_contest",
+        "interaction_radius": "structure.interaction_radius",
+        "interaction_decay": "structure.interaction_decay",
     }
 
     kind: str = _registry_field("structure.kind")
@@ -473,6 +494,8 @@ class StructureConfig(_RegistryBackedModel):
     birth_radius: int | None = _registry_field("structure.birth_radius")
     birth_decay: float = _registry_field("structure.birth_decay")
     placement_contest: str = _registry_field("structure.placement_contest")
+    interaction_radius: int | None = _registry_field("structure.interaction_radius")
+    interaction_decay: float = _registry_field("structure.interaction_decay")
 
     @model_validator(mode="after")
     def _check_layout_file(self) -> Self:
@@ -1345,6 +1368,41 @@ class ExperimentConfig(_RegistryBackedModel):
                 "would have nowhere coherent to happen. Match the population "
                 "to the site count, or leave rows/columns blank to auto-size "
                 "the grid to the population."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_spatial_interaction_needs_lattice(self) -> Self:
+        """Check spatial interaction runs on a lattice (M11a Phase D, #108).
+
+        Sampling partners "within the interaction radius" needs a world in
+        which distance exists — in a well-mixed world there is no radius to
+        sample within, so the toggle would promise a locality the structure
+        cannot supply. The #126 discipline puts the check here, at config
+        validation, where the app and the CLI render it as a plain
+        sentence. Tournament mode skips the check: structure is ignored
+        wholesale there (#120(a)), and this toggle gets the identical
+        ignored-under-tournament treatment — ignored parameters are never
+        validation errors (#34).
+
+        Returns:
+            The model, unchanged.
+
+        Raises:
+            ValueError: If spatial interaction is on without a lattice.
+                The message names both settings and says why.
+        """
+        if (
+            self.mode == "evolution"
+            and self.matching.spatial_interaction
+            and self.structure.kind != "lattice"
+        ):
+            raise ValueError(
+                "matching.spatial_interaction is on, but structure.kind is "
+                f"{self.structure.kind!r} — partners are sampled from within "
+                "the interaction radius, and a well-mixed world has no "
+                "distance to sample within. Set structure.kind to 'lattice' "
+                "(or switch spatial interaction off)."
             )
         return self
 

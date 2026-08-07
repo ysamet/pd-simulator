@@ -150,7 +150,20 @@ run data exists.
     R = 1 Ohtsuki reduction (#132), VT-4 runtime-confirmed (#130), four
     negative + three positive golden masters with the counting-wrapper
     no-draw pins (#133; the fourth positive golden moved to Phase D,
-    #128); 950 tests passing. **D — local interaction — is next.**
+    #128); 950 tests passing. **D — local interaction — landed
+    2026-08-06** (#137-#140): `matching.spatial_interaction` +
+    `interaction_radius`/`interaction_decay`; the `SpatialKernel`
+    synchronous adapter and the async partner-draw substitution, both
+    gated on lattice + toggle, both through the one Phase A primitive;
+    the draw-unconditionally/empty-eligible RNG contract with new
+    no-call pins; the requires-lattice validator; the matcher.py
+    docstring correction; the fourth positive golden recorded (#128
+    discharged, #138); VT-6(b) answered EXACTLY 8 matches per agent per
+    generation (#139); V6 run by manual configuration — no visible
+    b/c > k separation at strong selection, reported honestly to the
+    design layer (#140); 977 tests passing, zero golden re-recordings.
+    **E — polish — is next** (opens with the `helpers.greying`
+    conjunction inspection).
 
     Calibration-guide residue (DECISIONS #113–#115) folded into the
     remaining phases: Phase B measures the #114 shifted-weight spread;

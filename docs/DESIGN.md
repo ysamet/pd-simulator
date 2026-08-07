@@ -530,7 +530,7 @@ pdsim/
     strategies/      # one module per strategy, auto-discovered on package import
       registry.py    #   Strategy Registry: StrategyInfo metadata + create_strategy
     agent.py         # Agent: identity, strategy instance, score, history store
-    matcher.py       # Matcher ABC; RoundRobin; RandomK; (future: SpatialKernel)
+    matcher.py       # Matcher ABC; RoundRobin; RandomK; SpatialKernel (M11a)
     match.py         # plays one match (length mode, noise ε) between participants
     selection.py     # SelectionRule ABC; Fermi, proportional, tournament_k,
                      #   truncation, threshold_cloning (M9a, DECISIONS #63)

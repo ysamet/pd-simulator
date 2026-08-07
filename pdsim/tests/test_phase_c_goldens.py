@@ -8,11 +8,14 @@ Two families, one mechanism:
   principle 1). Their digest constants were captured from the PRE-Phase-C
   engine (2026-08-06, before any Phase C engine edit), so a draw leaking
   past its gate fails here loudly.
-* **Three POSITIVE goldens** (#128 moves the fourth — sync imitation +
-  lattice — to Phase D) — sync economy + lattice; async ``fixed_n`` +
-  lattice + ``death_birth``; async ``variable_n`` + lattice — seal Phase
-  C's NEW behaviour for Phases D and E to build on. Their constants were
-  captured from the finished Phase C engine.
+* **Four POSITIVE goldens** — sync economy + lattice; async ``fixed_n`` +
+  lattice + ``death_birth``; async ``variable_n`` + lattice (all three
+  captured from the finished Phase C engine); and sync imitation + lattice
+  + ``spatial_interaction`` — the interaction-only case, no births and no
+  deaths, structure expressed purely through who plays whom — captured
+  from the finished Phase D engine (2026-08-06), discharging #128's
+  deferral. The fourth also carries the reload-and-re-run assertion the
+  #133(d) technique prescribes.
 
 Both grains from the spec are pinned per golden: the EVENT STREAM (at
 ``"round"`` granularity, so every per-round draw's consequence is in scope)
@@ -324,16 +327,18 @@ class TestNegativeGoldens:
 
 
 # ---------------------------------------------------------------------------
-# The three positive configurations (lattice; spec Design 9, count per #128)
+# The four positive configurations (lattice; spec Design 9; the fourth is
+# Phase D's, per #128)
 # ---------------------------------------------------------------------------
 
 
 def _positive_config(name: str) -> ExperimentConfig:
-    """Build one of the three pinned lattice configurations.
+    """Build one of the four pinned lattice configurations.
 
     Args:
-        name: ``"sync_economy_lattice"``, ``"async_fixed_n_lattice"``, or
-            ``"async_variable_n_lattice"``.
+        name: ``"sync_economy_lattice"``, ``"async_fixed_n_lattice"``,
+            ``"async_variable_n_lattice"``, or
+            ``"sync_imitation_spatial_lattice"`` (Phase D's).
 
     Returns:
         A validated config on a small grid with a deterministic layout (so
@@ -416,6 +421,27 @@ def _positive_config(name: str) -> ExperimentConfig:
                 },
             }
         )
+    if name == "sync_imitation_spatial_lattice":
+        # Phase D's golden (#128 discharged): the interaction-only case —
+        # imitation reproduction, so no births and no deaths, and the
+        # lattice expressed PURELY through who plays whom. k = 3 sits below
+        # the Moore neighbourhood size of 8, so the kernel genuinely
+        # samples (a forced-draw configuration would pin less).
+        return ExperimentConfig.model_validate(
+            {
+                "seed": 43,
+                "population": {"size": 9, "composition": {"tit_for_tat": 5, "always_defect": 4}},
+                "matching": {"spatial_interaction": True, "opponents_per_agent": 3},
+                "match": {"length_mode": "fixed", "rounds_per_match": 3},
+                "structure": {
+                    "kind": "lattice",
+                    "rows": 3,
+                    "cols": 3,
+                    "initial_layout": "stripes",
+                },
+                "dynamics": {"generations": 4, "mutation_rate": 0.05},
+            }
+        )
     raise ValueError(f"Unknown positive golden {name!r}.")
 
 
@@ -423,26 +449,51 @@ POSITIVE_STREAM_DIGESTS = {
     "sync_economy_lattice": "03cf9dfed314380d386323581c8ca9af2e9742cbe804053ee81ac0ed41a6c6fa",
     "async_fixed_n_lattice": "8d03522a6736c341e584264c9312201c210c20f68e358a9d814f4bc5d01f7e87",
     "async_variable_n_lattice": "e1b02eab771b28372079eb15c6d16e44acad4af9b5cc8964436d978d943e32c7",
+    "sync_imitation_spatial_lattice": (
+        "a2bd4367d7062f845df214e0432fe37194b46981278830132d59738a845d957f"
+    ),
 }
-"""Phase C event-stream digests, captured 2026-08-06 from the finished engine."""
+"""Event-stream digests: the first three captured 2026-08-06 from the finished
+Phase C engine; the fourth captured 2026-08-06 from the finished Phase D
+engine (#128 discharged)."""
 
 POSITIVE_FOLDER_DIGESTS = {
     "sync_economy_lattice": "fd63020abf59c72903ec6ede50ff31f89d9b6982b5ce1c0988f4383c06c080df",
     "async_fixed_n_lattice": "b5022f06c5ba00508f90e4f68f401f04ea7bb0dfc36d64fd07490590203f3dbd",
     "async_variable_n_lattice": "b88a197558da5634a6437dd85b71d4807f896f8adef04c0fe23641d6faaa4d46",
+    "sync_imitation_spatial_lattice": (
+        "d49ea44ad0eeea9a3e1ab850c47f07e2017ac87b17741283f4aeb8c48f9f0968"
+    ),
 }
-"""Phase C run-folder digests, captured 2026-08-06 from the finished engine."""
+"""Run-folder digests, captured as the stream digests above."""
 
 
 class TestPositiveGoldens:
-    """Phase C's new behaviour, sealed for Phases D and E to build on."""
+    """Phase C's and D's new behaviour, sealed for later phases to build on."""
 
     @pytest.mark.parametrize("name", sorted(POSITIVE_STREAM_DIGESTS))
-    def test_event_stream_matches_the_phase_c_capture(self, name: str) -> None:
-        """The full round-grain stream digest equals the Phase C constant."""
+    def test_event_stream_matches_the_capture(self, name: str) -> None:
+        """The full round-grain stream digest equals the pinned constant."""
         assert stream_digest(_positive_config(name)) == POSITIVE_STREAM_DIGESTS[name]
 
     @pytest.mark.parametrize("name", sorted(POSITIVE_FOLDER_DIGESTS))
-    def test_run_folder_matches_the_phase_c_capture(self, name: str, tmp_path: Path) -> None:
-        """The persisted folder's content digest equals the Phase C constant."""
+    def test_run_folder_matches_the_capture(self, name: str, tmp_path: Path) -> None:
+        """The persisted folder's content digest equals the pinned constant."""
         assert folder_digest(_positive_config(name), tmp_path) == POSITIVE_FOLDER_DIGESTS[name]
+
+    def test_the_phase_d_recorded_config_reruns_to_the_pinned_stream(self, tmp_path: Path) -> None:
+        """config.yaml coverage for the Phase D golden (#133(d) verbatim).
+
+        The folder digest excludes ``config.yaml``, so — exactly as for the
+        negative goldens — the recorded config's semantics are pinned by
+        reloading it and re-running to the pinned stream digest. The three
+        Phase C positives keep their recorded scope; this assertion is part
+        of the FOURTH golden's capture technique.
+        """
+        config = _positive_config("sync_imitation_spatial_lattice")
+        recorder = RunRecorder(config, out_dir=tmp_path)
+        for event in engine.run(config):
+            recorder.add(event)
+        folder = recorder.finalize()
+        reloaded = load_config(folder / "config.yaml")
+        assert stream_digest(reloaded) == POSITIVE_STREAM_DIGESTS["sync_imitation_spatial_lattice"]

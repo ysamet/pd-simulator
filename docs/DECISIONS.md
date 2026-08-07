@@ -3124,3 +3124,151 @@ No new machinery: the snapshot was designed as the render state (Design
 browser is unchanged (it still shows founding — rendering a recorded
 run's FINAL occupancy from `agents.parquet` is a nicety deferred to
 Phase E with the rest of the rendering polish).
+
+**#137 — 2026-08-06 — The Phase D build record: local interaction lands as
+two gated substitutions over the one Phase A primitive; the SpatialKernel
+seam; the draw-unconditionally and empty-eligible contract; the inherited
+RandomK behaviours; the requires-lattice validator; the matcher.py
+docstring correction (M11a Phase D; spec Design 6 as implemented).**
+(a) THE PARAMETERS. `matching.spatial_interaction` (bool, default off) is
+registered FIRST in the Matching section, above `matcher` (Design 11's
+clean greying direction — the map itself is Phase E's);
+`structure.interaction_radius` (nullable int ≥ 1, default 1, blank =
+unlimited via the `memory_depth` machinery) and
+`structure.interaction_decay` (float 0–20, default 0) sit after the birth
+group. Accepted interim state, deliberate (the spec's Design 5 error
+asymmetry, mild direction): while the toggle is on the `matcher` widget
+renders live but is not consulted, and while it is off the interaction
+pair render live but are not consulted — the help text says plainly when
+each is read; the greying predicates arrive with Phase E's table.
+(b) THE SYNC SUBSTITUTION. When a synchronous evolution run has structure
+AND the toggle on (the conjunction is the gate — Design 9's inventory),
+the engine constructs `SpatialKernel(Matcher)` IN PLACE of the configured
+matcher, for BOTH sync engines (imitation and economy; tournament ignores
+structure wholesale, #120(a), and keeps `build_matcher`). The kernel is
+genuinely thin: `pairings()` walks agents ascending-id and makes ONE
+`neighbourhood_sample` call per focal (size = k, the interaction kernel,
+eligible = occupied sites minus the focal's own site), mapping sites back
+to agents; pairings are drawn eagerly before the first match plays (the
+#57 no-interleaving contract). MICRO-DECISION, recorded: the matcher is
+now constructed AFTER `found_population` in both sync engines' `__init__`
+(the seam needs the occupancy); construction consumes no RNG, so the
+reorder cannot touch any stream — pinned by the negative goldens passing
+unre-recorded. The seam is a module-private factory
+(`_build_generation_matcher`), not a `build_matcher` signature change —
+the alternative (widening `build_matcher` to take an optional occupancy)
+was rejected because the tournament path must never see the kernel and a
+config-only factory cannot construct one.
+(c) THE ASYNC SUBSTITUTION. Under lattice + toggle (both async population
+modes, one call site), the focal-bundle partner draw is SUBSTITUTED in
+place: same position in the within-event order, same single-draw shape —
+one `neighbourhood_sample` call (size = k, interaction kernel, eligible =
+occupied minus the focal's own) instead of one uniform
+`rng.choice(N−1, ...)`. No draw gained or lost (#99/#133 discipline),
+pinned by a test asserting a spatial `fixed_n` run's per-method call-name
+sequence is IDENTICAL to its well-mixed twin's. The `fixed_n`
+breeder/victim localisation (#132) is a different mechanism on the BIRTH
+kernel and is untouched; sync imitation's comparison partner stays global
+(#132's decline stands, handed to M12).
+(d) THE RNG CONTRACT. Draw unconditionally (Design 6's resolved fork):
+whenever spatial sampling is active the kernel call happens once per
+focal agent even when k ≥ neighbourhood size and the outcome is forced —
+stream position is a function of the config alone; per #133(a) the
+contract counts CALLS (counting wrapper), not bit-generator movement.
+Empty eligible set (an isolated focal): the primitive returns () BEFORE
+drawing (its existing #133(b) data-conditional contract) — the agent
+plays zero matches, consumes zero partner RNG, and no wasted draw is
+added for it. Inherited RandomK behaviours, kept deliberately: NO
+DEDUPLICATION (A can draw B while B draws A — income statistics stay
+comparable to the well-mixed baseline; the `len(agent._histories)` sharp
+edge stays as-is) and CLAMP, DON'T RAISE (#81 — a bounded-Moore corner
+plays 3 at k = 8). New no-call pins: with the toggle off — well-mixed AND
+lattice, sync AND async — zero interaction-kernel calls occur (sync
+watched at `pdsim.core.matcher`'s primitive reference, which is
+interaction-only by construction; async distinguished from Phase C's
+size-1 breeder/victim/placement kernel draws by the interaction draw's
+size = k signature), each with a toggle-on positive control.
+(e) THE VALIDATOR. `matching.spatial_interaction` on requires
+`structure.kind = lattice` — checked at config time in the #126
+discipline (the message names both settings and says why: a well-mixed
+world has no distance to sample within). Tournament mode skips the check
+— structure is ignored wholesale there (#120(a)), and ignored parameters
+are never validation errors (#34). No ordering subtlety arose: the
+validator is independent of the layout-file and K-family checks.
+(f) THE DOCSTRING CORRECTION. `matcher.py`'s module docstring no longer
+justifies the Matcher ABC's full-`Agent` signature by a future
+`agent.position` (the continuous-coordinate plan #104 dropped); the real
+reason recorded in its place: `SpatialKernel` holds the structure and the
+occupancy at construction, and an agent's location is its SITE — the
+full objects buy identity (playable (Agent, Agent) pairs), not
+coordinates. Comment-only; no behavioural effect.
+All four negative and all three Phase C positive golden masters pass with
+ZERO re-recording — every Phase D draw sits behind the
+`spatial_interaction` gate, which no pinned configuration sets. 977 tests
+pass; ruff clean.
+
+**#138 — 2026-08-06 — #128 discharged: the fourth positive golden master
+(sync imitation + lattice + `spatial_interaction` on) is recorded from
+the finished Phase D engine (M11a Phase D).** The interaction-only case —
+imitation reproduction, so no births and no deaths; the lattice expressed
+purely through who plays whom. Configuration: 3×3 Moore torus, `stripes`
+(deterministic — the founding-draw gate stays closed), N = 9, k = 3
+(below the neighbourhood size of 8, so the kernel genuinely samples
+rather than being forced), 4 generations, μ = 0.05, seed 43. Captured
+with exactly the #133(d) technique: the round-grain event-stream digest
+over the explicit per-event-type field list, the content-grain run-folder
+digest excluding `config.yaml`, AND the reload-and-re-run-to-the-pinned-
+stream assertion (the piece that covers the recorded config). Lives in
+`test_phase_c_goldens.py`'s positive tables beside the Phase C three,
+which keep their recorded scope and constants untouched.
+
+**#139 — 2026-08-06 — VT-6(b) answered: EXACTLY 8 matches per agent per
+generation — the ≈ in the spec's expectation dissolves into equality on a
+fully occupied uniform-degree grid (M11a Phase D; the measured number the
+design layer checks the flagship's `basic_living_cost` and the
+calibration guide's §4.2 against).** The probe (temporary, never
+shipped — the #117/#130 precedent): synchronous imitation on a fully
+occupied 10×10 torus, `neighbourhood_shape = von_neumann`, both kernels
+at radius 1, `spatial_interaction` on, 5 generations, measured at k = 4
+and k = 6. OBSERVED: min = mean = max = 8.00 for every agent in every
+generation at BOTH k values. The arithmetic, so the number is understood
+rather than trusted: at k ≥ 4 every focal's draw is forced (or clamped)
+to all 4 von Neumann neighbours — 4 initiated — and each of its 4
+neighbours' draws are equally forced and include it — 4 received; 4 + 4
+= 8, with no variance because degree is uniform on a torus and occupancy
+is full and static under imitation. Design 6's no-deduplication text is
+CONFIRMED (an engine that deduplicated would have shown 4). Consequences
+are the DESIGN LAYER'S to act on, per the phase-task ledger: a
+cluster-interior cooperator's income is ≈ 8R (not 4R) against the
+flagship's living cost, and the Moore counterfactual is a four-fold
+income change; nothing in the repo — no scenario, no living-cost value,
+no calibration-guide text — was edited here. Also pinned as a permanent
+test (`test_spatial_interaction.py`: every adjacent pair meets exactly
+twice; every agent plays exactly 8).
+
+**#140 — 2026-08-06 — V6 run by manual configuration, as the design layer
+resolved (the `donation_game_threshold` scenario packages the same
+configuration in Phase E); the observed result is MUDDY and is reported
+as a finding, not fixed (M11a Phase D; the #117 honesty rule applied).**
+Configuration, exactly as prescribed: donation game T = 5, R = 4, P = 0,
+S = −1 (additive, b/c = 5), `rounds_per_match = 1`, AllC + AllD only,
+asynchronous `fixed_n` (N = 100 = the 10×10 site count),
+`moran_rule = death_birth`, `fixed_n_death_rule = pure_random`, torus,
+both kernels at radius 1, `spatial_interaction` on; von Neumann at k = 4
+(below b/c) versus Moore at k = 8 (above it); `initial_layout = random`,
+μ = 0, horizon 150 generation-equivalents. A single seed pair was
+ambiguous, so 20 seeds per shape were run. OBSERVED: von Neumann — AllC
+fixed 11/20, AllD fixed 8/20, 1 coexisting at horizon, mean final
+cooperator share 0.596; Moore — AllC fixed 10/20, AllD fixed 7/20, 3
+coexisting, mean final share 0.569. Directionally von Neumann sits a
+hair above Moore, but the separation (one seed in twenty) is well inside
+sampling noise: NO visible b/c > k reversal at this configuration. The
+honest reading, consistent with VT-3/#114's evidence: this engine's
+selection is far from the weak-selection limit in which Ohtsuki's
+threshold is derived — fitness reads ACCUMULATED energy through the #63
+shift, with no intensity knob — so the threshold operates as the
+calibration compass #103 said it was, not as a prediction; drift plus
+strong selection washes the k-dependence out at these settings. Nothing
+was tuned to force the textbook picture. The number and reading go back
+to the design layer with the VT-6(b) report; the scenario text Phase E
+ships must carry whatever caveat the design layer derives from this.
