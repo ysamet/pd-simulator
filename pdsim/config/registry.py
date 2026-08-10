@@ -455,8 +455,10 @@ register(
             "'round_robin' means every agent plays every other agent exactly once — "
             "thorough, but the match count grows with the SQUARE of the population. "
             "'random_k' means each agent starts matches against a few randomly drawn "
-            "opponents instead, so big populations stay fast. Distance-based "
-            "matching arrives with the geographic layer in a later version."
+            "opponents instead, so big populations stay fast. While 'Spatial "
+            "interaction' (above) is on, this scheme is NOT consulted — partners "
+            "come from the grid via the reach kernel instead, and the widget "
+            "greys to say so."
         ),
         learn_more=(
             "Round-robin plays about N²/2 matches per period; random_k plays exactly "

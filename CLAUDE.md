@@ -270,10 +270,18 @@ fourth positive golden recorded (#128 discharged); VT-6(b) measured
 EXACTLY 8 matches per agent per generation (#139); V6 run manually — no
 visible b/c > k separation at this engine's strong selection, reported
 to the design layer (#140). Zero golden re-recordings; 977 tests.
-Next up: **Phase E — polish** (opens with the `helpers.greying`
-conjunction inspection, then the full greying map as a predicate table
-across BOTH greying branches; the pixel-array rendering fallback and
-size floor; the four named scenarios; the bench structure column; the
-sparse-`stripes` full-width band, #127; the §12 54-item audit with
-coverage reported). Design everything to not block the v2/v3 extensions
+**Phase E — polish — is IN PROGRESS, delivered as four sub-prompts.
+E1 landed 2026-08-07 (#141-#144)**: the `helpers.greying` inspection
+(Outcome A — the rule form admits predicates), the full greying map as
+the ONE `STRUCTURE_GREYING` predicate table consumed by BOTH branches
+(tournament wholesale-grey included, #144; `spatial_interaction` greys
+under well_mixed, #142; composition greys under `from_file`, #143), and
+the §12 paint-time readouts (resolved dims, resolved K beside the site
+count, effective neighbour count, payoff additivity) on two new pure
+functions in `experiment.py`; 1006 tests, zero golden re-recordings.
+Remaining: **E2** — rendering (pixel-array fallback, ≈ 3 px floor,
+results-browser final occupancy, the #127 stripes band, the deferred
+pixel-array-active readout, the golden-test-file rename); **E3** — the
+four named scenarios; **E4** — the bench structure column and the §12
+54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
 listed in `docs/DESIGN.md` §6.

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, NamedTuple, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -41,9 +41,12 @@ __all__ = [
     "MatchConfig",
     "MatchingConfig",
     "OutputConfig",
+    "PayoffAdditivity",
     "PopulationConfig",
     "StructureConfig",
+    "effective_neighbour_count",
     "load_config",
+    "payoff_additivity",
     "resolve_carrying_capacity",
     "resolve_initial_energy",
     "resolve_lattice_dimensions",
@@ -178,6 +181,103 @@ def resolve_carrying_capacity(carrying_capacity: int | None, site_count: int | N
     if site_count is not None:
         return site_count
     return WELL_MIXED_CAPACITY_DEFAULT
+
+
+def effective_neighbour_count(
+    neighbourhood_shape: str, boundary: str, opponents_per_agent: int
+) -> int:
+    """The neighbour count an interior cell actually plays — the threshold's k.
+
+    ``opponents_per_agent`` clamps rather than errors when it exceeds the
+    neighbourhood size (#81): an interior cell has 8 neighbours on a Moore
+    neighbourhood and 4 on von Neumann, so the number of matches a cell
+    starts per generation under spatial interaction is
+    ``min(k, interior degree)`` — and that number is the k the b/c > k
+    cooperation threshold counts (M11a spec §12 readout 4).
+
+    A pure free function on the spec Design 11 paint-time pattern, so the
+    panel readout and any future validator arithmetic cannot drift. The
+    ``boundary`` argument completes the readout's inputs but does not move
+    the number: the interior degree is the same on a torus and a bounded
+    grid — the difference is that a torus has ONLY interior cells, while a
+    bounded grid's edge and corner cells clamp lower still (a corner keeps
+    3 of Moore's 8), which the readout's explanation notes rather than
+    averages over.
+
+    Args:
+        neighbourhood_shape: ``"moore"`` (8 neighbours) or ``"von_neumann"``
+            (4 neighbours).
+        boundary: ``"torus"`` or ``"bounded"`` — documented above; accepted
+            so the signature states the full geometry the readout describes.
+        opponents_per_agent: The configured k.
+
+    Returns:
+        ``min(opponents_per_agent, interior degree)``.
+    """
+    interior_degree = 8 if neighbourhood_shape == "moore" else 4
+    return min(opponents_per_agent, interior_degree)
+
+
+class PayoffAdditivity(NamedTuple):
+    """The payoff-additivity readout's result (§12 readout 9, DECISIONS #111).
+
+    A ``NamedTuple`` (new concept): an immutable tuple whose fields have
+    names — lighter than a dataclass, and it unpacks like a plain tuple.
+
+    Attributes:
+        additive: Whether ``T − R = P − S`` holds — only then do b and c
+            exist as single numbers.
+        benefit: b = T − P (equivalently R − S), or ``None`` when the
+            matrix is not additive.
+        cost: c = T − R (equivalently P − S), or ``None`` when the matrix
+            is not additive.
+        ratio: b/c, or ``None`` when not additive — or when c = 0, where
+            cooperating is free and the ratio is not a finite number.
+    """
+
+    additive: bool
+    benefit: float | None
+    cost: float | None
+    ratio: float | None
+
+
+def payoff_additivity(
+    temptation: float, reward: float, punishment: float, sucker: float
+) -> PayoffAdditivity:
+    """Inspect the four payoffs for donation-game additivity (#111).
+
+    The b/c > k threshold is derived for the DONATION GAME: a cooperator
+    pays a cost c so the opponent receives a benefit b (T = b, R = b − c,
+    P = 0, S = −c). Reading the cost of cooperating off a general matrix
+    twice gives ``T − R`` against a cooperator and ``P − S`` against a
+    defector; only when the two agree ("equal gains from switching") do b
+    and c exist at all. With a non-additive matrix the ratio is AMBIGUOUS
+    rather than merely inapplicable — two defensible benefits over two
+    defensible costs give four different readings.
+
+    A pure free function of the four registry values, on the spec Design 11
+    paint-time resolver pattern — callable from the panel at paint time and
+    from anything that later needs the same arithmetic, so displayed text
+    and validator logic cannot drift.
+
+    Args:
+        temptation: T — defecting against a cooperator.
+        reward: R — mutual cooperation.
+        punishment: P — mutual defection.
+        sucker: S — cooperating against a defector.
+
+    Returns:
+        The additivity verdict with the resolved b, c, and b/c (fields
+        ``None`` where undefined).
+    """
+    cost_vs_cooperator = temptation - reward
+    cost_vs_defector = punishment - sucker
+    if not math.isclose(cost_vs_cooperator, cost_vs_defector):
+        return PayoffAdditivity(additive=False, benefit=None, cost=None, ratio=None)
+    benefit = temptation - punishment
+    cost = cost_vs_cooperator
+    ratio = benefit / cost if cost != 0 else None
+    return PayoffAdditivity(additive=True, benefit=benefit, cost=cost, ratio=ratio)
 
 
 def _registry_field(key: str) -> FieldInfo:

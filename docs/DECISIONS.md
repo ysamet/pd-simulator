@@ -3272,3 +3272,130 @@ strong selection washes the k-dependence out at these settings. Nothing
 was tuned to force the textbook picture. The number and reading go back
 to the design layer with the VT-6(b) report; the scenario text Phase E
 ships must carry whatever caveat the design layer derives from this.
+
+**#141 — 2026-08-07 — The Phase E1 build record: the Task 0 inspection
+answers OUTCOME A, the greying map lands as ONE predicate table consumed
+by both clock branches, and the §12 paint-time readouts land on two new
+pure functions (M11a Phase E, sub-prompt 1; spec Design 11 as
+implemented).** (a) THE INSPECTION (the phase's opening task, spec Design
+11 extension 1): `helpers.greying` and `_async_greying` are chains of
+plain-Python conditionals evaluated over the FULL widget-value mapping —
+compound conditions already exist inline in both shapes (the Moran-weights
+rule is an OR over two widgets; the async delegation itself is an AND) —
+so predicates over the mapping are trivially admissible and the table was
+built directly in that form (Outcome A). No adapter was needed; the
+pre-existing rule chains are preserved byte-for-byte outside the cells
+Phase E names. (b) THE TABLE: `helpers.STRUCTURE_GREYING`, key →
+`GreyingRule(sync, asynchronous)`, each column a predicate over the
+values mapping returning the greyed-state note or None-for-live — notes
+BY CAUSE (the radii's OR names whichever condition holds;
+`placement_contest` has four cause notes), wording drawn from the
+registry descriptions where they already state the reason (§12's
+single-source rule). `greying` consults the sync column,
+`_async_greying` the async column; the tournament wholesale-ignore runs
+before either branch, so the two rows reachable under tournament
+(`matching.matcher`, the composition pseudo-key) self-guard on the mode.
+`grid_visible` (#121) stays BESIDE the table as its visibility sibling —
+it decides showing, not greying — and the composition row reuses it
+rather than duplicating its logic. M11b's tab/collapse work becomes a
+second renderer over this same table (the spec's stated payoff).
+(c) PRECISION taken on the matcher's sync cell: it greys on the ENGINE's
+actual gate — evolution AND lattice AND toggle (#137(b)) — not on the
+toggle alone as the sub-prompt's shorthand had it, because with the
+toggle stranded on under `well_mixed` (a greyed checkbox keeps its
+value) or under tournament the configured matcher genuinely IS consulted,
+and the note would assert something false (#34). Same cell, sharper
+predicate. Consequently `matching.opponents_per_agent`'s pre-existing
+round-robin greying (#57) gained a guard: it must not fire while spatial
+sampling is active, where the (greyed) matcher is unconsulted and k does
+the work (#108) — item 9's live-always cell made consistent.
+(d) THE ASYNC MATCHER CELL moved into the table from `_async_greying`'s
+inline check (and out of `_ASYNC_INERT`), with the Phase D baton's
+imprecision corrected: the old note claimed partners are drawn "uniformly
+(the well-mixed corner)", true only while the toggle is off (#137(c));
+the new note covers both draws. Same answer — always greyed under async.
+(e) THE PAINT-TIME FUNCTIONS (spec Design 11 extension 2), both in
+`pdsim/config/experiment.py` beside the resolvers:
+`effective_neighbour_count(shape, boundary, k)` = min(k, 8|4) — boundary
+accepted so the signature states the full geometry but documented as not
+moving the interior number — and `payoff_additivity(T, R, P, S)` (#111's
+readout 9) returning additive/b/c/ratio with the T − R = P − S test on
+`math.isclose` and ratio None when c = 0. THE READOUTS: "Grid (resolved)
+auto → r × c" beside blank dimension widgets and "Effective neighbours
+(k)" while spatial interaction is on (both above the grid preview);
+"Capacity K (resolved) auto → K" as a fourth metric literally beside the
+site count whenever K is blank on a lattice (#106's both-numbers guard);
+and the additivity verdict beside the payoff widgets in evolution mode
+(defaults read NOT additive, T − R = 2 vs P − S = 1; the donation matrix
+reads b/c = 5). (f) MACHINERY: the #101 lookahead now also reconstructs
+NULLABLE keys' forward values from their checkbox/value widget-state
+pairs — needed because K renders in Dynamics, one section after the
+Structure readout that displays it; behaviour-neutral for every greying
+predicate (none reads a nullable). (g) The `matching.matcher` registry
+description's stale sentence ("Distance-based matching arrives with the
+geographic layer in a later version" — false since Phase D) is replaced
+by the truth the greyed note also tells: while the toggle is on, partners
+come from the grid and the scheme is not consulted. `PARAMETERS.md`
+regenerated. All eight golden masters (four negative, four positive)
+pass with ZERO re-recording; 1006 tests pass; ruff check and format
+clean. One prompt discrepancy noted for the record: the sub-prompt's
+test list says `boundary_order` is pinned live under "all three
+reproduction modes" — `dynamics.reproduction_mode` has exactly two
+values (imitation, energy_economy); both are pinned.
+
+**#142 — 2026-08-07 — `matching.spatial_interaction` greys under
+`well_mixed`, both branches, note "needs a lattice world structure"
+(M11a Phase E1; a design-layer addition beyond the spec's enumerated
+map, decided 2026-08-07).** Until now the #137(e) requires-lattice
+validator was the ONLY guard, so the toggle rendered live in a
+well-mixed world and invited an avoidable validation error; a greyed
+widget saying "this exists and does nothing here" is the #34-correct
+surface (greyed, never hidden — and never a surprise error for an
+ignored parameter's gate). This is the map's genuinely FORWARD-POINTING
+rule — the Matching section renders four sections above Structure, so
+the predicate reads `structure.kind` through the #101
+session-state/default lookahead — exercising exactly the machinery
+Design 11's section-order trade-off (#100(e)/spec) accepted. The note's
+wording is the validator's own reason: in a well-mixed world there is no
+distance to sample within.
+
+**#143 — 2026-08-07 — Under `from_file` the composition widgets GREY
+(the #124 interim treatment's designed end-state), the Populate button
+remains the write path, and `population.size` stays live (M11a Phase
+E1; spec Design 8 consequence 1 delivered).** When evolution + lattice +
+`initial_layout = from_file` hold — both clock branches, via the
+`population.composition` pseudo-key row of the #141 table — the mix
+widgets disable with the note "set by the layout file … use the
+Populate button", because the file decides both arrangement and mixture
+and editable widgets restating it are two sources of the same truth
+that can silently disagree (Design 8's trap). The #124 one-click
+populate offer REMAINS as the write path (a Streamlit button callback
+may write disabled widgets' session state — greying blocks USER edits
+only), and the #126 composition-equality validator REMAINS as defence
+in depth: greying changes what the user can edit, never what is
+checked. `population.size` deliberately has NO table row — spec Design
+11 keeps it live and validated. Under tournament the composition stays
+fully live (the layout is ignored wholesale there, and founding still
+deals the widgets' mix).
+
+**#144 — 2026-08-07 — Tournament mode now greys structure wholesale:
+all twelve `structure.*` keys, `matching.spatial_interaction`, and
+`dynamics.boundary_order` join `IGNORED_IN_TOURNAMENT` (M11a Phase E1;
+the sub-prompt's item 13 inspect-and-report, resolved as plainly
+accidental).** THE INSPECTION FOUND: every structure widget rendered
+LIVE under `run.mode = tournament` although tournament ignores structure
+wholesale (#120(a)) — the `IGNORED_IN_TOURNAMENT` tuple is dynamics-only
+and simply predates M11a, and Phases A-D deferred ALL structure greying
+to Phase E; nothing anywhere records a deliberate live-under-tournament
+choice (the one deliberate tournament exclusion, `grid_visible`'s, hides
+the PREVIEW, not the widgets). The same omission covered
+`dynamics.boundary_order` from Phase C: it rendered live under
+tournament while every other Dynamics parameter greyed. Both are the
+#34 pattern's plain case — a parameter that exists but has no effect in
+the mode greys with the explanatory note — and the fix is a tuple
+extension the table makes trivial. `structure.kind` itself greys too:
+under tournament it gates nothing, exactly like `reproduction_mode`
+(#34's precedent for greying a gate in a mode that ignores its whole
+family). The generic tournament note is reused unchanged; the
+tournament check keeps running BEFORE both table branches, so the
+mode-level note wins.

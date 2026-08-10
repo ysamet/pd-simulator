@@ -14,7 +14,8 @@ parameter has everywhere.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import NamedTuple
 
 from pydantic import ValidationError
 
@@ -60,6 +61,27 @@ IGNORED_IN_TOURNAMENT = (
     "dynamics.moran_weight_death_birth",
     "dynamics.fixed_n_death_rule",
     "dynamics.imitation_overlay",
+    # M11a Phase E (#141): tournament ignores structure WHOLESALE (#120(a))
+    # — nothing is born and nothing dies there, so space has nothing to do —
+    # and with it the spatial-interaction toggle (the sync kernel
+    # substitution exists only in the evolution engines, #137(b)) and the
+    # boundary order (no generation boundary of deaths and births exists).
+    # Structure landed in Phases A-D with its whole greying map deferred to
+    # Phase E, which is why these joined the list only now.
+    "matching.spatial_interaction",
+    "structure.kind",
+    "structure.rows",
+    "structure.cols",
+    "structure.neighbourhood_shape",
+    "structure.boundary",
+    "structure.initial_layout",
+    "structure.layout_file",
+    "structure.birth_radius",
+    "structure.birth_decay",
+    "structure.placement_contest",
+    "structure.interaction_radius",
+    "structure.interaction_decay",
+    "dynamics.boundary_order",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
 
@@ -129,7 +151,6 @@ _ASYNC_INERT = (
     "dynamics.score_accounting",
     "dynamics.accounting_window",
     "dynamics.accounting_discount",
-    "matching.matcher",
 )
 """Parameters the asynchronous time model ignores wholesale (M10b spec).
 
@@ -139,6 +160,8 @@ overlay consumes it in async mode, so it gets its own overlay-keyed arm
 is consumed by async
 newborns, and the ledger knobs (initial energy, L, engagement, r, sigma,
 overhead) run in both async modes — none of them grey here.
+``matching.matcher`` moved to :data:`STRUCTURE_GREYING`'s async column
+(M11a Phase E, #141) — same answer (always greyed under async), one table.
 """
 
 _FIXED_N_PARAMS = ("dynamics.moran_rule", "dynamics.fixed_n_death_rule")
@@ -159,6 +182,380 @@ carrying capacity, no age or insolvency deaths — the Moran replacement is
 the only demography there)."""
 
 
+# ---------------------------------------------------------------------------
+# The M11a structure greying map — ONE predicate table, consumed by BOTH
+# clock branches (spec Design 11; M11a Phase E, DECISIONS #141).
+#
+# Built as DATA, not as conditionals scattered through panel code: each row
+# names a parameter and answers both branches with a liveness predicate over
+# the full widget-value mapping (the #101 lookahead supplies values for
+# widgets that render later, so predicates may point forward in registry
+# order — `matching.spatial_interaction` greys off `structure.kind`, which
+# renders four sections below it). The payoff is one milestone ahead:
+# M11b's tab/collapse work becomes a second renderer over this same table.
+# `grid_visible` is the table's VISIBILITY sibling — a named predicate kept
+# beside the table rather than inside it, because it decides showing, not
+# greying; the composition row below reuses it rather than duplicating it.
+# ---------------------------------------------------------------------------
+
+GreyingPredicate = Callable[[Mapping[str, ParamValue]], str | None]
+"""One branch's answer: the greyed-state note when inert, ``None`` when live."""
+
+
+class GreyingRule(NamedTuple):
+    """One row of the structure greying table: an answer for EACH clock branch.
+
+    Every row answers both branches (spec Design 11's two-branch
+    obligation): :func:`greying` delegates early to :func:`_async_greying`,
+    so a rule present in only one branch would simply not exist in the
+    other — producing exactly the failure #34 warns against, the app
+    asserting something false about the user's run.
+    ``dynamics.boundary_order`` is the sharp case: its entire content is
+    "live under sync, greyed under async", a statement about both branches
+    at once, which no single-branch edit can implement.
+
+    Attributes:
+        sync: The synchronous-clock answer.
+        asynchronous: The asynchronous-clock answer.
+    """
+
+    sync: GreyingPredicate
+    asynchronous: GreyingPredicate
+
+
+_NO_GEOMETRY_NOTE = (
+    "NOTE: only meaningful on a lattice — a well-mixed world has no "
+    "geometry for this to act on (no places, no distance). Switch 'World "
+    "structure' to 'lattice' to use it."
+)
+"""The generic well-mixed cause, shared by every geometry-only structure widget."""
+
+_NEEDS_LATTICE_NOTE = (
+    "NOTE: needs a lattice world structure — in a well-mixed world there "
+    "is no distance to sample within."
+)
+"""The spatial toggle's and interaction radii's well-mixed cause.
+
+Wording from the ``matching.spatial_interaction`` registry description and
+the #137(e) requires-lattice validator — the same single source (§12).
+"""
+
+_TOGGLE_OFF_NOTE = (
+    "NOTE: only consulted while 'Spatial interaction' (in the Matching "
+    "section) is on — switch it on to sample partners by distance."
+)
+"""The interaction radii's toggle-off cause (the registry description's rule)."""
+
+_MATCHER_SPATIAL_NOTE = (
+    "NOTE: not consulted while 'Spatial interaction' is on — partners come "
+    "from the grid via the reach kernel, and 'Opponents per agent' (k) does "
+    "the work. Switch spatial interaction off to use a matching scheme."
+)
+"""The sync matcher cell (#108/#137: round-robin has no local analogue)."""
+
+_ASYNC_MATCHER_NOTE = (
+    "NOTE: IGNORED under the asynchronous time model — each focal event "
+    "draws its own partners (uniformly across the population, or from the "
+    "grid while 'Spatial interaction' is on), consuming 'Opponents per "
+    "agent' directly. Round-robin is a generation-batch concept with no "
+    "event-time analogue."
+)
+"""The async matcher cell — reworded at Phase E (#141): the old note called
+the partner draw 'uniformly (the well-mixed corner)', true only while the
+spatial toggle is off (#137(c) substitutes the draw when it is on)."""
+
+_LAYOUT_FILE_NOTE = (
+    "NOTE: read only when the initial layout is 'from_file' — pick that "
+    "layout to paint the world from a file, or leave this empty."
+)
+"""The layout-file cell (the `continuation_probability` idiom, spec Design 11)."""
+
+_CONTEST_WELL_MIXED_NOTE = "NOTE: a well-mixed world has no cells to contest."
+"""placement_contest's well-mixed cause (the registry description's wording)."""
+
+_CONTEST_IMITATION_NOTE = (
+    "NOTE: under 'imitation' reproduction there are no births to place — "
+    "only a synchronous energy-economy run on a lattice reads this."
+)
+"""placement_contest's sync-imitation cause (#107's three-way conjunction)."""
+
+_CONTEST_ASYNC_NOTE = (
+    "NOTE: an asynchronous run resolves one birth at a time, so births "
+    "never contend for ground — there is nothing to contest."
+)
+"""placement_contest's async cause (the registry description's wording)."""
+
+_CONTEST_FIXED_N_NOTE = (
+    "NOTE: under the fixed-size ('fixed_n' Moran) population the newborn "
+    "takes exactly the freed site — there is no placement to contest."
+)
+"""placement_contest's async fixed_n cause (#132: no placement draw exists)."""
+
+_BOUNDARY_ORDER_ASYNC_NOTE = (
+    "NOTE: only read at a synchronous generation boundary — the "
+    "asynchronous clock has no generation boundary of deaths and births "
+    "to order."
+)
+"""boundary_order's async cell (#131: the parameter is never read there)."""
+
+_COMPOSITION_FROM_FILE_NOTE = (
+    "NOTE: set by the layout file — under 'from_file' the file decides "
+    "both the arrangement and the mixture (spec Design 8: the file wins). "
+    "Use the 'Populate the Population section from the file' button to "
+    "bring these widgets into agreement."
+)
+"""The composition row's from-file cell (#124's flow is the write path)."""
+
+
+def _on_a_lattice(values: Mapping[str, ParamValue]) -> bool:
+    """True when the world-structure widget says lattice.
+
+    Args:
+        values: Widget values (with the app's lookahead — see
+            :func:`greying`).
+
+    Returns:
+        Whether ``structure.kind`` currently reads ``"lattice"``.
+    """
+    return values.get("structure.kind") == "lattice"
+
+
+def _spatial_sampling_active(values: Mapping[str, ParamValue]) -> bool:
+    """True when partners genuinely come from the grid.
+
+    The engine's own gate (#137(b)): an EVOLUTION run on a lattice with the
+    spatial-interaction toggle on. The mode check is load-bearing —
+    tournament ignores structure wholesale (#120(a)) and keeps consulting
+    the configured matcher, so the matcher must never grey there.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        Whether spatial partner sampling would actually run.
+    """
+    return (
+        values.get("run.mode") != "tournament"
+        and _on_a_lattice(values)
+        and bool(values.get("matching.spatial_interaction"))
+    )
+
+
+def _always_live(values: Mapping[str, ParamValue]) -> str | None:
+    """The always-live answer (``structure.kind`` is the gate and never greys).
+
+    Args:
+        values: Widget values (unused; the signature is the table's).
+
+    Returns:
+        Always ``None`` — live.
+    """
+    return None
+
+
+def _geometry_only(values: Mapping[str, ParamValue]) -> str | None:
+    """Grey under well-mixed, live on a lattice — the map's base rule.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The no-geometry note under well-mixed, else ``None``.
+    """
+    return None if _on_a_lattice(values) else _NO_GEOMETRY_NOTE
+
+
+def _needs_lattice(values: Mapping[str, ParamValue]) -> str | None:
+    """The spatial toggle's rule: grey under well-mixed, with the lattice note.
+
+    This is the map's genuinely FORWARD-POINTING rule: the Matching section
+    renders four sections above Structure, so the predicate reads
+    ``structure.kind`` through the #101 lookahead (#141).
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The needs-a-lattice note under well-mixed, else ``None``.
+    """
+    return None if _on_a_lattice(values) else _NEEDS_LATTICE_NOTE
+
+
+def _layout_file_rule(values: Mapping[str, ParamValue]) -> str | None:
+    """Live only under lattice AND ``initial_layout = from_file`` (both branches).
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The applicable greyed note, or ``None`` when the file is consumed.
+    """
+    if not _on_a_lattice(values):
+        return _NO_GEOMETRY_NOTE
+    if values.get("structure.initial_layout") != "from_file":
+        return _LAYOUT_FILE_NOTE
+    return None
+
+
+def _interaction_kernel_rule(values: Mapping[str, ParamValue]) -> str | None:
+    """The radii's OR-shaped rule: grey under well-mixed OR toggle-off.
+
+    Both branches share it — the async partner draw reads the pair too
+    (#137(c)) — and the note names whichever condition actually holds.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The cause-naming note, or ``None`` under lattice with the toggle on.
+    """
+    if not _on_a_lattice(values):
+        return _NEEDS_LATTICE_NOTE
+    if not values.get("matching.spatial_interaction"):
+        return _TOGGLE_OFF_NOTE
+    return None
+
+
+def _contest_sync(values: Mapping[str, ParamValue]) -> str | None:
+    """placement_contest's sync answer: the three-way conjunction (#107).
+
+    Live only under synchronous AND lattice AND ``energy_economy`` — the
+    branch supplies "synchronous"; this predicate checks the other two,
+    with the note naming the failing cause.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The cause-naming note, or ``None`` when contests can actually occur.
+    """
+    if not _on_a_lattice(values):
+        return _CONTEST_WELL_MIXED_NOTE
+    if values.get("dynamics.reproduction_mode") != "energy_economy":
+        return _CONTEST_IMITATION_NOTE
+    return None
+
+
+def _contest_async(values: Mapping[str, ParamValue]) -> str | None:
+    """placement_contest's async answer: always greyed, note by cause.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The most specific cause: no cells (well-mixed), no placement
+        (fixed_n), or no contention (one birth at a time).
+    """
+    if not _on_a_lattice(values):
+        return _CONTEST_WELL_MIXED_NOTE
+    if values.get("dynamics.async_population") == "fixed_n":
+        return _CONTEST_FIXED_N_NOTE
+    return _CONTEST_ASYNC_NOTE
+
+
+def _matcher_sync(values: Mapping[str, ParamValue]) -> str | None:
+    """The matcher's sync answer: greyed while spatial sampling is active.
+
+    Discharges #137(a)'s recorded interim state (toggle on, matcher
+    rendering live but unconsulted).
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The partners-come-from-the-grid note, or ``None``.
+    """
+    return _MATCHER_SPATIAL_NOTE if _spatial_sampling_active(values) else None
+
+
+def _matcher_async(values: Mapping[str, ParamValue]) -> str | None:
+    """The matcher's async answer: always greyed (no event-time analogue).
+
+    Args:
+        values: Widget values (unused; the signature is the table's).
+
+    Returns:
+        Always the async matcher note.
+    """
+    return _ASYNC_MATCHER_NOTE
+
+
+def _boundary_order_async(values: Mapping[str, ParamValue]) -> str | None:
+    """boundary_order's async answer: always greyed (#131 — never read).
+
+    Args:
+        values: Widget values (unused; the signature is the table's).
+
+    Returns:
+        Always the no-generation-boundary note.
+    """
+    return _BOUNDARY_ORDER_ASYNC_NOTE
+
+
+def _composition_rule(values: Mapping[str, ParamValue]) -> str | None:
+    """The composition widgets' rule: greyed while a layout file decides them.
+
+    Reuses :func:`grid_visible` (evolution AND lattice) rather than
+    duplicating its logic (#121) — under tournament the layout is ignored
+    wholesale and the composition stays fully live.
+
+    Args:
+        values: Widget values (with the app's lookahead — ``initial_layout``
+            points FORWARD from the Population section).
+
+    Returns:
+        The set-by-the-file note under ``from_file``, else ``None``.
+    """
+    if grid_visible(values) and values.get("structure.initial_layout") == "from_file":
+        return _COMPOSITION_FROM_FILE_NOTE
+    return None
+
+
+STRUCTURE_GREYING: dict[str, GreyingRule] = {
+    "structure.kind": GreyingRule(sync=_always_live, asynchronous=_always_live),
+    "structure.rows": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.cols": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.neighbourhood_shape": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.boundary": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.initial_layout": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.layout_file": GreyingRule(sync=_layout_file_rule, asynchronous=_layout_file_rule),
+    # The birth pair stays live in EVERY reproduction mode on a lattice —
+    # under fixed_n the birth kernel defines the competition set for a
+    # freed site, the k that b/c > k counts (#132); greying it would grey
+    # the heart of the Moran localisation. The naive reading is backwards.
+    "structure.birth_radius": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.birth_decay": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
+    "structure.placement_contest": GreyingRule(sync=_contest_sync, asynchronous=_contest_async),
+    "structure.interaction_radius": GreyingRule(
+        sync=_interaction_kernel_rule, asynchronous=_interaction_kernel_rule
+    ),
+    "structure.interaction_decay": GreyingRule(
+        sync=_interaction_kernel_rule, asynchronous=_interaction_kernel_rule
+    ),
+    "matching.spatial_interaction": GreyingRule(sync=_needs_lattice, asynchronous=_needs_lattice),
+    "matching.matcher": GreyingRule(sync=_matcher_sync, asynchronous=_matcher_async),
+    # k stays live ALWAYS (#81/#108: it clamps, and it does the work under
+    # spatial sampling) — the row exists so the two-branch obligation is
+    # answered explicitly, not by omission. The pre-table round-robin rule
+    # in `greying` still applies while spatial sampling is inactive.
+    "matching.opponents_per_agent": GreyingRule(sync=_always_live, asynchronous=_always_live),
+    "dynamics.boundary_order": GreyingRule(sync=_always_live, asynchronous=_boundary_order_async),
+    # Not a registry key: the bespoke Population mix widgets consult the
+    # table through this pseudo-key (spec Design 8 consequence 1 / #124's
+    # end-state). `population.size` deliberately has NO row — it stays live
+    # and validated (spec Design 11).
+    "population.composition": GreyingRule(sync=_composition_rule, asynchronous=_composition_rule),
+}
+"""The M11a greying map (spec Design 11), one row per parameter, both branches.
+
+Consumed by :func:`greying` (sync column) and :func:`_async_greying` (async
+column); the tournament wholesale-ignore runs BEFORE either branch via
+``IGNORED_IN_TOURNAMENT``, so rows never see tournament values except
+through self-guarding predicates (:func:`_spatial_sampling_active`,
+:func:`_composition_rule`).
+"""
+
+
 def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
     """Decide whether a panel widget is greyed out right now, and why.
 
@@ -173,10 +570,17 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
       and under the synchronous clock the eight async knobs are — this
       check runs before every mode-internal check below, so the
       clock-level note wins;
+    * the M11a STRUCTURE TABLE (:data:`STRUCTURE_GREYING`, Phase E #141):
+      every ``structure.*`` parameter, the spatial-interaction toggle, the
+      matcher, k, the boundary order, and the composition pseudo-key answer
+      BOTH clock branches from one predicate table — this function consults
+      its sync column, :func:`_async_greying` its async column;
     * ``matching.opponents_per_agent``, ignored under round-robin matching
       (keyed off the matcher widget's current value, not the run mode, #57)
       — but never in async mode, where round-robin itself is inert and the
-      uniform partner draws consume k directly;
+      partner draws consume k directly, and never while spatial sampling
+      is active, where the (greyed) matcher is not consulted and k does
+      the work (#108);
     * the COARSE reproduction-mode split (M10a): under ``energy_economy``
       the whole selection + accounting families are inert (differential
       survival IS the selection); under ``imitation`` the eleven economy
@@ -219,7 +623,22 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
             "NOTE: only read under the ASYNCHRONOUS time model — IGNORED on "
             "the synchronous (generational) clock (see the time-model help)."
         )
-    if key == "matching.opponents_per_agent" and values.get("matching.matcher") == "round_robin":
+    # The M11a structure table's SYNC column (Phase E, #141). Safe to consult
+    # even under tournament: structure keys returned above via
+    # IGNORED_IN_TOURNAMENT, and the remaining rows self-guard on the mode.
+    rule = STRUCTURE_GREYING.get(key)
+    if rule is not None:
+        table_note = rule.sync(values)
+        if table_note is not None:
+            return True, table_note
+    if (
+        key == "matching.opponents_per_agent"
+        and values.get("matching.matcher") == "round_robin"
+        # Under active spatial sampling the (greyed) matcher is not
+        # consulted and k does the work (#108) — round-robin must not
+        # grey it then.
+        and not _spatial_sampling_active(values)
+    ):
         return True, (
             "NOTE: this parameter exists but is IGNORED under round-robin "
             "matching — every pair plays once anyway. Switch the matching "
@@ -254,11 +673,15 @@ def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
 def _async_greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
     """The asynchronous-clock arm of :func:`greying` (M10b spec's map).
 
-    Under event time the generational machinery is inert wholesale
+    Consults the M11a structure table's async column first (Phase E #141)
+    — the matcher's always-greyed answer lives there now, and every
+    ``structure.*`` parameter has a defined async answer, even where it is
+    "greyed, because async never reads it". Then the M10b rules: under
+    event time the generational machinery is inert wholesale
     (``reproduction_mode`` — the async paradigm is chosen by
-    ``async_population`` instead — the SelectionRule family, score
-    accounting, and the matcher; uniform partner draws ARE the well-mixed
-    corner and consume ``opponents_per_agent`` directly). Within async:
+    ``async_population`` instead — plus the SelectionRule family and score
+    accounting; each focal event draws its own partners, consuming
+    ``opponents_per_agent`` directly). Within async:
     the Moran knobs apply only under ``fixed_n``, the mixture weights only
     under ``moran_rule = random``, the economy demography knobs only under
     ``variable_n``, and β only when the imitation overlay is on — the
@@ -273,18 +696,19 @@ def _async_greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, st
     Returns:
         ``(disabled, note)`` — as :func:`greying`.
     """
+    # The M11a structure table's ASYNC column (Phase E, #141) — including
+    # the matcher, whose always-greyed answer moved here from an inline
+    # check so both of its branch answers live in the one table.
+    rule = STRUCTURE_GREYING.get(key)
+    if rule is not None:
+        table_note = rule.asynchronous(values)
+        if table_note is not None:
+            return True, table_note
     if key == "dynamics.reproduction_mode":
         return True, (
             "NOTE: IGNORED under the asynchronous time model — the async "
             "paradigm is chosen by 'Async population' instead (variable_n "
             "= the energy economy in event time; fixed_n = Moran)."
-        )
-    if key == "matching.matcher":
-        return True, (
-            "NOTE: IGNORED under the asynchronous time model — each event "
-            "draws partners uniformly (the well-mixed corner), consuming "
-            "'Opponents per agent' directly. Round-robin is a "
-            "generation-batch concept with no event-time analogue."
         )
     if key in _ASYNC_INERT:
         return True, (

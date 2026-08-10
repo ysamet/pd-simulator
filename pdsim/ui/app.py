@@ -29,7 +29,13 @@ import streamlit as st
 from pydantic import ValidationError
 from streamlit.delta_generator import DeltaGenerator
 
-from pdsim.config.experiment import ExperimentConfig
+from pdsim.config.experiment import (
+    ExperimentConfig,
+    effective_neighbour_count,
+    payoff_additivity,
+    resolve_carrying_capacity,
+    resolve_lattice_dimensions,
+)
 from pdsim.config.registry import ParameterSpec, ParamValue
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core import engine, layouts
@@ -71,8 +77,44 @@ STRUCTURE_HELP = {
         "neighbours plays nobody, earns nothing, and starves — which is the model "
         "being honest about isolation, not a fault."
     ),
+    "resolved_dimensions": (
+        "The grid the blank dimension boxes resolve to. Blank means automatic "
+        "sizing: the most-square rectangle holding exactly the population (a "
+        "prime population makes a single line). Computed by the SAME function "
+        "the run itself uses, so the number shown here and the grid the run "
+        "founds can never disagree."
+    ),
+    "resolved_capacity": (
+        "The carrying capacity a blank K resolves to on this lattice: the site "
+        "count — the grid decides. Shown beside the site count so both numbers "
+        "are visible at once. Set K below the site count instead to leave "
+        "permanent slack — empty ground for the occupied region to drift in."
+    ),
+    "effective_neighbours": (
+        "The number of matches an interior cell actually starts per generation "
+        "under spatial interaction: 'Opponents per agent' clamped to the "
+        "neighbours that exist — min(k, 8) on a Moore neighbourhood, min(k, 4) "
+        "on von Neumann. This is the k the b/c > k cooperation threshold "
+        "counts. On a bounded grid, edge and corner cells have fewer "
+        "neighbours still (a corner keeps 3 of Moore's 8); a torus has no "
+        "edges, so every cell plays exactly this number."
+    ),
 }
 """Inline (?) explanations for the Structure panel's derived readouts (the §12 rule)."""
+
+GAME_HELP = {
+    "payoff_additivity": (
+        "Whether the four payoffs form a DONATION GAME: cooperating costs the "
+        "same amount c whoever the opponent is (T − R = P − S), with a benefit "
+        "b = T − P delivered to the partner. Only then do 'b' and 'c' exist as "
+        "single numbers, and only then does the b/c > k cooperation threshold "
+        "apply. With a non-additive matrix the ratio is AMBIGUOUS rather than "
+        "merely inapplicable — two defensible benefits (T − P, R − S) over two "
+        "defensible costs (T − R, P − S) give four different readings — so "
+        "asking whether b/c clears k is a malformed question there."
+    ),
+}
+"""Inline (?) explanations for the Game panel's derived readouts (the §12 rule)."""
 
 PROGRESS_EVERY = 200
 """Fine-grained events between progress-line refreshes (DECISIONS #39)."""
@@ -350,6 +392,15 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         for key, spec in specs.items()
         if not spec.nullable
     }
+    # Nullable numbers render as a checkbox/value widget PAIR, so their
+    # forward value is reconstructed from that pair's session state (blank
+    # until the box is ticked). The Structure readouts need one of them —
+    # carrying capacity — before the Dynamics section renders (#106's
+    # both-numbers guard, M11a Phase E).
+    for key, spec in specs.items():
+        if spec.nullable and spec.kind in ("int", "float"):
+            limited = st.session_state.get(f"{key}#limit", spec.default is not None)
+            lookahead[key] = st.session_state.get(f"{key}#value", spec.default) if limited else None
 
     composition: dict[str, int] = {}
     for section, section_specs in sections.items():
@@ -364,8 +415,23 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
                 disabled, note = helpers.greying(spec.key, {**lookahead, **values})
                 with columns[i % 2]:
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
+            if section == "Game" and values.get("run.mode") == "evolution":
+                # The §12 payoff-additivity readout (#111) — whether the
+                # b/c > k threshold is even a well-formed question for
+                # these four payoffs. Tournament mode has no births or
+                # deaths for the threshold to govern, so it stays out.
+                _additivity_readout(values)
             if section == "Population":
-                composition = _composition_panel()
+                # The composition widgets are bespoke (no registry specs),
+                # so they consult the greying table through a pseudo-key:
+                # under `from_file` the layout file decides the mixture and
+                # the mix widgets grey (spec Design 8; #124's end-state).
+                # The lookahead matters here — `initial_layout` renders in
+                # the LATER Structure section.
+                comp_disabled, comp_note = helpers.greying(
+                    "population.composition", {**lookahead, **values}
+                )
+                composition = _composition_panel(disabled=comp_disabled, note=comp_note)
             if section == "Structure" and helpers.grid_visible({**lookahead, **values}):
                 # The Population section renders before Structure (registry
                 # order), so the composition is already gathered here — which
@@ -398,14 +464,24 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
     return values, composition, strategy_params
 
 
-def _composition_panel() -> dict[str, int]:
+def _composition_panel(disabled: bool = False, note: str = "") -> dict[str, int]:
     """Render the per-strategy count inputs for the initial population mix.
+
+    Args:
+        disabled: Grey every mix widget out (under ``from_file`` the layout
+            file decides the mixture — the greying table's composition row,
+            #34's greyed-never-hidden). The #124 Populate button still
+            writes their session state: greying blocks USER edits only.
+        note: The greyed-state explanation, shown as a visible caption and
+            appended to each widget's tooltip.
 
     Returns:
         Strategy machine name → count (zeros allowed here; dropped at
         config assembly).
     """
     st.markdown("**Initial population mix** (counts must sum to the population size)")
+    if disabled and note:
+        st.caption(note)
     counts: dict[str, int] = {}
     columns = st.columns(4)
     for i, info in enumerate(all_strategies()):
@@ -416,10 +492,62 @@ def _composition_panel() -> dict[str, int]:
                     min_value=0,
                     step=1,
                     key=f"composition.{info.name}",
-                    help=info.description,
+                    help=f"{info.description}\n\n{note}" if note else info.description,
+                    disabled=disabled,
                 )
             )
     return counts
+
+
+def _additivity_readout(values: dict[str, ParamValue]) -> None:
+    """Render the §12 payoff-additivity readout inside the Game expander (#111).
+
+    Presentation only (the #38 split): the arithmetic is
+    :func:`pdsim.config.experiment.payoff_additivity`, a pure function of
+    the four payoff values on the paint-time resolver pattern, so this
+    number and any future validator arithmetic cannot drift.
+
+    Args:
+        values: The widget values gathered so far this script run (the Game
+            section has already rendered, so all four payoffs are present).
+    """
+    payoffs = tuple(
+        values.get(key)
+        for key in (
+            "game.payoff_temptation",
+            "game.payoff_reward",
+            "game.payoff_punishment",
+            "game.payoff_sucker",
+        )
+    )
+    if not all(isinstance(p, int | float) for p in payoffs):
+        return
+    t, r, p, s = (float(x) for x in payoffs)  # type: ignore[arg-type]
+    report = payoff_additivity(t, r, p, s)
+    if report.additive and report.ratio is not None:
+        st.metric(
+            "Payoff additivity",
+            f"b/c = {report.ratio:g}",
+            help=GAME_HELP["payoff_additivity"],
+        )
+        st.caption(f"additive: b = {report.benefit:g}, c = {report.cost:g}, b/c = {report.ratio:g}")
+    elif report.additive:
+        st.metric(
+            "Payoff additivity",
+            f"b = {report.benefit:g}, c = 0",
+            help=GAME_HELP["payoff_additivity"],
+        )
+        st.caption(
+            f"additive with b = {report.benefit:g} and c = 0 — cooperating "
+            "costs nothing, so the b/c > k threshold is trivially cleared."
+        )
+    else:
+        st.metric("Payoff additivity", "not additive", help=GAME_HELP["payoff_additivity"])
+        st.caption(
+            "not additive — the b/c > k threshold does not apply: cooperating "
+            f"costs a different amount against a cooperator (T − R = {t - r:g}) "
+            f"than against a defector (P − S = {p - s:g})."
+        )
 
 
 def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
@@ -540,6 +668,7 @@ def _grid_area(
     config: ExperimentConfig,
     key_prefix: str,
     config_dir: Path | None = None,
+    resolved_capacity: int | None = None,
 ) -> None:
     """Draw the lattice and its derived readouts, if the run has one.
 
@@ -560,6 +689,10 @@ def _grid_area(
             areas in the same script run.
         config_dir: Folder to resolve a relative layout file against (a
             recorded run keeps its own copy).
+        resolved_capacity: The K a BLANK carrying-capacity widget resolves
+            to, shown beside the site count (#106's both-numbers guard) —
+            the panel passes it at paint time; the results browser and run
+            area pass nothing (their configs store the resolved number).
     """
     try:
         view = layouts.founding_view(config, config_dir)
@@ -573,7 +706,15 @@ def _grid_area(
         width="stretch",
         key=f"{key_prefix}_grid",
     )
-    col_sites, col_occupied, col_isolated = st.columns(3)
+    if resolved_capacity is None:
+        col_sites, col_occupied, col_isolated = st.columns(3)
+    else:
+        col_sites, col_capacity, col_occupied, col_isolated = st.columns(4)
+        col_capacity.metric(
+            "Capacity K (resolved)",
+            f"auto → {resolved_capacity}",
+            help=STRUCTURE_HELP["resolved_capacity"],
+        )
     col_sites.metric("Sites", f"{view.site_count}", help=STRUCTURE_HELP["site_count"])
     col_occupied.metric(
         "Occupied",
@@ -607,6 +748,88 @@ def _populate_from_layout_file(size: int, counts: dict[str, int]) -> None:
         st.session_state[f"composition.{info.name}"] = int(counts.get(info.name, 0))
 
 
+def _structure_readouts(values: dict[str, ParamValue]) -> None:
+    """Render the paint-time derived readouts above the grid preview (§12).
+
+    Each is a pure resolver call with possibly-blank inputs (spec Design 11
+    extension 2) — the SAME functions the validator runs, so the numbers
+    shown and the numbers the run uses can never drift:
+
+    * the grid a blank rows/cols pair resolves to ("auto → 10 × 10");
+    * the effective neighbour count under spatial interaction — the k the
+      b/c > k threshold compares against, shown while the toggle is on.
+
+    Args:
+        values: The widget values gathered so far this script run (the
+            Structure section has already rendered), plus the lookahead.
+    """
+    size = values.get("population.size")
+    if not isinstance(size, int) or size < 1:
+        return
+    metrics: list[tuple[str, str, str]] = []
+    rows = values.get("structure.rows")
+    cols = values.get("structure.cols")
+    if rows is None or cols is None:
+        resolved_rows, resolved_cols = resolve_lattice_dimensions(
+            rows if isinstance(rows, int) else None,
+            cols if isinstance(cols, int) else None,
+            size,
+        )
+        metrics.append(
+            (
+                "Grid (resolved)",
+                f"auto → {resolved_rows} × {resolved_cols}",
+                STRUCTURE_HELP["resolved_dimensions"],
+            )
+        )
+    if values.get("matching.spatial_interaction"):
+        shape = values.get("structure.neighbourhood_shape")
+        boundary = values.get("structure.boundary")
+        k = values.get("matching.opponents_per_agent")
+        if isinstance(shape, str) and isinstance(boundary, str) and isinstance(k, int):
+            metrics.append(
+                (
+                    "Effective neighbours (k)",
+                    str(effective_neighbour_count(shape, boundary, k)),
+                    STRUCTURE_HELP["effective_neighbours"],
+                )
+            )
+    if not metrics:
+        return
+    columns = st.columns(max(len(metrics), 2))
+    for column, (label, value, help_text) in zip(columns, metrics, strict=False):
+        column.metric(label, value, help=help_text)
+
+
+def _resolved_capacity_if_blank(values: dict[str, ParamValue]) -> int | None:
+    """The K a blank carrying-capacity widget resolves to on this lattice.
+
+    #106's both-numbers guard: whenever K is blank on a lattice, the panel
+    shows the resolved K beside the site count. The K widget renders in the
+    LATER Dynamics section, so its state arrives through the lookahead.
+
+    Args:
+        values: The widget values gathered so far, plus the lookahead.
+
+    Returns:
+        The resolved K, or ``None`` when K is set explicitly (the widget
+        already shows the number) or the inputs cannot resolve yet.
+    """
+    if values.get("dynamics.carrying_capacity") is not None:
+        return None
+    size = values.get("population.size")
+    if not isinstance(size, int) or size < 1:
+        return None
+    rows = values.get("structure.rows")
+    cols = values.get("structure.cols")
+    resolved_rows, resolved_cols = resolve_lattice_dimensions(
+        rows if isinstance(rows, int) else None,
+        cols if isinstance(cols, int) else None,
+        size,
+    )
+    return resolve_carrying_capacity(None, resolved_rows * resolved_cols)
+
+
 def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
     """Preview the founding arrangement from the panel's current values.
 
@@ -626,6 +849,7 @@ def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int])
         values: Registry key → widget value gathered so far this script run.
         composition: Strategy machine name → agent count.
     """
+    _structure_readouts(values)
     if values.get("structure.initial_layout") == "from_file":
         names = ", ".join(f"`{info.name}`" for info in all_strategies())
         st.caption(
@@ -677,7 +901,7 @@ def _structure_panel(values: dict[str, ParamValue], composition: dict[str, int])
         messages = helpers.validation_messages(error)
         st.caption(f"The grid preview is waiting on: {messages[0]}")
         return
-    _grid_area(config, key_prefix="panel")
+    _grid_area(config, key_prefix="panel", resolved_capacity=_resolved_capacity_if_blank(values))
 
 
 def _request_stop() -> None:

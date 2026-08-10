@@ -14,6 +14,8 @@ from pdsim.config.experiment import (
     GameConfig,
     PopulationConfig,
     StructureConfig,
+    effective_neighbour_count,
+    payoff_additivity,
     resolve_carrying_capacity,
     resolve_lattice_dimensions,
 )
@@ -631,3 +633,78 @@ class TestPhaseCValidators:
                 "reproduction_overhead": 150.0,
             }
         )
+
+
+class TestPhaseEPaintTimeFunctions:
+    """M11a Phase E: the §12 readout functions on the paint-time pattern (#141)."""
+
+    def test_resolvers_accept_fully_blank_inputs_without_raising(self) -> None:
+        """Paint time may hand the resolvers nothing but a population size."""
+        assert resolve_lattice_dimensions(None, None, 100) == (10, 10)
+        assert resolve_carrying_capacity(None, None) == 200
+        assert resolve_carrying_capacity(None, 10 * 10) == 100
+
+    def test_display_arithmetic_equals_the_validators(self) -> None:
+        """Anti-drift: the panel's numbers ARE the validator's numbers.
+
+        The panel calls the same free functions the config validator runs,
+        so this asserts the resolved config agrees with a direct call on
+        the same blank inputs.
+        """
+        cfg = _minimal_config(
+            structure={"kind": "lattice"},
+            dynamics={"reproduction_mode": "energy_economy"},
+        )
+        assert (cfg.structure.rows, cfg.structure.cols) == resolve_lattice_dimensions(
+            None, None, cfg.population.size
+        )
+        site_count = cfg.structure.rows * cfg.structure.cols
+        assert cfg.dynamics.carrying_capacity == resolve_carrying_capacity(None, site_count)
+
+    def test_effective_neighbour_count_clamps_to_the_interior_degree(self) -> None:
+        """min(k, 8) on Moore, min(k, 4) on von Neumann — the threshold's k."""
+        assert effective_neighbour_count("moore", "torus", 8) == 8
+        assert effective_neighbour_count("moore", "torus", 20) == 8
+        assert effective_neighbour_count("von_neumann", "torus", 8) == 4
+        assert effective_neighbour_count("von_neumann", "bounded", 3) == 3
+
+    def test_boundary_does_not_move_the_interior_number(self) -> None:
+        """Torus and bounded share the interior degree; edges only clamp lower."""
+        for shape in ("moore", "von_neumann"):
+            assert effective_neighbour_count(shape, "torus", 99) == effective_neighbour_count(
+                shape, "bounded", 99
+            )
+
+    @pytest.mark.parametrize(
+        ("payoffs", "additive", "benefit", "cost", "ratio"),
+        [
+            # The project defaults: a valid PD that is NOT a donation game
+            # (T − R = 2 against P − S = 1) — the #111 finding.
+            ((5.0, 3.0, 1.0, 0.0), False, None, None, None),
+            # The donation matrix (donation_game_threshold): b/c = 5.
+            ((5.0, 4.0, 0.0, -1.0), True, 5.0, 1.0, 5.0),
+            # Boundary case: additive with P ≠ 0 (T − R = 2 = P − S).
+            ((6.0, 4.0, 2.0, 0.0), True, 4.0, 2.0, 2.0),
+        ],
+    )
+    def test_payoff_additivity_verdicts(
+        self,
+        payoffs: tuple[float, float, float, float],
+        additive: bool,
+        benefit: float | None,
+        cost: float | None,
+        ratio: float | None,
+    ) -> None:
+        """The additivity readout's arithmetic, pinned per matrix (#111)."""
+        report = payoff_additivity(*payoffs)
+        assert report.additive is additive
+        assert report.benefit == benefit
+        assert report.cost == cost
+        assert report.ratio == ratio
+
+    def test_zero_cost_additive_matrix_has_no_finite_ratio(self) -> None:
+        """T = R with P = S is additive with c = 0 — the ratio stays None."""
+        report = payoff_additivity(5.0, 5.0, 1.0, 1.0)
+        assert report.additive
+        assert report.cost == 0.0
+        assert report.ratio is None

@@ -652,3 +652,317 @@ class TestLayoutFileDimensionMismatch:
         values = self._values(tmp_path)
         values["structure.layout_file"] = str(tmp_path / "gone.txt")
         assert helpers.layout_file_dimension_mismatch(values) is None
+
+
+class TestStructureGreyingTable:
+    """M11a Phase E: the ONE predicate table, consumed by BOTH branches (#141).
+
+    The spec's Design 11 map made executable: a completeness test for the
+    two-branch obligation, then cell pins for every load-bearing rule.
+    """
+
+    SYNC: ClassVar[dict[str, object]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "synchronous",
+    }
+    ASYNC: ClassVar[dict[str, object]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "asynchronous",
+    }
+
+    def test_every_named_key_has_a_defined_answer_in_both_branches(self) -> None:
+        """The two-branch obligation, executable (spec Design 11).
+
+        Every ``structure.*`` registry key plus the four named
+        matching/dynamics keys must carry an explicit answer in BOTH table
+        columns — even where that answer is "greyed, because async never
+        reads it" — and each answer must evaluate on a bare mapping.
+        """
+        from pdsim.config.registry import all_specs
+
+        named = [
+            *(spec.key for spec in all_specs() if spec.key.startswith("structure.")),
+            "matching.spatial_interaction",
+            "matching.matcher",
+            "matching.opponents_per_agent",
+            "dynamics.boundary_order",
+        ]
+        assert named  # the registry must actually contribute structure keys
+        for key in named:
+            assert key in helpers.STRUCTURE_GREYING, key
+            rule = helpers.STRUCTURE_GREYING[key]
+            for answer in (rule.sync({}), rule.asynchronous({})):
+                assert answer is None or isinstance(answer, str), key
+
+    def test_opponents_per_agent_answers_live_in_both_branches(self) -> None:
+        """Item 9's assertion: k stays live always — the #81 clamp idiom."""
+        rule = helpers.STRUCTURE_GREYING["matching.opponents_per_agent"]
+        spatial = {"structure.kind": "lattice", "matching.spatial_interaction": True}
+        for values in ({}, spatial):
+            assert rule.sync(values) is None
+            assert rule.asynchronous(values) is None
+
+    def test_kind_is_the_gate_and_never_greys(self) -> None:
+        """structure.kind stays live in both branches, both worlds."""
+        for base in (self.SYNC, self.ASYNC):
+            for kind in ("well_mixed", "lattice"):
+                values = {**base, "structure.kind": kind}
+                assert helpers.greying("structure.kind", values) == (False, ""), (base, kind)
+
+    def test_well_mixed_greys_every_other_structure_widget_in_both_branches(self) -> None:
+        """The map's base rule: no geometry, nothing for these to act on."""
+        for base in (self.SYNC, self.ASYNC):
+            values = {**base, "structure.kind": "well_mixed"}
+            for key in (
+                "structure.rows",
+                "structure.cols",
+                "structure.neighbourhood_shape",
+                "structure.boundary",
+                "structure.initial_layout",
+                "structure.layout_file",
+                "structure.birth_radius",
+                "structure.birth_decay",
+                "structure.placement_contest",
+                "structure.interaction_radius",
+                "structure.interaction_decay",
+            ):
+                disabled, note = helpers.greying(key, values)
+                assert disabled, (base, key)
+                assert note, (base, key)
+
+    def test_layout_file_needs_lattice_and_from_file(self) -> None:
+        """The `continuation_probability` idiom, in both branches."""
+        for base in (self.SYNC, self.ASYNC):
+            live = {
+                **base,
+                "structure.kind": "lattice",
+                "structure.initial_layout": "from_file",
+            }
+            assert helpers.greying("structure.layout_file", live) == (False, "")
+            other_layout = {**live, "structure.initial_layout": "random"}
+            disabled, note = helpers.greying("structure.layout_file", other_layout)
+            assert disabled
+            assert "from_file" in note
+
+    def test_birth_pair_stays_live_on_a_lattice_in_every_mode(self) -> None:
+        """The spec's emphatic cell: the naive reading is BACKWARDS.
+
+        Under async fixed_n the birth kernel defines the competition set
+        for a freed site — the k that b/c > k counts (#132) — so the pair
+        must NOT grey there; nor under sync imitation (the spec's map greys
+        the pair only under well_mixed).
+        """
+        modes = [
+            {**self.ASYNC, "dynamics.async_population": "fixed_n"},
+            {**self.ASYNC, "dynamics.async_population": "variable_n"},
+            {**self.SYNC, "dynamics.reproduction_mode": "energy_economy"},
+            {**self.SYNC, "dynamics.reproduction_mode": "imitation"},
+        ]
+        for base in modes:
+            values = {**base, "structure.kind": "lattice"}
+            for key in ("structure.birth_radius", "structure.birth_decay"):
+                assert helpers.greying(key, values) == (False, ""), (base, key)
+
+    def test_placement_contest_three_way_conjunction(self) -> None:
+        """All eight combinations of (synchronous, lattice, energy_economy).
+
+        Exactly one cell is live — sync AND lattice AND economy (#107) —
+        and each greyed cell's note names its actual cause.
+        """
+        for synchronous in (True, False):
+            for lattice in (True, False):
+                for economy in (True, False):
+                    values = {
+                        **(self.SYNC if synchronous else self.ASYNC),
+                        "structure.kind": "lattice" if lattice else "well_mixed",
+                        "dynamics.reproduction_mode": (
+                            "energy_economy" if economy else "imitation"
+                        ),
+                    }
+                    disabled, note = helpers.greying("structure.placement_contest", values)
+                    cell = (synchronous, lattice, economy)
+                    if synchronous and lattice and economy:
+                        assert (disabled, note) == (False, ""), cell
+                    else:
+                        assert disabled, cell
+                        if not lattice:
+                            assert "cells to contest" in note or "well-mixed" in note, cell
+                        elif not synchronous:
+                            assert "asynchronous" in note or "fixed_n" in note.lower(), cell
+                        else:
+                            assert "imitation" in note, cell
+
+    def test_placement_contest_async_notes_name_the_specific_cause(self) -> None:
+        """fixed_n gets the freed-site note; variable_n the one-at-a-time note."""
+        fixed = {
+            **self.ASYNC,
+            "structure.kind": "lattice",
+            "dynamics.async_population": "fixed_n",
+        }
+        _, note = helpers.greying("structure.placement_contest", fixed)
+        assert "freed site" in note
+        variable = {**fixed, "dynamics.async_population": "variable_n"}
+        _, note = helpers.greying("structure.placement_contest", variable)
+        assert "one birth at a time" in note
+
+    def test_interaction_radii_disjunction_names_the_holding_condition(self) -> None:
+        """Three greyed causes, one live cell — in BOTH branches (#137(c))."""
+        for base in (self.SYNC, self.ASYNC):
+            for key in ("structure.interaction_radius", "structure.interaction_decay"):
+                live = {
+                    **base,
+                    "structure.kind": "lattice",
+                    "matching.spatial_interaction": True,
+                }
+                assert helpers.greying(key, live) == (False, ""), (base, key)
+                toggle_off = {**live, "matching.spatial_interaction": False}
+                disabled, note = helpers.greying(key, toggle_off)
+                assert disabled and "Spatial interaction" in note, (base, key)
+                for toggle in (True, False):
+                    well_mixed = {
+                        **base,
+                        "structure.kind": "well_mixed",
+                        "matching.spatial_interaction": toggle,
+                    }
+                    disabled, note = helpers.greying(key, well_mixed)
+                    assert disabled and "lattice" in note, (base, key, toggle)
+
+    def test_spatial_toggle_greys_under_well_mixed_in_both_branches(self) -> None:
+        """The forward-pointing rule (#141): the toggle renders ABOVE kind."""
+        for base in (self.SYNC, self.ASYNC):
+            well_mixed = {**base, "structure.kind": "well_mixed"}
+            disabled, note = helpers.greying("matching.spatial_interaction", well_mixed)
+            assert disabled
+            assert "lattice" in note
+            lattice = {**base, "structure.kind": "lattice"}
+            assert helpers.greying("matching.spatial_interaction", lattice) == (False, "")
+
+    def test_matcher_greys_while_spatial_sampling_is_active_sync(self) -> None:
+        """Discharges #137(a)'s interim state: toggle on → matcher unconsulted."""
+        values = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "matching.spatial_interaction": True,
+        }
+        disabled, note = helpers.greying("matching.matcher", values)
+        assert disabled
+        assert "not consulted" in note
+        off = {**values, "matching.spatial_interaction": False}
+        assert helpers.greying("matching.matcher", off) == (False, "")
+
+    def test_matcher_stays_live_under_tournament_whatever_the_toggle_says(self) -> None:
+        """Tournament keeps build_matcher (#137(b)) — the mode guard is real."""
+        values = {
+            "run.mode": "tournament",
+            "structure.kind": "lattice",
+            "matching.spatial_interaction": True,
+        }
+        assert helpers.greying("matching.matcher", values) == (False, "")
+
+    def test_async_matcher_note_knows_about_spatial_interaction(self) -> None:
+        """The Phase D imprecision, corrected: partners are not always uniform."""
+        values = {**self.ASYNC, "structure.kind": "lattice"}
+        disabled, note = helpers.greying("matching.matcher", values)
+        assert disabled
+        assert "Spatial interaction" in note
+
+    def test_k_stays_live_under_active_spatial_sampling(self) -> None:
+        """A (greyed) round_robin matcher must not grey k while spatial is on."""
+        values = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "matching.spatial_interaction": True,
+            "matching.matcher": "round_robin",
+        }
+        assert helpers.greying("matching.opponents_per_agent", values) == (False, "")
+        off = {**values, "matching.spatial_interaction": False}
+        disabled, note = helpers.greying("matching.opponents_per_agent", off)
+        assert disabled
+        assert "round-robin" in note
+
+    def test_boundary_order_is_live_under_every_synchronous_mode(self) -> None:
+        """#131's cell: live under ALL sync runs (VT-4's slots rationing)."""
+        for reproduction in ("imitation", "energy_economy"):
+            for kind in ("well_mixed", "lattice"):
+                values = {
+                    **self.SYNC,
+                    "dynamics.reproduction_mode": reproduction,
+                    "structure.kind": kind,
+                }
+                assert helpers.greying("dynamics.boundary_order", values) == (False, ""), (
+                    reproduction,
+                    kind,
+                )
+
+    def test_boundary_order_greys_under_async_with_the_no_boundary_note(self) -> None:
+        """The sharp two-branch case: its whole content is sync-vs-async."""
+        for kind in ("well_mixed", "lattice"):
+            values = {**self.ASYNC, "structure.kind": kind}
+            disabled, note = helpers.greying("dynamics.boundary_order", values)
+            assert disabled, kind
+            assert "generation boundary" in note
+
+    def test_composition_greys_under_from_file_on_both_clocks(self) -> None:
+        """Spec Design 8 consequence 1 / #124's end-state: the file decides."""
+        for base in (self.SYNC, self.ASYNC):
+            values = {
+                **base,
+                "structure.kind": "lattice",
+                "structure.initial_layout": "from_file",
+            }
+            disabled, note = helpers.greying("population.composition", values)
+            assert disabled, base
+            assert "Populate" in note
+
+    def test_composition_stays_live_outside_the_from_file_cell(self) -> None:
+        """Any other layout, a well-mixed world, or tournament: fully live."""
+        for values in (
+            {**self.SYNC, "structure.kind": "lattice", "structure.initial_layout": "random"},
+            {**self.SYNC, "structure.kind": "well_mixed", "structure.initial_layout": "from_file"},
+            {
+                "run.mode": "tournament",
+                "structure.kind": "lattice",
+                "structure.initial_layout": "from_file",
+            },
+        ):
+            assert helpers.greying("population.composition", values) == (False, ""), values
+
+    def test_population_size_has_no_table_row_and_stays_live(self) -> None:
+        """Spec Design 11: size stays live and validated, even under from_file."""
+        assert "population.size" not in helpers.STRUCTURE_GREYING
+        values = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "structure.initial_layout": "from_file",
+        }
+        assert helpers.greying("population.size", values) == (False, "")
+
+    def test_capacity_and_size_rules_are_unamended(self) -> None:
+        """Item 11: K and N keep their existing greying exactly."""
+        economy = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "dynamics.reproduction_mode": "energy_economy",
+        }
+        assert helpers.greying("dynamics.carrying_capacity", economy) == (False, "")
+        imitation = {**economy, "dynamics.reproduction_mode": "imitation"}
+        disabled, note = helpers.greying("dynamics.carrying_capacity", imitation)
+        assert disabled
+        assert "IGNORED under imitation" in note
+
+    def test_structure_greys_wholesale_under_tournament(self) -> None:
+        """Item 13's fix: #120(a) made visible — the widgets say so too now."""
+        values = {"run.mode": "tournament", "structure.kind": "lattice"}
+        for key in (
+            "structure.kind",
+            "structure.rows",
+            "structure.initial_layout",
+            "structure.birth_radius",
+            "structure.placement_contest",
+            "structure.interaction_radius",
+            "matching.spatial_interaction",
+            "dynamics.boundary_order",
+        ):
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "tournament mode" in note, key
