@@ -293,13 +293,24 @@ browser's Founding | Final occupancy selector, presence-driven,
 defaulting to Final (#146, discharging #136's deferral); and the golden
 suite renamed to `pdsim/tests/test_golden_masters.py`, zero pins
 touched (#147 — run it as `pytest pdsim/tests/test_golden_masters.py`).
-**The #127 sparse-`stripes` band was NOT implemented — BLOCKED (#148)**:
-two of #133's positive goldens pin sparse-`stripes` foundings
-(`sync_economy_lattice` N=6 on 3×4; `async_variable_n_lattice` N=10 on
-4×5), so the band cannot land under a zero-re-recording guard; the
-design layer must rule (re-record those two pins, re-pin them off the
-sparse-`stripes` case, or amend #127) before the band ships. 1020
-tests, zero golden re-recordings. Remaining: the #148 band ruling +
-Task 3; **E3** — the four named scenarios; **E4** — the bench structure
-column and the §12 54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
+E2's Task 3 was correctly HELD (#148) on two Phase C positive goldens
+pinning sparse-`stripes` foundings. **E2b landed 2026-08-09 (#150,
+discharging #148 by its option (a))**: the #127 sparse-`stripes`
+full-width band (`layouts._stripes_footprint` — ceil(N ÷ cols) rows
+centred vertically, all full-width except a centred partial LAST row;
+only `stripes` changes, no RNG, `fixed_n` unreachable by validator);
+the #120(f) test retirements (ball pin replaced by band pins including
+the two #148 footprints at the goldens' own compositions, a
+stripes ≠ blocks differentiation pin, a counting-wrapper zero-draw pin,
+the #125 fallback and blob-coincidence pins re-referenced onto
+`blocks`' footprint, and the new band-equals-rectangle coincidence at
+N=10 on 5×5 pinned as inherent); and the CONFINED re-record —
+`sync_economy_lattice` and `async_variable_n_lattice` re-recorded with
+the full #133(d) technique (both now carry the reload-and-re-run
+assertion; `async_fixed_n_lattice` alone keeps stream+folder-only
+scope), verified: only those two pins failed pre-re-record, foundings
+asserted against the #148 footprints before capture, and the diff shows
+exactly four constants moved. 1029 tests. Remaining: **E3** — the four
+named scenarios; **E4** — the bench structure column and the §12
+54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
 listed in `docs/DESIGN.md` §6.

@@ -35,6 +35,7 @@ from pdsim.core.layouts import (
 from pdsim.core.occupancy import Occupancy
 from pdsim.core.strategies import strategy_name_of
 from pdsim.core.structure import LatticeStructure
+from pdsim.tests.counting_rng import CountingGenerator
 
 AC = "always_cooperate"
 AD = "always_defect"
@@ -223,32 +224,142 @@ class TestLayoutDealing:
         centred = {14, 15, 20, 21, 22, 28}
         assert set(placement) != centred
 
-    def test_patterned_layouts_use_a_centred_footprint_when_sparse(self) -> None:
-        """The patterned five stay contiguous when N is below the site count."""
+    def test_non_stripes_patterned_layouts_keep_the_centred_ball_when_sparse(self) -> None:
+        """`blocks`, `checkerboard` and `patches` stay on the #119(a) ball.
+
+        #127/#150 gave `stripes` its own full-width band; the other
+        patterned layouts' purposes — compact runs, maximal interleaving,
+        organic patches — are served by a compact blob, so their footprint
+        is unchanged. (Replaces the stripes-based centred-footprint pin,
+        per #120(f)'s retire-with-replacement rule.)
+        """
         structure = _lattice(rows=5, cols=5)
-        placement = deal_layout(structure, {AC: 4, AD: 5}, "stripes", np.random.default_rng(0))
-        assert sorted(placement) == [6, 7, 8, 11, 12, 13, 16, 17, 18]
+        ball = [6, 7, 8, 11, 12, 13, 16, 17, 18]
+        for layout in ("blocks", "checkerboard", "patches"):
+            placement = deal_layout(structure, {AC: 4, AD: 5}, layout, np.random.default_rng(0))
+            assert sorted(placement) == ball, layout
+
+    def test_sparse_stripes_is_a_centred_full_width_band(self) -> None:
+        """N=60 on 20x20: rows 8-10 exactly, every column occupied (#127/#150).
+
+        The band is what makes sparse stripes read as STRIPES rather than
+        as a blob: ceil(60 / 20) = 3 full-width rows, centred vertically by
+        integer division.
+        """
+        structure = _lattice(rows=20, cols=20)
+        placement = deal_layout(structure, {AC: 30, AD: 30}, "stripes", np.random.default_rng(0))
+        assert sorted(placement) == list(range(8 * 20, 11 * 20))
+
+    def test_sparse_stripes_centres_a_partial_last_row(self) -> None:
+        """N=50 on 20x20: rows 8-9 full, row 10 holds ten centred cells.
+
+        50 is not a multiple of 20, so the band's LAST row carries the
+        remainder — ten cells centred horizontally (columns 5-14, start by
+        integer division).
+        """
+        structure = _lattice(rows=20, cols=20)
+        placement = deal_layout(structure, {AC: 25, AD: 25}, "stripes", np.random.default_rng(0))
+        expected = list(range(8 * 20, 10 * 20)) + [10 * 20 + col for col in range(5, 15)]
+        assert sorted(placement) == expected
+
+    @pytest.mark.parametrize(
+        ("rows", "cols", "counts", "expected"),
+        [
+            (3, 4, {AC: 3, AD: 3}, [0, 1, 2, 3, 5, 6]),
+            (4, 5, {"tit_for_tat": 5, AD: 5}, list(range(5, 15))),
+        ],
+    )
+    def test_sparse_stripes_band_on_the_re_recorded_golden_grids(
+        self, rows: int, cols: int, counts: dict[str, int], expected: list[int]
+    ) -> None:
+        """The two #148-computed foundings the #150 re-record pins onto.
+
+        These are exactly the grids and compositions of the two re-recorded
+        golden masters (`sync_economy_lattice`, N=6 on 3x4;
+        `async_variable_n_lattice`, N=10 on 4x5). The re-record procedure
+        asserted the new foundings equal these footprints BEFORE touching
+        the recorded constants.
+        """
+        structure = _lattice(rows=rows, cols=cols)
+        placement = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+        assert sorted(placement) == expected
+
+    def test_sparse_stripes_differs_from_sparse_blocks(self) -> None:
+        """The band and the ball part company where they used to coincide.
+
+        Before #150 every sparse patterned layout shared the #119(a) ball
+        footprint; N=60 on 20x20 now separates `stripes` (the full-width
+        band) from `blocks` (the centred blob) — the differentiation pin
+        #150 names.
+        """
+        structure = _lattice(rows=20, cols=20)
+        counts = {AC: 30, AD: 30}
+        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+        blocks = deal_layout(structure, counts, "blocks", np.random.default_rng(0))
+        assert sorted(stripes) != sorted(blocks)
+
+    def test_sparse_stripes_consumes_no_draw(self) -> None:
+        """The #119(f) founding-draw gate stays closed: the band is arithmetic.
+
+        Asserted via the counting wrapper — zero generator method calls of
+        ANY kind on the sparse-stripes founding path, not merely an unmoved
+        bit-generator state.
+        """
+        config = ExperimentConfig.model_validate(
+            {
+                "mode": "evolution",
+                "seed": 5,
+                "population": {"size": 6, "composition": {AC: 3, AD: 3}},
+                "structure": {"kind": "lattice", "rows": 3, "cols": 4, "initial_layout": "stripes"},
+                "dynamics": {"generations": 1},
+            }
+        )
+        agents = build_initial_population(config)
+        counted = CountingGenerator(np.random.default_rng(config.seed))
+        occupancy = found_population(config, agents, counted)  # type: ignore[arg-type]
+        assert occupancy is not None
+        assert counted.calls == []
 
     def test_central_block_is_a_true_rectangle_at_non_square_n(self) -> None:
         """N=10 on 5x5: a centred 2x5 rectangle, not the blob-with-a-knob (#125).
 
         The generic centred footprint for 10 is the 3x3 ball plus one stray
-        cell at the ring's lowest id — which is what `stripes` gets, and
-        what `central_block` wrongly got before the fix.
+        cell at the ring's lowest id — which is what `blocks` gets, and
+        what `central_block` wrongly got before the fix. (`stripes` was
+        #125's original contrast, but #150 moved it onto the band, which at
+        this N coincides with the rectangle — pinned as inherent below.)
         """
         structure = _lattice(rows=5, cols=5)
         counts = {AC: 5, AD: 5}
         block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
         assert sorted(block) == list(range(5, 15))  # rows 1-2, all five columns
+        blob = deal_layout(structure, counts, "blocks", np.random.default_rng(0))
+        assert sorted(blob) == [0, 6, 7, 8, 11, 12, 13, 16, 17, 18]  # the knob at the corner
+        assert sorted(block) != sorted(blob)
+
+    def test_the_band_can_coincide_with_the_rectangle_and_that_is_not_a_bug(self) -> None:
+        """N=10 on 5x5: stripes and central_block are IDENTICAL — correctly.
+
+        Whenever N's most-square rectangle spans the grid's full width, the
+        #150 band IS that rectangle (both centre their rows by the same
+        integer division), and both layouts deal run-length row-major
+        inside it — the sparse sibling of the full-grid coincidence #125
+        documents as inherent. Pinned so the next person who trips over it
+        finds the explanation in the suite.
+        """
+        structure = _lattice(rows=5, cols=5)
+        counts = {AC: 5, AD: 5}
+        block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
         stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
-        assert block != stripes
+        assert block == stripes
 
     def test_central_block_differs_from_stripes_on_an_oversized_grid(self) -> None:
         """The V2 walk's missing contrast: N=60 on 20x20 (#125).
 
-        `central_block` is the centred 6x10 rectangle; `stripes` bands the
-        generic centred blob. Before the fix the two were one code path and
-        identical in every configuration.
+        `central_block` is the centred 6x10 rectangle; `stripes` is the
+        centred full-width three-row band (#150; the generic centred blob
+        before that). Before #125 the two were one code path and identical
+        in every configuration.
         """
         structure = _lattice(rows=20, cols=20)
         counts = {AC: 30, AD: 30}
@@ -276,31 +387,42 @@ class TestLayoutDealing:
         assert sorted(block) == [10, 11, 12, 13, 14]  # the middle row
 
     def test_central_block_falls_back_when_no_rectangle_fits(self) -> None:
-        """A prime N wider than both grid dimensions: the blob, not an error."""
+        """A prime N wider than both grid dimensions: the blob, not an error.
+
+        #125's decision is "falls back to the generic centred blob", so the
+        pin compares against `blocks` — whose footprint IS that blob —
+        rather than against `stripes`, which #150 moved onto its own band
+        (the #120(f) re-reference named in #150). Coupling to `stripes`
+        was only ever true while it happened to share the ball.
+        """
         structure = _lattice(rows=3, cols=3)
         counts = {AC: 3, AD: 4}
         block = deal_layout(structure, counts, "central_block", np.random.default_rng(0))
-        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(0))
+        blob = deal_layout(structure, counts, "blocks", np.random.default_rng(0))
         assert len(block) == 7
-        assert sorted(block) == sorted(stripes)  # same footprint, by design
+        assert sorted(block) == sorted(blob)  # same footprint, by design
 
     def test_the_blob_can_coincide_with_the_rectangle_and_that_is_not_a_bug(self) -> None:
-        """N=30 on 12x12: stripes and central_block are IDENTICAL — correctly.
+        """N=30 on 12x12: the blob IS the rectangle here — correctly.
 
         The generic centred blob is built ring by ring with lowest-id ties
         filling from the top, and at this N the 30 nearest cells complete
         exactly the 5x6 rectangle rows 3-7 x cols 3-8 — the very rectangle
         `central_block` computes as 30's most-square factor pair. Whenever
-        the blob happens to be a rectangle, the two layouts coincide, and
-        that is a property of the footprints, not a regression of #125.
+        the blob happens to be a rectangle, the two FOOTPRINTS coincide,
+        and that is a property of the footprints, not a regression of #125.
         Pinned so the next person who trips over such a case (twice now:
         100 on 20x20, 30 on 12x12) finds the explanation in the suite.
+        (`stripes` demonstrated this with full placement equality until
+        #150 moved it onto the band; `blocks` shares the blob footprint but
+        deals along its tiled serpentine, so the pin is footprint equality
+        now — the #120(f) re-reference named in #150.)
         """
         structure = _lattice(rows=12, cols=12)
         counts = {AC: 15, AD: 15}
         block = deal_layout(structure, counts, "central_block", np.random.default_rng(1))
-        stripes = deal_layout(structure, counts, "stripes", np.random.default_rng(1))
-        assert block == stripes
+        blob = deal_layout(structure, counts, "blocks", np.random.default_rng(1))
+        assert sorted(block) == sorted(blob)
         assert sorted({site // 12 for site in block}) == [3, 4, 5, 6, 7]
         assert sorted({site % 12 for site in block}) == [3, 4, 5, 6, 7, 8]
 

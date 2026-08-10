@@ -357,10 +357,13 @@ def layout_consumes_rng(kind: str, initial_layout: str) -> bool:
 def _centre_ordered_sites(structure: LatticeStructure) -> tuple[SiteId, ...]:
     """Order every site by how far it sits from the grid's centre.
 
-    The footprint rule for the patterned layouts when the population is
-    smaller than the site count (spec Design 8): they occupy a **centred
-    contiguous** block, because a patterned arrangement is a statement about
-    contiguous structure and would be destroyed by scattering its cells.
+    The footprint rule for ``blocks``, ``checkerboard`` and ``patches`` when
+    the population is smaller than the site count (spec Design 8): they
+    occupy a **centred contiguous** block, because a patterned arrangement
+    is a statement about contiguous structure and would be destroyed by
+    scattering its cells. (``stripes`` used this ball too until #127/#150
+    gave it its own full-width band — see :func:`_stripes_footprint` — and
+    ``central_block`` has its definitional rectangle, #125.)
 
     Distance here is Chebyshev (the larger of the row and column offsets)
     regardless of the run's neighbourhood shape, so the footprint is a
@@ -395,11 +398,51 @@ def _footprint(structure: LatticeStructure, size: int, layout: str) -> tuple[Sit
     Returns:
         Exactly ``size`` site ids: the whole grid (ascending) when the
         population fills it, a centred block otherwise. ``random`` is handled
-        by its caller, which scatters over the whole grid instead.
+        by its caller, which scatters over the whole grid instead;
+        ``stripes`` and ``central_block`` have their own footprints.
     """
     if size >= structure.site_count:
         return structure.site_ids
     return tuple(sorted(_centre_ordered_sites(structure)[:size]))
+
+
+def _stripes_footprint(structure: LatticeStructure, size: int) -> tuple[SiteId, ...]:
+    """The sparse ``stripes`` footprint: a centred FULL-WIDTH horizontal band.
+
+    ``stripes``' purpose is broad horizontal bands, and the generic centred
+    blob destroys exactly the property the layout is named for — so when N
+    is below the site count, ``stripes`` occupies a band spanning every
+    column instead (#127, implemented under #150; this cannot arise under
+    ``fixed_n``, where a validator requires N = site count).
+
+    The rule: the band is ``ceil(N / cols)`` rows tall, centred vertically
+    by integer division. Every band row is full-width except — when N is
+    not a multiple of the column count — the band's LAST row, which holds
+    the remainder centred horizontally, again by integer division. Dealing
+    inside the band is unchanged: run-length, row-major, ascending machine
+    name, and no RNG on any path.
+
+    Args:
+        structure: The lattice.
+        size: How many agents there are.
+
+    Returns:
+        Exactly ``size`` site ids in ascending order: the whole grid when
+        the population fills it, the centred band otherwise.
+    """
+    if size >= structure.site_count:
+        return structure.site_ids
+    cols = structure.cols
+    band_rows = -(-size // cols)  # ceil(size / cols) in pure integer form
+    top = (structure.rows - band_rows) // 2
+    remainder = size % cols
+    full_rows = band_rows if remainder == 0 else band_rows - 1
+    sites = [row * cols + col for row in range(top, top + full_rows) for col in range(cols)]
+    if remainder:
+        last_row = top + band_rows - 1
+        start = (cols - remainder) // 2
+        sites.extend(last_row * cols + col for col in range(start, start + remainder))
+    return tuple(sites)
 
 
 def _central_block_footprint(structure: LatticeStructure, size: int) -> tuple[SiteId, ...]:
@@ -698,17 +741,20 @@ def deal_layout(
         # empty frame and a full world has none.
         rectangle = _central_block_footprint(structure, size)
         return _run_length(_row_major(structure, rectangle), counts)
+    if layout == "stripes":
+        # `stripes` sweeps its full-width band (#127/#150) row-major, so a
+        # strategy's run breaks at the row edge — a "stripe" can be a
+        # fragment of a row, because stripe boundaries fall where the
+        # COUNTS fall.
+        return _run_length(_row_major(structure, _stripes_footprint(structure, size)), counts)
+
     footprint = _footprint(structure, size, layout)
     if layout == "patches":
         return _patches(structure, footprint, counts, rng)
     if layout == "checkerboard":
         return _round_robin(_serpentine(structure, footprint), counts)
-    if layout == "blocks":
-        return _run_length(_tiled(structure, footprint), counts)
-    # `stripes` sweeps row-major, so a strategy's run breaks at the row edge —
-    # a "stripe" can be a fragment of a row, because stripe boundaries fall
-    # where the COUNTS fall.
-    return _run_length(_row_major(structure, footprint), counts)
+    # `blocks` — the one layout left after the dispatch above.
+    return _run_length(_tiled(structure, footprint), counts)
 
 
 def found_occupancy(

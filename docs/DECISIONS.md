@@ -3558,3 +3558,68 @@ EXTENDED, not contradicted: the count trigger stands; the small-cell
 trigger adds pixel-array rendering in a regime the contract never
 addressed. 1020 tests; all eight golden masters still pass with zero
 re-recording.
+
+**#150 — 2026-08-09 — The #148 ruling: option (a). The #127
+sparse-`stripes` band lands exactly as decided, and the two colliding
+Phase C positive goldens are RE-RECORDED as a logged decision (M11a
+Phase E2b; discharges #148, implements #127).** THE RULING. The design
+layer chose #148's option (a): land the band as #127 records and
+re-record `sync_economy_lattice` (N = 6 on 3×4) and
+`async_variable_n_lattice` (N = 10 on 4×5) under this entry — the
+#133(d) technique's sanctioned path for deliberate, DECISIONS-logged
+behaviour change. Rationale: positive pins exist to catch UNINTENDED
+drift, and this change is the opposite — the band was decided (#127,
+2026-08-06) BEFORE the pins were recorded the same day, with
+implementation assigned to Phase E, so the collision is fixture
+accident, not design conflict. Option (b) (re-pin onto configurations
+the band cannot touch) was rejected because it forces the same
+re-record while REMOVING sparse stripes from golden coverage — after
+(a), the band itself is pinned. Option (c) rejected: #127's rationale
+stands. THE BAND, as implemented (`layouts._stripes_footprint`): when N
+is below the site count — impossible under `fixed_n` by validator —
+`stripes` occupies ceil(N ÷ cols) rows, centred vertically by integer
+division (top = (rows − rows_needed) // 2); every band row is
+full-width except, when N is not a multiple of cols, the band's LAST
+row, which holds the remainder centred horizontally (start = (cols −
+remainder) // 2). Dealing inside is unchanged (run-length, row-major,
+ascending machine name); no RNG on any path — the #119(f) gate stays
+closed, asserted via the counting wrapper (zero generator calls of any
+kind on the sparse-stripes founding path). ONLY `stripes` changes:
+`blocks`/`checkerboard`/`patches` keep the #119(a) ball (pinned as the
+replacement test), `central_block` keeps its #125 rectangle, full-grid
+`stripes` is untouched (#138's golden passed un-re-recorded). TEST
+RETIREMENTS, per #120(f) retire-with-replacement: the Phase B
+sparse-stripes ball pin is replaced by band pins — 20×20 N = 60 → rows
+8–10 full-width; 20×20 N = 50 → rows 8–9 full plus ten centred cells in
+row 10 (cols 5–14); the two #148 footprints (3×4 N = 6 → {0,1,2,3,5,6};
+4×5 N = 10 → {5..14}) pinned at the goldens' own compositions — plus a
+stripes ≠ blocks differentiation pin at N = 60 on 20×20. The #125
+fallback pin is RE-REFERENCED: the no-fit fallback now asserts equality
+with `blocks`' footprint (which IS the generic centred blob), stating
+what #125 decided instead of coupling to `stripes`. TWO FURTHER
+#125-era pins coupled to ball-`stripes` broke by design and got the
+same re-referencing treatment, recorded here because the E2b prompt
+did not name them: the N = 10-on-5×5 true-rectangle pin's blob contrast
+moved to `blocks` (and the NEW coincidence — at that N the band IS the
+2×5 rectangle, both centring by the same integer division, both dealing
+run-length row-major — is pinned as inherent, the sparse sibling of
+#125's full-grid coincidence); and the N = 30-on-12×12
+blob-equals-rectangle pin became footprint equality against `blocks`
+(placement equality was a ball-stripes accident — `blocks` deals along
+its tiled serpentine). THE RE-RECORD, as a verified procedure: (1) with
+the band in, the golden suite failed on EXACTLY the two named pins
+(stream + folder digest each); the four negative pins, both full-grid
+positives, and the Phase D reload assertion all passed — no leak.
+(2) Before touching constants, both configs' new foundings were
+asserted equal to the #148-computed band footprints, against the actual
+golden configs. (3) The two pins were re-recorded with the FULL
+#133(d) technique — stream digest over the explicit field list, folder
+digest, AND the reload-and-re-run-to-the-pinned-stream assertion, which
+the two pins now carry permanently (previously only the negatives and
+the Phase D golden did; `async_fixed_n_lattice` alone keeps its
+original Phase C recorded scope). (4) The full suite is green (1029
+tests) and the diff confirms exactly four constants changed — the two
+pins' stream + folder digests — and no other golden constant moved.
+The founding-isolation readout needed no code change (a full-width band
+has zero isolated agents); no registry entry changed, so no gendocs
+run.

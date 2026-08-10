@@ -24,8 +24,11 @@ Two families, one mechanism:
   + ``spatial_interaction`` — the interaction-only case, no births and no
   deaths, structure expressed purely through who plays whom — captured
   from the finished Phase D engine (2026-08-06), discharging #128's
-  deferral. The fourth also carries the reload-and-re-run assertion the
-  #133(d) technique prescribes.
+  deferral. The two sparse-``stripes`` positives (``sync_economy_lattice``,
+  ``async_variable_n_lattice``) were RE-RECORDED 2026-08-09 under #150,
+  when the #127 full-width band replaced the ball footprint they had
+  accidentally pinned (#148); they and the fourth carry the
+  reload-and-re-run assertion the #133(d) technique prescribes.
 
 Both grains from the spec are pinned per golden: the EVENT STREAM (at
 ``"round"`` granularity, so every per-round draw's consequence is in scope)
@@ -456,26 +459,31 @@ def _positive_config(name: str) -> ExperimentConfig:
 
 
 POSITIVE_STREAM_DIGESTS = {
-    "sync_economy_lattice": "03cf9dfed314380d386323581c8ca9af2e9742cbe804053ee81ac0ed41a6c6fa",
+    "sync_economy_lattice": "44e18cf95ad237e68fc91135959fc11ce43328856a2c516dfd6d5ddaebf6fa08",
     "async_fixed_n_lattice": "8d03522a6736c341e584264c9312201c210c20f68e358a9d814f4bc5d01f7e87",
-    "async_variable_n_lattice": "e1b02eab771b28372079eb15c6d16e44acad4af9b5cc8964436d978d943e32c7",
+    "async_variable_n_lattice": "2851c6501806a410c97c2a9c217ad7ed7660739c5a9b09b0d44feda34d229b75",
     "sync_imitation_spatial_lattice": (
         "a2bd4367d7062f845df214e0432fe37194b46981278830132d59738a845d957f"
     ),
 }
-"""Event-stream digests: the first three captured 2026-08-06 from the finished
-Phase C engine; the fourth captured 2026-08-06 from the finished Phase D
-engine (#128 discharged)."""
+"""Event-stream digests. ``async_fixed_n_lattice`` captured 2026-08-06 from
+the finished Phase C engine; ``sync_imitation_spatial_lattice`` captured
+2026-08-06 from the finished Phase D engine (#128 discharged);
+``sync_economy_lattice`` and ``async_variable_n_lattice`` RE-RECORDED
+2026-08-09 under #150 — their sparse-``stripes`` foundings moved from the
+#119(a) ball to the #127 band, verified against the #148-computed
+footprints before re-capture."""
 
 POSITIVE_FOLDER_DIGESTS = {
-    "sync_economy_lattice": "fd63020abf59c72903ec6ede50ff31f89d9b6982b5ce1c0988f4383c06c080df",
+    "sync_economy_lattice": "31773ce4568b02478a0eb0f5d6a46cd59dbd04f2dffbe7f95cf853b3a7e40f8a",
     "async_fixed_n_lattice": "b5022f06c5ba00508f90e4f68f401f04ea7bb0dfc36d64fd07490590203f3dbd",
-    "async_variable_n_lattice": "b88a197558da5634a6437dd85b71d4807f896f8adef04c0fe23641d6faaa4d46",
+    "async_variable_n_lattice": "e77ac6484e3c145739b36eb2c371e67dca994f03a23491ea6132763f840b4558",
     "sync_imitation_spatial_lattice": (
         "d49ea44ad0eeea9a3e1ab850c47f07e2017ac87b17741283f4aeb8c48f9f0968"
     ),
 }
-"""Run-folder digests, captured as the stream digests above."""
+"""Run-folder digests, captured (and for the two #150 pins, re-recorded) as
+the stream digests above."""
 
 
 class TestPositiveGoldens:
@@ -491,19 +499,31 @@ class TestPositiveGoldens:
         """The persisted folder's content digest equals the pinned constant."""
         assert folder_digest(_positive_config(name), tmp_path) == POSITIVE_FOLDER_DIGESTS[name]
 
-    def test_the_phase_d_recorded_config_reruns_to_the_pinned_stream(self, tmp_path: Path) -> None:
-        """config.yaml coverage for the Phase D golden (#133(d) verbatim).
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "sync_imitation_spatial_lattice",
+            "sync_economy_lattice",
+            "async_variable_n_lattice",
+        ],
+    )
+    def test_the_recorded_config_reruns_to_the_pinned_stream(
+        self, name: str, tmp_path: Path
+    ) -> None:
+        """config.yaml coverage, where a capture used the FULL #133(d) technique.
 
         The folder digest excludes ``config.yaml``, so — exactly as for the
         negative goldens — the recorded config's semantics are pinned by
-        reloading it and re-running to the pinned stream digest. The three
-        Phase C positives keep their recorded scope; this assertion is part
-        of the FOURTH golden's capture technique.
+        reloading it and re-running to the pinned stream digest. The Phase D
+        golden carried this assertion from its capture (#138); the two #150
+        re-records prescribed the full technique too, so they carry it from
+        the re-record on. ``async_fixed_n_lattice`` alone keeps its original
+        Phase C recorded scope (stream + folder digests only).
         """
-        config = _positive_config("sync_imitation_spatial_lattice")
+        config = _positive_config(name)
         recorder = RunRecorder(config, out_dir=tmp_path)
         for event in engine.run(config):
             recorder.add(event)
         folder = recorder.finalize()
         reloaded = load_config(folder / "config.yaml")
-        assert stream_digest(reloaded) == POSITIVE_STREAM_DIGESTS["sync_imitation_spatial_lattice"]
+        assert stream_digest(reloaded) == POSITIVE_STREAM_DIGESTS[name]
