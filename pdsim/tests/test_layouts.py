@@ -626,7 +626,7 @@ class TestWellMixedIsUntouched:
     # imitation corner the fixture happened to use — where it is now
     # asserted more sharply by the no-draw pin (test_local_birth.py:
     # sync imitation + lattice consumes zero contest draws) and by the
-    # Phase C golden masters (test_phase_c_goldens.py), which seal the
+    # Phase C golden masters (test_golden_masters.py), which seal the
     # well-mixed streams byte-for-byte instead of comparing trajectories.
 
 

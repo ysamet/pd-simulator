@@ -272,6 +272,107 @@ class TestEconomyCharts:
         assert not {"population.html", "mean_energy.html", "mean_age.html"} & plain_files
 
 
+class TestGridRenderer:
+    """The two-path grid renderer: threshold switch, one palette, the floor.
+
+    M11a Phase E2 (DECISIONS #145/#149): `grid_chart` is the single
+    renderer every consumer uses — bordered hover-labelled cells while they
+    have the room, one pixel-array image once the site count passes
+    ``PIXEL_ARRAY_THRESHOLD`` OR the cells shrink below
+    ``BORDER_MIN_SIDE_PX``.
+    """
+
+    def test_pixel_array_activates_above_the_threshold_and_not_below(self) -> None:
+        """49x49 (2,401 sites) stays a heatmap; 51x51 (2,601) becomes an image."""
+        below = charts.grid_chart(49, 49, {0: "always_defect"})
+        above = charts.grid_chart(51, 51, {0: "always_defect"})
+        assert below.data[0].type == "heatmap"
+        assert above.data[0].type == "image"
+        assert not charts.pixel_array_active(49, 49)
+        assert charts.pixel_array_active(51, 51)
+
+    def test_small_cells_trigger_the_pixel_array_below_the_count_threshold(self) -> None:
+        """200x10 is only 2,000 sites, but its ~3 px cells demand the pixel path.
+
+        The #149 finding: on the bordered path a floor-sized cell loses a
+        third of itself to the gap stroke and the grid degrades into
+        disconnected dots — elongated grids reach small cells long before
+        they reach 2,500 sites.
+        """
+        figure = charts.grid_chart(200, 10, {0: "always_defect"})
+        assert figure.data[0].type == "image"
+        assert charts.pixel_array_active(200, 10)
+
+    def test_a_small_ribbon_keeps_its_bordered_hover_labelled_cells(self) -> None:
+        """60x5: elongated but roomy (7.5 px cells) — borders and hover stay."""
+        figure = charts.grid_chart(60, 5, {0: "always_defect"})
+        assert figure.data[0].type == "heatmap"
+        assert not charts.pixel_array_active(60, 5)
+
+    def test_a_floored_canvas_keeps_room_for_the_figure_chrome(self) -> None:
+        """The #149 defect: 10 columns need 70 px, but title + modebar do not fit.
+
+        The canvas width never drops below the chrome minimum; the height
+        still comes from the floored cells exactly.
+        """
+        canvas = charts.floored_canvas(200, 10)
+        assert canvas == (320, 200 * charts.CELL_FLOOR_PX + 60)
+
+    def test_both_paths_draw_from_the_one_colour_mapping(self) -> None:
+        """Same colour source by construction: both paths read strategy_colors().
+
+        The heatmap's discrete colorscale must carry the registry colour
+        verbatim, and the image's pixel must be that same colour parsed to
+        RGB — no second palette anywhere.
+        """
+        color = charts.strategy_colors()["always_defect"]
+        shape_path = charts.grid_chart(2, 2, {0: "always_defect"})
+        scale_colors = {stop_color for _, stop_color in shape_path.data[0].colorscale}
+        assert color in scale_colors
+        pixel_path = charts.grid_chart(51, 51, {0: "always_defect"})
+        expected = charts._parse_css_color(color)
+        assert tuple(pixel_path.data[0].z[0][0][:3]) == expected
+        assert pixel_path.data[0].z[0][0][3] == 255
+
+    def test_empty_sites_are_transparent_on_the_pixel_path(self) -> None:
+        """Unoccupied cells show the shared plot background, as on the shape path."""
+        figure = charts.grid_chart(51, 51, {0: "always_defect"})
+        assert figure.data[0].z[0][1][3] == 0  # alpha 0: visibly empty
+
+    def test_the_cell_floor_binds_only_on_oversized_grids(self) -> None:
+        """20x20 fits the nominal canvas; 200x10 falls below ~3 px and floors."""
+        assert charts.floored_canvas(20, 20) is None
+        canvas = charts.floored_canvas(200, 10)
+        assert canvas is not None
+        width, height = canvas
+        assert width >= 10 * charts.CELL_FLOOR_PX
+        assert height >= 200 * charts.CELL_FLOOR_PX
+
+    def test_a_floored_figure_carries_its_explicit_canvas(self) -> None:
+        """When the floor binds the figure sizes itself; otherwise it stretches."""
+        floored = charts.grid_chart(200, 10, {})
+        expected = charts.floored_canvas(200, 10)
+        assert expected is not None
+        assert (floored.layout.width, floored.layout.height) == expected
+        assert charts.grid_chart(20, 20, {}).layout.width is None
+
+    def test_the_floor_applies_on_the_pixel_path_too(self) -> None:
+        """300x300: pixel array AND floored — the two mechanisms compose."""
+        figure = charts.grid_chart(300, 300, {})
+        assert figure.data[0].type == "image"
+        assert figure.layout.width is not None
+        assert figure.layout.width >= 300 * charts.CELL_FLOOR_PX
+
+    def test_cells_stay_exactly_square_on_both_paths(self) -> None:
+        """The #109 contract: y is scale-anchored to x on shape and pixel paths."""
+        for figure in (
+            charts.grid_chart(4, 4, {0: "always_defect"}),
+            charts.grid_chart(51, 51, {0: "always_defect"}),
+        ):
+            assert figure.layout.yaxis.scaleanchor == "x"
+            assert figure.layout.yaxis.scaleratio == 1
+
+
 class TestEventTimeAxis:
     """M10b: async runs plot against the generation-equivalent clock."""
 

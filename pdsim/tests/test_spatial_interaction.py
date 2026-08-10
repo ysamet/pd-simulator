@@ -17,7 +17,7 @@ The groups, in the order the spec's Phase D block lists their obligations:
   sequence of a ``fixed_n`` lattice run is IDENTICAL to its well-mixed
   twin's (a substitution changes a draw's candidates, never the stream's
   shape). Toggle-off async lattice behaviour is byte-identical to Phase C
-  by the pinned positive goldens in ``test_phase_c_goldens.py`` — Phase D
+  by the pinned positive goldens in ``test_golden_masters.py`` — Phase D
   re-recorded nothing.
 * **The no-call assertions** — with ``spatial_interaction`` off, zero
   interaction-kernel calls occur anywhere: sync engines are watched at

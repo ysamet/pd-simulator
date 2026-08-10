@@ -15,6 +15,8 @@ import pytest
 from pydantic import ValidationError
 
 from pdsim.config.scenarios import get_scenario_info
+from pdsim.core.events import AgentSnapshot, GenerationFinished
+from pdsim.core.timeseries import RunTimeseries
 from pdsim.ui import helpers
 
 
@@ -313,6 +315,76 @@ class TestShouldRedraw:
     def test_zero_delay_still_honors_the_floor(self) -> None:
         """A zero delay must not mean redraw-every-period — that is the flood."""
         assert not helpers.should_redraw(now=1000.1, last_redraw=1000.0, delay=0.0, floor=0.5)
+
+
+class TestFinalOccupancy:
+    """The results browser's presence test for its Founding | Final selector.
+
+    M11a Phase E2 (#136's deferred half, DECISIONS #146): presence-driven,
+    never mode-driven — the answer comes from the recorded snapshots alone.
+    """
+
+    @staticmethod
+    def _series(periods: list[tuple[AgentSnapshot, ...]]) -> RunTimeseries:
+        """Assemble a timeseries carrying the given per-period snapshots.
+
+        Args:
+            periods: One snapshot tuple per generation.
+
+        Returns:
+            An evolution-mode series with matching minimal aggregates.
+        """
+        timeseries = RunTimeseries(mode="evolution")
+        for index, agents in enumerate(periods):
+            counts: dict[str, int] = {}
+            for snapshot in agents:
+                counts[snapshot.strategy] = counts.get(snapshot.strategy, 0) + 1
+            timeseries.add(
+                GenerationFinished(
+                    index=index,
+                    composition=counts,
+                    mean_scores={name: 1.0 for name in counts},
+                    rounds_played={name: 1 for name in counts},
+                    agents=agents,
+                )
+            )
+        return timeseries
+
+    def test_snapshots_with_site_ids_yield_the_last_periods_map(self) -> None:
+        """Present → the LAST period's site → strategy pairs, exactly."""
+        early = (
+            AgentSnapshot(0, None, 1, 10.0, "always_defect", site_id=0),
+            AgentSnapshot(1, None, 1, 10.0, "tit_for_tat", site_id=1),
+        )
+        late = (
+            AgentSnapshot(0, None, 2, 20.0, "always_defect", site_id=0),
+            AgentSnapshot(2, 0, 0, 5.0, "always_defect", site_id=3),
+        )
+        placements = helpers.final_occupancy(self._series([early, late]))
+        assert placements == {0: "always_defect", 3: "always_defect"}
+
+    def test_no_snapshots_at_all_yields_none(self) -> None:
+        """Imitation-shaped data (#116: nothing persisted) → founding only."""
+        timeseries = RunTimeseries(mode="evolution")
+        assert helpers.final_occupancy(timeseries) is None
+
+    def test_snapshots_without_site_ids_yield_none(self) -> None:
+        """A schema ≤ 4 economy recording (site_id absent) behaves as today."""
+        agents = (
+            AgentSnapshot(0, None, 1, 10.0, "always_defect"),
+            AgentSnapshot(1, None, 1, 10.0, "tit_for_tat"),
+        )
+        assert helpers.final_occupancy(self._series([agents])) is None
+
+    def test_an_extinct_final_period_yields_an_empty_map_not_none(self) -> None:
+        """Earlier periods carried sites; the run ended with nobody alive.
+
+        The empty mapping (not None) keeps the selector available: an empty
+        world IS the run's final occupancy, and hiding it would misreport
+        what happened.
+        """
+        alive = (AgentSnapshot(0, None, 1, 10.0, "always_defect", site_id=4),)
+        assert helpers.final_occupancy(self._series([alive, ()])) == {}
 
 
 class TestAsyncGreying:

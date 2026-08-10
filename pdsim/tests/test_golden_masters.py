@@ -1,4 +1,14 @@
-"""Golden masters around M11a Phase C (spec Design 9).
+"""The engine's golden masters: four negative pins, four positive pins.
+
+This file holds ALL of the project's golden masters (spec Design 9),
+captured with the #133(d) technique — the round-grain event-stream digest
+over an explicit per-event-type field list, the content-grain run-folder
+digest excluding ``config.yaml``, and (where recorded) the
+reload-and-re-run-to-the-pinned-stream assertion. The recorded constants
+are phase provenance, not phase property: nothing here is specific to the
+phase that captured it, which is why the file is named for what it holds
+rather than for M11a Phase C, where most of it landed (the rename is
+DECISIONS #147; the fourth positive golden is Phase D's, #138).
 
 Two families, one mechanism:
 

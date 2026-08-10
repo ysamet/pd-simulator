@@ -99,6 +99,20 @@ STRUCTURE_HELP = {
         "neighbours still (a corner keeps 3 of Moore's 8); a torus has no "
         "edges, so every cell plays exactly this number."
     ),
+    "pixel_array": (
+        "Whether the grid is currently drawn as ONE image — a pixel array, "
+        "each cell one pixel block — instead of as individually bordered, "
+        "individually hover-labelled cells. Two things flip it on: past a "
+        "few thousand cells (above 2,500 sites here) redrawing every cell "
+        "as its own bordered shape makes each refresh crawl; and on a "
+        "strongly elongated grid the cells shrink toward the ~3 px floor "
+        "long before the site count gets there, where the borders would eat "
+        "the cells and the grid would degrade into disconnected dots. "
+        "Either way the switch costs nothing you can see at that size: same "
+        "colours from the same palette, same layout, just no cell borders. "
+        "The large-count case is also the regime where the live view's "
+        "wall-clock redraw throttling starts to matter."
+    ),
 }
 """Inline (?) explanations for the Structure panel's derived readouts (the §12 rule)."""
 
@@ -664,6 +678,24 @@ def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -
         st.markdown(f"**Passport ids and lineage** — {ECONOMY_HELP['passport_id']}")
 
 
+def _grid_width(rows: int, cols: int) -> str:
+    """The ``st.plotly_chart`` width mode for a grid figure.
+
+    When the ≈ 3 px cell floor binds, :func:`charts.grid_chart` gives the
+    figure an explicit canvas size; stretching it back into the column would
+    shrink the cells below the floor again, so the figure keeps its own
+    (possibly scrolling) size instead (DECISIONS #145).
+
+    Args:
+        rows: Grid row count.
+        cols: Grid column count.
+
+    Returns:
+        ``"content"`` when the floor binds, else ``"stretch"``.
+    """
+    return "content" if charts.floored_canvas(rows, cols) else "stretch"
+
+
 def _grid_area(
     config: ExperimentConfig,
     key_prefix: str,
@@ -677,11 +709,13 @@ def _grid_area(
     and the seed, so what the panel shows and what the engine founds cannot
     drift apart.
 
-    This is the FOUNDING arrangement — the panel preview and the results
-    browser both show generation 0. During a live economy run the run area
-    additionally renders the CURRENT occupancy from the latest snapshot
-    (Phase C: births claim sites and deaths free them, so the picture
-    genuinely moves — the snapshot is the render state, Design 10).
+    This is the FOUNDING arrangement — the panel preview shows generation 0,
+    and the results browser shows it under its "Founding" view (its "Final"
+    view draws the last recorded period's occupancy instead, #146). During a
+    live economy run the run area additionally renders the CURRENT occupancy
+    from the latest snapshot (Phase C: births claim sites and deaths free
+    them, so the picture genuinely moves — the snapshot is the render state,
+    Design 10).
 
     Args:
         config: The run's configuration.
@@ -703,13 +737,13 @@ def _grid_area(
         return
     st.plotly_chart(
         charts.grid_chart(view.rows, view.cols, view.placements),
-        width="stretch",
+        width=_grid_width(view.rows, view.cols),
         key=f"{key_prefix}_grid",
     )
     if resolved_capacity is None:
-        col_sites, col_occupied, col_isolated = st.columns(3)
+        col_sites, col_occupied, col_isolated, col_pixels = st.columns(4)
     else:
-        col_sites, col_capacity, col_occupied, col_isolated = st.columns(4)
+        col_sites, col_capacity, col_occupied, col_isolated, col_pixels = st.columns(5)
         col_capacity.metric(
             "Capacity K (resolved)",
             f"auto → {resolved_capacity}",
@@ -722,6 +756,13 @@ def _grid_area(
         help=STRUCTURE_HELP["occupancy"],
     )
     col_isolated.metric("Isolated at founding", f"{view.isolated}", help=STRUCTURE_HELP["isolated"])
+    # The ninth §12 derived readout (DECISIONS #145): the renderer's own
+    # switch, read from the same predicate the renderer consults.
+    col_pixels.metric(
+        "Pixel-array rendering",
+        "on" if charts.pixel_array_active(view.rows, view.cols) else "off",
+        help=STRUCTURE_HELP["pixel_array"],
+    )
     if view.isolated:
         st.caption(
             f"{view.isolated} agent(s) start with no occupied neighbour. Once local "
@@ -1100,7 +1141,7 @@ def _run_live(
                 return
             grid_live.plotly_chart(
                 charts.grid_chart(config.structure.rows, config.structure.cols, placements),
-                width="stretch",
+                width=_grid_width(config.structure.rows, config.structure.cols),
                 key=f"live_grid_{draw_id}",
             )
 
@@ -1401,7 +1442,41 @@ def _results_browser() -> None:
     )
     # A recorded lattice run carries its own layout file, so the grid is
     # resolved against the run folder rather than the working directory.
-    _grid_area(loaded.config, key_prefix="browser", config_dir=RUNS_DIR / run_id)
+    # When the recorded data carries site ids (sync economy; async both
+    # modes), the browser also offers the run's FINAL occupancy — #136's
+    # deferred half — and defaults to it, because the browser answers "what
+    # happened" and the final state is the answer; founding stays one click
+    # away for arrangement questions (DECISIONS #146). Presence-driven,
+    # never mode-driven (#100(b)/#120): imitation runs persist no snapshots
+    # and schema ≤ 4 folders carry no site ids, so for them no selector
+    # renders and the founding view stands unchanged.
+    final_placements = helpers.final_occupancy(loaded.timeseries)
+    grid_rows = loaded.config.structure.rows
+    grid_cols = loaded.config.structure.cols
+    if final_placements is not None and grid_rows is not None and grid_cols is not None:
+        grid_view = st.radio(
+            "Grid view",
+            options=["Founding", "Final"],
+            index=1,
+            key="browser_grid_view",
+            horizontal=True,
+            help=(
+                "'Final' draws the last recorded period's occupancy from the "
+                "run's per-agent data — where births and deaths left the "
+                "population. 'Founding' replays the generation-0 arrangement "
+                "from the recorded config and seed."
+            ),
+        )
+        if grid_view == "Final":
+            st.plotly_chart(
+                charts.grid_chart(grid_rows, grid_cols, final_placements, title="Final occupancy"),
+                width=_grid_width(grid_rows, grid_cols),
+                key="browser_final_grid",
+            )
+        else:
+            _grid_area(loaded.config, key_prefix="browser", config_dir=RUNS_DIR / run_id)
+    else:
+        _grid_area(loaded.config, key_prefix="browser", config_dir=RUNS_DIR / run_id)
     _final_summary_area(loaded.timeseries)
 
 

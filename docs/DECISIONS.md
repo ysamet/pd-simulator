@@ -3399,3 +3399,162 @@ under tournament it gates nothing, exactly like `reproduction_mode`
 family). The generic tournament note is reused unchanged; the
 tournament check keeps running BEFORE both table branches, so the
 mode-level note wins.
+
+**#145 — 2026-08-09 — The pixel-array rendering fallback and the ≈ 3 px
+cell floor land inside the ONE `grid_chart` path, with the ninth §12
+readout reading the renderer's own switch (M11a Phase E2; DESIGN §6.3's
+rendering contract completed).** (a) THE SWITCH. A named module constant
+`PIXEL_ARRAY_THRESHOLD = 2500` in `pdsim/viz/charts.py`: at or below
+2,500 sites `grid_chart` builds the Phase B bordered heatmap (1 px cell
+gaps, per-cell hover labels); above it, a single `go.Image` trace — one
+RGBA pixel block per site, empty sites TRANSPARENT so the shared plot
+background shows through them exactly as the heatmap's None cells do.
+2,500 (a 50×50 grid) sits comfortably inside the contract's "a few
+thousand". FINDING, recorded because the E2 prompt's rationale assumed
+otherwise and asked for a report: the Phase B renderer was NEVER
+thousands of individual plotly shapes — #120(e) built it as ONE heatmap
+trace — so the switch is bordered-heatmap → image trace, not
+shapes → image. The threshold value stands anyway: past a few thousand
+cells the bordered path rebuilds per-cell gap strokes and a full
+hover-label array on every #94-throttled redraw, wasted work at cell
+sizes where the borders are invisible; and the two-trace-kind split is
+what makes the fallback directly testable (the pin asserts trace kind at
+49×49 vs 51×51). Both paths read the SAME `strategy_colors()` mapping —
+no second palette — pinned by construction (the heatmap's discrete
+colorscale must carry the registry colour verbatim; the image's pixel
+must be that colour parsed to RGB). (b) THE FLOOR. `floored_canvas`
+computes the contract's naive side min(width/cols, height/rows) against
+a NOMINAL canvas of 700×450 (Streamlit's content-column width by
+plotly's default figure height — the two numbers the un-floored figure
+actually gets); when the side falls below `CELL_FLOOR_PX = 3` the figure
+takes an explicit width/height at exactly 3 px per cell plus margins,
+and the app renders it UN-STRETCHED (`st.plotly_chart` width "content"
+via the `_grid_width` helper, all three consumers) — stretching a
+floored figure back into the column would shrink cells below the floor
+again. The floor applies on both paths and composes with the pixel
+switch (pinned at 300×300). (c) THE NINTH §12 READOUT. "Pixel-array
+rendering" (on/off) joins the grid's metric row in `_grid_area`, its (?)
+from the new `STRUCTURE_HELP["pixel_array"]` entry (the single described
+source, like the E1 readouts), its value from the SAME
+`charts.pixel_array_active` predicate the renderer consults — readout
+and renderer cannot disagree. This completes the nine derived readouts;
+the E4 audit should find it here. (d) ONE CODE PATH, kept: panel
+preview, live run view (#136), and results browser all render through
+`grid_chart` and inherit both mechanisms; no per-surface renderer was
+forked. 1017 tests; all eight golden masters pass with zero
+re-recording (presentation only — no draw added, moved, or removed).
+
+**#146 — 2026-08-09 — The results browser renders a recorded run's FINAL
+occupancy: a Founding | Final selector defaulting to Final, gated by
+PRESENCE of recorded site ids, never by mode (M11a Phase E2; #136's
+deferred half delivered).** When a recorded run's per-agent snapshots
+carry real site ids (sync economy; async both modes — schema 5), the
+browser offers a two-way "Grid view" radio — Founding | Final —
+DEFAULTING to Final: the browser answers "what happened", and the final
+state is the answer; the founding view stays one click away for
+arrangement questions. Final renders the LAST recorded period's
+site_id/strategy pairs through the same `grid_chart`; Founding is the
+unchanged #120(e) replay. The presence test is
+`helpers.final_occupancy(timeseries)` — pure, Streamlit-free, pinned:
+it answers None (no selector, founding view exactly as today) when no
+snapshot anywhere carries a site id, which covers BOTH legacy shapes at
+once — imitation runs (#116: no snapshots persisted at all) and
+schema ≤ 4 economy folders (snapshots without the site column) — the
+#100(b)/#120 presence-driven discipline, so old folders behave
+byte-for-byte as before with no version check anywhere. MICRO-DECISION:
+a run that ended EXTINCT returns an EMPTY mapping, not None — earlier
+periods carried sites, so the selector stays and Final draws an empty
+world, because nobody-left-alive IS that run's final occupancy and
+hiding it would misreport what happened.
+
+**#147 — 2026-08-09 — `test_phase_c_goldens.py` → `test_golden_masters.py`
+(M11a Phase E2; pure housekeeping).** The file has housed the Phase D
+fourth positive golden since #138, so the phase-specific name misled.
+Renamed with NO pin re-recorded and no constant, digest, or fixture
+touched; the module docstring now states what the file holds — the four
+negative and four positive golden masters and the #133(d) capture
+technique — with phase names kept only as capture provenance. The two
+live comment references (`test_layouts.py`, `test_spatial_interaction.py`)
+updated; DECISIONS mentions of the old name are historical record and
+stand. The golden suite runs as
+`pytest pdsim/tests/test_golden_masters.py`.
+
+**#148 — 2026-08-09 — The #127 sparse-`stripes` band is BLOCKED and NOT
+implemented: two of #133's positive golden masters pin sparse-`stripes`
+foundings, so the band cannot ship under E2's zero-re-recording guard —
+referred to the design layer (M11a Phase E2; an open question logged,
+not a decision).** THE CONTRADICTION, found by the session-start check:
+the E2 prompt's premise — "#125 and #138 establish that no golden master
+covers any sparse layout" — is FALSE. #125's "no golden master existed
+on the sparse case" was true when written (2026-08-04, Phase B
+follow-up), but Phase C's positive goldens (recorded 2026-08-06, #133)
+include two sparse-`stripes` configurations: `sync_economy_lattice`
+(N = 6 on 3×4 — 12 sites) and `async_variable_n_lattice` (N = 10 on
+4×5 — 20 sites). Verified by computation against the live code: the
+band would move `sync_economy_lattice`'s footprint from the #119(a)
+ball {1,2,5,6,9,10} to {0,1,2,3,5,6}, and `async_variable_n_lattice`'s
+from {1,2,3,6,7,8,11,12,13,16} to {5..14} — different foundings,
+different placement-kernel eligible sets, different stream AND folder
+digests. The band and the zero-re-recording guard are therefore
+IRRECONCILABLE for these two pins: no implementation freedom exists
+(#127 fixes the band exactly; the digests pin the ball exactly). Per
+the E2 prompt's own tripwire ("if any golden fails, STOP and report" —
+though the failure mode here is a false premise, not a band leak) and
+the project rule that golden re-recording is a logged design-layer act,
+E2 shipped WITHOUT Task 3: no footprint change, no #120(f) test
+retirements (the #125 fallback pin still correctly references
+`stripes`), no band pins, no stripes-vs-blocks differentiation pin. The
+third golden (`async_fixed_n_lattice`, N = 9 on 3×3) and #138's fourth
+are full grids and untouched by the band; also checked and unaffected:
+every other sparse-`stripes` fixture in the suite (3×3 at N = 4 and
+N = 8, where band and ball coincide cell-for-cell; the 6×6 N = 5
+orderings fixture, which pins orderings and invariants, not footprints).
+THE DECISION THE DESIGN LAYER NOW OWNS: either (a) re-record the two
+Phase C positive goldens under a new DECISIONS entry (a deliberate,
+logged re-pin — the band is a designed behaviour change and these two
+pins were captured 2026-08-06 against the interim ball footprint #127
+itself calls wrong for `stripes`), or (b) re-pin those two goldens on
+configurations the band cannot touch (full grids, or a non-`stripes`
+layout) and then land the band against unchanged constants, or (c)
+amend #127. Until that ruling, sparse `stripes` keeps the #119(a) ball
+footprint everywhere.
+
+**#149 — 2026-08-09 — Two rendering fixes from the owner's E2 manual
+validation: the pixel-array switch gains a small-cell trigger (elongated
+grids), and floored figures keep a minimum canvas width for their chrome
+(M11a Phase E2 follow-up; owner-reported defect plus an owner-proposed
+amendment, decided in-session).** THE DEFECT, from validation step 2
+(200 rows × 10 columns): the floored figure took an explicit canvas of
+70 px — 10 columns × 3 px plus margins — so the title and the plotly
+modebar (zoom/pan/autoscale) collided unusably; and because 200×10 is
+only 2,000 sites (below #145's 2,500-site threshold), the grid kept the
+BORDERED heatmap path at floor-sized cells, where the 1 px gap stroke
+eats a third of every 3 px cell and ten columns degrade into
+disconnected dots that read as four or five. TWO FIXES, both in
+`pdsim/viz/charts.py`, both presentation-only (no RNG, no goldens):
+(a) `floored_canvas` never returns a width below
+`_MIN_CANVAS_WIDTH = 320` — room for the title and modebar; the
+square-cell constraint centres a narrow grid in the extra width.
+(b) `pixel_array_active` gains a SECOND sufficient trigger: the naive
+cell side (the #109 arithmetic, min(700/cols, 450/rows)) falling below
+`BORDER_MIN_SIDE_PX = 6` — at 6 px the gap is a sixth of the cell and
+borders still read as borders; below it they eat the cells. THE RULE
+CHOICE: the owner proposed keying the switch on max(rows, cols) rather
+than site count; implemented as the cell-side form because it is the
+same idea made exact — max(rows, cols) is a proxy for "cells got
+small", and the renderer can compute cell size directly. Equivalences
+and differences, stated: on square grids the new trigger never fires
+before the 2,500-site threshold (50×50 parity intact, #145's pins
+unchanged); on the owner's 200×10 both forms switch to the pixel path;
+they part company only on small elongated ribbons (e.g. 60×5 — 300
+sites, 7.5 px cells), where max(rows,cols) > 50 would drop borders and
+per-cell hover labels that still comfortably fit — the cell-side form
+keeps them. Pinned: 200×10 renders as an image below the count
+threshold; 60×5 keeps its heatmap; floored_canvas(200,10) = (320, 660).
+The §12 readout stays honest for free (it reads the same predicate),
+and its `STRUCTURE_HELP["pixel_array"]` source now describes both
+triggers. DESIGN §6.3's "past a few thousand cells" contract is
+EXTENDED, not contradicted: the count trigger stands; the small-cell
+trigger adds pixel-array rendering in a regime the contract never
+addressed. 1020 tests; all eight golden masters still pass with zero
+re-recording.

@@ -279,9 +279,27 @@ under well_mixed, #142; composition greys under `from_file`, #143), and
 the §12 paint-time readouts (resolved dims, resolved K beside the site
 count, effective neighbour count, payoff additivity) on two new pure
 functions in `experiment.py`; 1006 tests, zero golden re-recordings.
-Remaining: **E2** — rendering (pixel-array fallback, ≈ 3 px floor,
-results-browser final occupancy, the #127 stripes band, the deferred
-pixel-array-active readout, the golden-test-file rename); **E3** — the
-four named scenarios; **E4** — the bench structure column and the §12
-54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
+**E2 landed 2026-08-09 (#145-#149), MINUS its Task 3**: the pixel-array
+rendering fallback (`PIXEL_ARRAY_THRESHOLD = 2500` sites OR cells below
+`BORDER_MIN_SIDE_PX = 6` px — the elongated-grid amendment from the
+owner's validation, #149 — heatmap → `go.Image`, same one
+`strategy_colors()` source) and the ≈ 3 px cell floor (`floored_canvas`,
+minimum 320 px canvas width for the figure chrome, rendered
+un-stretched), both inside the ONE
+`grid_chart` path all three consumers share (#145); the ninth §12
+readout, "Pixel-array rendering", on the grid's metric row (#145 — the
+nine derived readouts are now complete for E4's audit); the results
+browser's Founding | Final occupancy selector, presence-driven,
+defaulting to Final (#146, discharging #136's deferral); and the golden
+suite renamed to `pdsim/tests/test_golden_masters.py`, zero pins
+touched (#147 — run it as `pytest pdsim/tests/test_golden_masters.py`).
+**The #127 sparse-`stripes` band was NOT implemented — BLOCKED (#148)**:
+two of #133's positive goldens pin sparse-`stripes` foundings
+(`sync_economy_lattice` N=6 on 3×4; `async_variable_n_lattice` N=10 on
+4×5), so the band cannot land under a zero-re-recording guard; the
+design layer must rule (re-record those two pins, re-pin them off the
+sparse-`stripes` case, or amend #127) before the band ships. 1020
+tests, zero golden re-recordings. Remaining: the #148 band ruling +
+Task 3; **E3** — the four named scenarios; **E4** — the bench structure
+column and the §12 54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
 listed in `docs/DESIGN.md` §6.

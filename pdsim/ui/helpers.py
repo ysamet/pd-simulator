@@ -26,6 +26,7 @@ from pdsim.config.experiment import (
     resolve_senescence_factor,
 )
 from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
+from pdsim.core.timeseries import RunTimeseries
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
 # its parameters live at the top level of the config (DECISIONS #34).
@@ -1057,6 +1058,38 @@ def layout_file_dimension_mismatch(values: Mapping[str, ParamValue]) -> str | No
         f"resolves to {rows}x{cols}. Set Lattice rows to {layout.rows} and "
         f"columns to {layout.cols}, or edit the file's header to match the grid."
     )
+
+
+def final_occupancy(timeseries: RunTimeseries) -> dict[int, str] | None:
+    """The last recorded period's site → strategy mapping, if the data has one.
+
+    The results browser's presence test for its Founding | Final grid
+    selector (#136's deferred half; DECISIONS #146). PRESENCE-driven, never
+    mode-driven (#100(b)/#120): the decision reads the recorded per-agent
+    snapshots, not the config. An imitation run persists no snapshots
+    (#116 — nothing moves after founding), and a schema ≤ 4 folder's
+    snapshots carry no site ids; both answer ``None`` here, so the browser's
+    founding-only view stands exactly as it was for them.
+
+    Args:
+        timeseries: The recorded run's accumulated series.
+
+    Returns:
+        Site id → strategy machine name from the LAST recorded period, when
+        any recorded snapshot carries a real site id; ``None`` otherwise.
+        The mapping can be EMPTY — a run that ended extinct has a final
+        occupancy of nobody, and an empty world is the honest picture of it.
+    """
+    has_sites = any(
+        snapshot.site_id is not None for period in timeseries.agent_snapshots for snapshot in period
+    )
+    if not has_sites:
+        return None
+    return {
+        snapshot.site_id: snapshot.strategy
+        for snapshot in timeseries.agent_snapshots[-1]
+        if snapshot.site_id is not None
+    }
 
 
 def collect_strategy_params(
