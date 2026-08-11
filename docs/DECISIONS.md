@@ -3623,3 +3623,229 @@ pins' stream + folder digests — and no other golden constant moved.
 The founding-isolation readout needed no code change (a full-width band
 has zero isolated agents); no registry entry changed, so no gendocs
 run.
+
+**#151 — 2026-08-10 — The four M11a scenarios are REGISTERED:
+`spatial_reciprocity` / "Cooperation Survives in Clusters" (the
+flagship), `donation_game_threshold` / "The b/c > k Threshold",
+`the_drifting_frontier` / "The Drifting Frontier", and
+`the_filling_grid` / "The Filling Grid" (M11a Phase E, sub-prompt 3;
+the spec Validation section's four named scenarios delivered).** Each
+is ONE configuration per #36, comparative questions confined to
+things-to-try; every override of a registry default is deliberate, its
+reason carried in the scenario text itself, and the worked arithmetic
+is written so a novice can reproduce every number in a description
+from the settings shown. THE FLAGSHIP packages the #111(c)/#115
+design: synchronous `energy_economy` on a 20×20 torus (400 sites for
+N = 200 — a half-empty world with room for clusters; blank dimensions
+would have auto-sized to a full 200-site grid), AllC 100 / AllD 100
+founded as `patches` (contiguous clusters from generation 0, dealt
+inside the Design 8 centred blob), `von_neumann` (#111(c): fewer
+neighbours, stronger viscosity), spatial interaction on with k left
+at 5 clamping to play-all-4, ONE round per match (matches and rounds
+become the same number, so every income figure is per-generation),
+T = 5, R = 3, P = 0 (#111(c): a defector interior must earn NOTHING
+against the living cost), S = −1 (#115: ordering legality with P = 0,
+and bleeding cluster edges), ledger L = 12 / θ = 60 / σ = 40 — the
+#139-measured 8 matches per fully-neighboured agent give all-C
+interior income 24 and all-D interior income 0, window 0 ≤ L < 24
+with L at the midpoint; at L = 12 a cooperator with n cooperating
+neighbours earns 8n − 8 (interiors +12, flat edges +4, corners −4),
+interior defectors die during generation 4, and interior cooperators
+first breed at generation 2 (64 ≥ 60) on a three-generation rhythm —
+μ = 0 (a copying-rule mutant seeded inside a cluster would muddy the
+interior arithmetic the scenario exists to display), horizon 100 (the
+drama completes well inside it). The #111 conceptual guard is in the
+text verbatim in spirit: the story is ECOLOGICAL, not Ohtsuki's — and
+the matrix is not additive (T − R = 2 ≠ 1 = P − S), so "b/c" is not
+even defined here. `donation_game_threshold` packages #140's measured
+configuration verbatim: asynchronous `fixed_n`, `moran_rule =
+death_birth` (stated: the threshold is a death-birth result),
+`fixed_n_death_rule = pure_random` overriding `energy_decides`
+(Ohtsuki's death is RANDOM, its neighbours then compete by fitness —
+the default's deterministic death is a plausible run that is not the
+model), N = 100 on an explicit 10×10 (the fixed_n N = site-count
+validator satisfied legibly), `von_neumann` (the case that CLEARS
+b/c = 5, so the default view shows cooperation succeeding),
+opponents = 4 (exact play-all at the von Neumann degree), the
+donation matrix T = 5, R = 4, P = 0, S = −1 (additive, c = 1, b = 5
+per #111 — the text carries the read-the-cost-off-twice arithmetic
+and the fact that additivity with P = 0 FORCES S = −1), one round
+with AllC 50 / AllD 50 only (one-shot derivation; reciprocity
+parameters inert, and the text says where the roster went), `random`
+layout, μ = 0 (fixation must be permanent to be readable), horizon
+150 (#140's). Its weak-selection caveat uses the #114/#117 softened
+wording — selection begins at exactly zero and strengthens from
+nothing; fitness reads a STOCK, so the draw partly selects for age —
+plus #140's measured consequence (mean final cooperator share 0.596
+von Neumann vs 0.569 Moore at 20 seeds per shape, inside sampling
+noise, no visible reversal) and the verbatim compass phrase. THE
+NUMBERS THIS DESIGN SESSION FINALISED: `the_drifting_frontier` ships
+the growth economy's ledger AT DEFAULTS (θ = 500, σ = 400, L = 200)
+on a 20×20 lattice — `random_k` k = 5 with 10 rounds gives matches
+≈ 2k = 10, 100 rounds, window 100 ≤ L < 300 with L at the midpoint
+(deliberately the calibration guide §4.5 worked example) — K = 240
+explicit (60% of the 400 sites, #106's slack live so the occupied
+region drifts rather than fills), N = 120 (TitForTat/AllC/AllD 40
+each, `patches`), spatial interaction OFF deliberately (local birth
+WITHOUT local interaction is a named legitimate configuration; this
+scenario demonstrates the separability — children land near parents
+while everyone plays everyone — which also keeps the window
+arithmetic aspatial), `base_hazard = 0.05` for churn (deaths free
+sites anywhere; births refill only near parents), and
+`senescence_factor = 1` EXPLICIT: blank would ALSO resolve to 1.0
+here (`resolve_senescence_factor` falls back to "age never matters"
+unless both a hazard and a max age are set, and max_age is 0), but
+the scenario states its intent rather than leaning on a fallback.
+`the_filling_grid` ships L = 40 / θ = 200 / σ = 150 with N = 60
+(AllC/AllD 30 each) as `central_block` — the centred 6×10 rectangle
+with 340 empty sites, the filling regime #109 shipped the layout for,
+named at DESIGN §6.3's qualitative level only (the four #103/#111
+literature gates honoured: no wrap-around claim, no period figure, no
+σ formula, no cited assumption set) — Moore kept deliberately as the
+anti-flagship contrast, opponents = 8 play-all, 10 rounds, payoffs at
+DEFAULTS with P = 1 deliberate: the saturated defector interior earns
+16 × 10 × 1 = 160 and never starves, the saturated interior window is
+160 ≤ L < 480 and L = 40 sits BELOW it — the metabolic filter is OFF
+for interiors at saturation, only fully-encircled cooperators can
+starve (one cooperator contact = 60 clears the bill; zero contacts =
+0 does not), so the endgame is a slow one-cell-at-a-time grind and
+RISE-THEN-FALL is the expected observable, not cooperation winning;
+horizon 300 (the fill is fast, the grind is slow, and the fall half
+needs room to be visible). THE FOUR HORIZONS, with their one-line
+reasons: 100 (flagship — interiors die by ~4, edges over tens),
+150 (#140's measured horizon), 200 (frontier — mean lifetime 20 at a
+5% flat hazard, ten full turnovers), 300 (filling — the slow half).
+SEEDS: 42/7/11 (flagship, frontier, filling grid) are arbitrary
+house-style picks; the donation scenario's seed 4 is CURATED — a
+twelve-seed check during E3 validation split 6/6 between the two
+fixations (the #140 coin flip made concrete), and the spec's frozen
+intent is that the default view shows cooperation succeeding, so a
+cooperation-fixing seed ships, with a sentence in the scenario text
+saying so plainly (the `moran_random_mix` curated-seed honesty
+precedent: "this seed happens to…" is stated, never hidden).
+MECHANICS: the four join #36's shrunk-copy smoke test, whose helper
+now shrinks a `fixed_n` lattice scenario to N = 9 on 3×3 (composition
+topped up cyclically) to preserve the N = site-count validator. Alternatives
+rejected: sibling comparison scenarios (#36 — comparisons live in
+things-to-try); and letting the load-bearing payoff and ledger values
+ride on registry defaults inside the config dicts — scenario configs
+are constructed from the registry at import, so a future default
+change would silently rewrite a scenario's worked arithmetic; every
+payoff is pinned explicitly in all four configs.
+
+**#152 — 2026-08-10 — Three things-to-try rewordings, recorded as one
+consolidated deviation from the frozen spec: predictions replaced by
+stated arithmetic, per the Phase D measurements (#139, #140) (M11a
+Phase E, sub-prompt 3).** The spec's Validation wording is frozen
+(#62), so the deviations are logged here rather than edited in, and
+all three exist for the same reason: things-to-try text that promises
+an outcome the arithmetic does not support — or that walks the user
+into a validation error — is worse than a logged rewording.
+(a) `donation_game_threshold`: the spec's "switch
+`neighbourhood_shape` to `moore` and re-run, predicting the reversal
+before doing it" becomes state-the-prediction, run, and EXPECT VERY
+LITTLE VISIBLE CHANGE — #140 found no visible reversal at 20 seeds
+per shape, so the gap between the prediction and the observation IS
+the weak-selection lesson the scenario teaches; the compass points
+where the prediction cannot. (b) the flagship's "switch back to
+`well_mixed` and watch AllD take everything" gains the required order
+of operations — spatial interaction OFF first, while the toggle is
+still editable, because under `well_mixed` it greys with its value
+stranded (#142 greys, never un-sets) and a stranded-on toggle fails
+the #137(e) requires-lattice validator — plus the matcher instruction
+(set `random_k`: the default round-robin at N = 200 gives 199 matches
+and income two orders of magnitude above L = 12, so the filter would
+simply be off; and blank K falls back to the aspatial 200 = N,
+freezing the demography) and the honest full arc: AllD sweeps, and
+then, with the cooperators gone, all-defector income is 0 < L = 12
+and the whole population collapses — the tragedy completes.
+(c) the flagship's "switch `neighbourhood_shape` to `moore` and watch
+the clusters struggle" becomes income arithmetic with the outcome
+left open: the naive reading says von Neumann means 4 matches, the
+#139-measured truth is 8, and Moore at k ≥ 8 gives 16 by the same
+arithmetic — a FOUR-fold income change against the naive reading but
+two-fold against the actual — with the window becoming 0 ≤ L < 48
+and L in its lower quarter; whether clusters struggle under the
+weaker viscosity is something to watch, not something promised, and
+the user is told to recompute the window before trusting any living
+cost after the switch. Alternative rejected: shipping the spec's
+wording as-is — (b) would trap the user in a validation error by
+ordering the structure switch before the toggle, and (a)/(c) would
+promise a reversal and a struggle that #140/#139's measurements say
+this engine's selection strength does not deliver on cue.
+
+**#153 — 2026-08-10 — Findings from E3's app validation, REPORTED AND
+HELD (Rule 7 — nothing fixed in this sub-prompt): the Economy panel's
+calibration report ignores `matching.spatial_interaction`, and two of
+the E3 prompt's validation expectations mismatch designed panel
+behaviour (M11a Phase E, sub-prompt 3).** (a) THE REAL GAP, surfaced
+by the first spatial + economy scenarios the platform has shipped:
+`economy_helpers.calibration_report` branches on `matching.matcher`
+alone (N − 1 under round_robin, ≈ 2k under random_k) and never
+consults the spatial toggle, so while spatial interaction is ON the
+Economy panel reports the GREYED, unconsulted matcher's arithmetic.
+Loaded, `spatial_reciprocity` shows "Matches per agent 199" and
+window 0 ≤ cost < 597 where the truth (#139, and the scenario's own
+text) is 8 matches and 0 ≤ L < 24; `the_filling_grid` shows
+59 / 1770 / 590 where the saturated truth is 16 matches, 480 / 160.
+The scenario TEXTS carry the correct arithmetic, and
+`the_drifting_frontier` — spatial off deliberately, its calibration
+aspatial — reads correctly (10 matches, window 100 ≤ cost < 300).
+The readout predates M11a (M10a's Economy panel) and Phase D did not
+extend it; the natural formula is the calibration guide §4.2's
+matches ≈ 2 × min(k, degree), but the design choice (min-degree
+versus a per-site expectation on partially occupied or bounded
+grids) is the design layer's to make — E4's §12 audit is the likely
+vehicle. (b) TWO EXPECTATION MISMATCHES, recorded so the E4 auditor
+does not re-derive them: the E3 prompt expected the flagship to show
+"Capacity K (resolved) → 400 beside the site count" and the frontier
+"240 beside the 400-site count". Neither renders, by design: #141's
+blank-K metric fires only while the K WIDGET is blank, and a
+validated scenario config stores K resolved to a plain number (hard
+rule 8), which the scenario loader writes into the widget — the
+flagship loads with K = 400 explicit, the frontier with 240
+explicit, and both numbers are still on screen (the K widget itself
+plus the Sites metric), just not via the blank-K metric. Related
+presentation note, same mechanism inverted:
+`helpers.widget_values_from_config` re-presents stored values that
+EQUAL their auto-resolution as blank-auto (its documented loss-free
+inverse), so `donation_game_threshold` — whose explicit 10 × 10 IS
+the most-square resolution of N = 100 — loads with blank dimension
+widgets and shows "Grid (resolved) auto → 10 × 10", and
+`the_drifting_frontier`'s explicit senescence factor 1.0 (equal to
+the max_age = 0 fallback) loads as auto with the resolved-senescence
+readout showing 1.0. The round trips are exact and the stored
+configs keep the plain numbers, so nothing is wrong; it is simply
+where the numbers appear. (c) THE FILLING GRID'S OBSERVED ENDGAME IS
+A FREEZE, NOT THE GRIND — a structural finding, not seed luck. On
+the shipped seed the fill happens as designed (60 → ~250 agents by
+generation 5; cooperator share 0.50 → 0.61), but growth then STOPS
+at ~265 of 400 sites with zero deaths and near-zero births through
+generation 300: saturation never arrives and the text's predicted
+rise-then-FALL never begins. The mechanism, diagnosed from the event
+stream: the capacity gate admits the RICHEST eligible parents first,
+rationed to the free-seat count; the richest parents are the
+all-cooperator INTERIOR (income 480/generation, compounding), which
+is exactly the cohort the placement kernel BLOCKS (no empty site
+within Moore radius 1 of an interior parent); the poorer rim parents
+— 54 at the freeze point, every one above θ and every one with an
+empty neighbour site — never rank inside the admission quota, so the
+blocked interior consumes the whole quota every generation. Verified
+signature: from generation 6 onward `blocked_parents` equals EXACTLY
+400 − population, every generation. With occupancy frozen, neighbour
+sets are static, every cooperator keeps at least one cooperator
+contact, and deaths stay zero — a true fixed point. This is an
+EMERGENT INTERACTION of three separately-designed mechanisms
+(wealth-ranked K-admission, the Design 4 gate order in which
+admission precedes placement, and Phase C's
+blocked-parents-pay-nothing-stay-eligible semantics — a blocked
+parent still consumes its admission slot that generation), not a bug
+in any one of them. Whether the scenario should be recalibrated
+(e.g. a small base hazard for churn, as `the_drifting_frontier`
+has) or the admission rule revisited is the design layer's call;
+HELD per Rule 7 — the configuration ships exactly as the E3 prompt
+prescribes, with its rise-then-fall text standing as design intent
+and this finding logged beside it. (The flagship and the frontier do
+NOT hit this: the flagship's population sits far below its K = 400,
+so admission is never rationed, and the frontier's 5% hazard keeps
+deaths freeing seats and churning the rim.)

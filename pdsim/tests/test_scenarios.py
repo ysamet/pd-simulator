@@ -35,9 +35,14 @@ ALL_SCENARIOS = V1_SCENARIOS | {
     "imitation_overlay_only",
     "moran_random_mix",
     "sync_vs_async_economy",
+    "spatial_reciprocity",
+    "donation_game_threshold",
+    "the_drifting_frontier",
+    "the_filling_grid",
 }
-"""The five v1 seed scenarios, M10a's energy-economy scenario, and the
-four M10b event-time scenarios (spec Validation V1/V2/V3/V5)."""
+"""The five v1 seed scenarios, M10a's energy-economy scenario, the four
+M10b event-time scenarios (spec Validation V1/V2/V3/V5), and the four
+M11a population-structure scenarios (DECISIONS #151)."""
 
 
 def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
@@ -58,6 +63,24 @@ def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
     composition = {name: min(2, count) for name, count in data["population"]["composition"].items()}
     data["population"]["composition"] = composition
     data["population"]["size"] = sum(composition.values())
+    # An async fixed_n lattice run pins N to the site count, so the grid
+    # must shrink with the population: 9 agents on 3 x 3 — the smallest
+    # square that keeps a torus neighbourhood non-degenerate (M11a; the
+    # composition is topped up cyclically to reach the 9). Larger rosters
+    # would overflow 3 x 3 and fail validation loudly — revisit then.
+    if (
+        data["dynamics"]["time_model"] == "asynchronous"
+        and data["dynamics"]["async_population"] == "fixed_n"
+        and data["structure"]["kind"] == "lattice"
+    ):
+        data["structure"]["rows"] = 3
+        data["structure"]["cols"] = 3
+        names = sorted(composition)
+        index = 0
+        while sum(composition.values()) < 9:
+            composition[names[index % len(names)]] += 1
+            index += 1
+        data["population"]["size"] = 9
     # random_k's k must fit the shrunk population (k ≤ N − 1 at generation 0).
     data["matching"]["opponents_per_agent"] = min(
         data["matching"]["opponents_per_agent"], data["population"]["size"] - 1

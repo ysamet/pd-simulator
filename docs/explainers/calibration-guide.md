@@ -373,6 +373,8 @@ Every agent initiates a match against each neighbour — that is *degree* matche
 
 pdsim does not remove these duplicates, and that is deliberate rather than accidental: the same behaviour is already present in `random_k`, and inheriting it unchanged keeps income statistics comparable between the spatial and non-spatial cases. But it means the neighbourhood shape dropdown is an income multiplier, which is not how anyone reads a setting called "neighbourhood shape."
 
+*(This figure has since been measured in-engine rather than derived: on a fully occupied von Neumann torus at k ≥ 4, every agent plays exactly 8 matches per generation, with no variance — VT-6(b), DECISIONS #139.)*
+
 ### §4.3 — Choosing the neighbourhood shape
 
 The two standard choices on a square grid are named after the mathematicians who introduced them. **Von Neumann** counts the four orthogonal neighbours — up, down, left, right. **Moore** counts all eight surrounding cells, diagonals included.
