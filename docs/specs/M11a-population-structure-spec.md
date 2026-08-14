@@ -1,4 +1,4 @@
-Status: in progress (Phase A implemented 2026-08-01, see DECISIONS #112; Phase B implemented 2026-08-03, see DECISIONS #116-#120; Phase C implemented 2026-08-06, see DECISIONS #127-#136; Phase D implemented 2026-08-06, see DECISIONS #137-#140 — the #128-deferred fourth positive golden recorded, VT-6(b) answered exactly 8, V6 run by manual configuration with a muddy result reported to the design layer)
+Status: implemented 2026-08-14 (see DECISIONS #111-#160 — Phase A 2026-08-01 #112; Phase B 2026-08-03 #116-#120; Phase C 2026-08-06 #127-#136; Phase D 2026-08-06 #137-#140; Phase E as five sub-prompts 2026-08-07..14: E1 #141-#144, E2 #145-#149, E2b #150, E3 #151-#153, E4a #154-#155, E4b #156-#160 — M11a complete; the explainer stays gated on the literature verification pass, spec Out-of-scope)
 
 # M11a — Population structure (sites, local birth, local interaction)
 

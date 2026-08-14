@@ -236,6 +236,28 @@ class TestSpatialCalibration:
         aspatial = calibration_report(get_scenario_info("the_drifting_frontier").config)
         assert SPATIAL_FINE_PRINT not in aspatial.regime_note
 
+    def test_memory_note_names_fixed_neighbours_on_the_spatial_branch(self) -> None:
+        """The E4b audit fix: no matcher attribution while spatial is active.
+
+        Pre-fix the note branched on the CONFIGURED matcher even while the
+        matcher was greyed and unconsulted — a round_robin ghost got "every
+        pair meets every generation", and the random_k wording ("recurs only
+        occasionally") is the OPPOSITE of the lattice truth, where neighbours
+        are fixed and an adjacent pair meets twice per generation (#139).
+        The flagship (spatial, unlimited memory depth, greyed round_robin)
+        must now get the fixed-neighbour wording with the 2× worst case:
+        2 meetings × 1 round × 100 generations = 200 recorded moves.
+        """
+        report = calibration_report(get_scenario_info("spatial_reciprocity").config)
+        assert report.memory_note is not None
+        assert "neighbours are FIXED" in report.memory_note
+        assert "200" in report.memory_note
+        assert "round_robin" not in report.memory_note
+        # And the aspatial branches keep their matcher-based wording.
+        frontier = calibration_report(get_scenario_info("the_drifting_frontier").config)
+        assert frontier.memory_note is not None
+        assert "random_k" in frontier.memory_note
+
 
 class TestChartCarryingCapacity:
     """The K line is config-derived and economy-only."""

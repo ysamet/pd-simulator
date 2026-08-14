@@ -75,6 +75,61 @@ class TestCli:
         assert "whole numbers" in capsys.readouterr().err
 
 
+class TestStructureCells:
+    """The M11a structure columns (spec Phase E, the #91 discipline)."""
+
+    def test_structure_cell_builds_a_spatial_imitation_config(self) -> None:
+        """A lattice label sets the toggle, the lattice, and the radius."""
+        config = _cell_config(9, "lattice_moore_r5", k=2, rounds=2, generations=2, seed=0)
+        assert config.matching.spatial_interaction is True
+        assert config.structure.kind == "lattice"
+        assert config.structure.neighbourhood_shape == "moore"
+        assert config.structure.interaction_radius == 5
+        # Constant N: the structure cells stay on the imitation loop.
+        assert config.dynamics.reproduction_mode == "imitation"
+
+    def test_structure_cell_produces_positive_seconds(self) -> None:
+        """A tiny lattice cell times out to a positive figure."""
+        config = _cell_config(9, "lattice_vn_r1", k=2, rounds=2, generations=2, seed=0)
+        assert time_cell(config, generations=2) > 0.0
+
+    def test_structure_cell_rejects_the_other_tunings(self) -> None:
+        """A lattice label under the economy/async tunings is an error."""
+        with pytest.raises(ValueError, match="synchronous imitation"):
+            _cell_config(
+                9,
+                "lattice_vn_r1",
+                k=2,
+                rounds=2,
+                generations=2,
+                seed=0,
+                reproduction_mode="energy_economy",
+            )
+        with pytest.raises(ValueError, match="synchronous imitation"):
+            _cell_config(
+                9,
+                "lattice_vn_r1",
+                k=2,
+                rounds=2,
+                generations=2,
+                seed=0,
+                time_model="asynchronous",
+            )
+
+    def test_structure_flag_runs_the_five_column_grid(self, capsys: pytest.CaptureFixture) -> None:
+        """--structure prints one row per (N, column) over all five columns."""
+        exit_code = main(["--sizes", "9", "--rounds", "2", "--generations", "2", "--structure"])
+        assert exit_code == 0
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 1 + 5  # header + five columns at one N
+        assert any("lattice_moore_r5" in line for line in lines[1:])
+
+    def test_structure_flag_rejects_the_async_grid(self, capsys: pytest.CaptureFixture) -> None:
+        """--structure with --time-model asynchronous fails plainly."""
+        assert main(["--structure", "--time-model", "asynchronous"]) == 1
+        assert "synchronous imitation" in capsys.readouterr().err
+
+
 class TestAsyncCells:
     """The M10b event-time column (spec Phase E, the #91 discipline)."""
 

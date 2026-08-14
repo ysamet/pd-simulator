@@ -676,6 +676,130 @@ def test_sample_rejects_negative_size_and_negative_site_weights() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The Phase E precomputation: draw-neutrality safeguard (a), the equality pin
+# (#156). The cache may change WHEN arrays are built, never what they contain
+# — so every cached candidate list and weight vector is asserted IDENTICAL
+# (== and bit-for-bit) to a fresh direct enumeration through sites_within and
+# kernel_weights. The geometries deliberately include a large-radius Moore
+# case and a bounded (non-torus) grid — the regimes outside golden coverage.
+# ---------------------------------------------------------------------------
+
+
+_REACH_GEOMETRIES = [
+    ("moore", "torus", 5),  # the large-radius Moore case the spec names
+    ("moore", "bounded", 5),  # large radius against a real rim
+    ("von_neumann", "bounded", 2),  # the other metric, corner-degree regime
+    ("moore", "torus", 1),  # the classic Hammond-Axelrod corner
+    ("von_neumann", "torus", None),  # unlimited reach
+]
+"""(shape, boundary, radius) cases for the equality pin, on a 9×7 grid."""
+
+
+@pytest.mark.parametrize(("shape", "boundary", "radius"), _REACH_GEOMETRIES)
+def test_reach_cache_equals_fresh_enumeration(
+    shape: str, boundary: str, radius: int | None
+) -> None:
+    """Cached candidates and weights are identical to a direct enumeration.
+
+    The cache is populated for EVERY origin/decay combination first and
+    asserted afterwards — interleaving population and assertion would let a
+    mis-keyed cache (say, one ignoring the origin) hand back a stale entry
+    that a build-then-check-one-at-a-time loop could never catch.
+    """
+    lattice = LatticeStructure(9, 7, shape, boundary)
+    origins = [0, 6, 31, 62]  # corner, corner, interior, corner (9×7 row-major)
+    decays = [0.0, 0.7]
+    for origin in origins:  # populate every entry before asserting any
+        lattice.reach(origin, radius)
+    for origin in origins:
+        entry = lattice.reach(origin, radius)
+        fresh_candidates = sites_within(lattice, origin, radius)
+        assert entry.candidates == fresh_candidates
+        assert entry.distances.tolist() == [
+            lattice.distance(origin, site) for site in fresh_candidates
+        ]
+        for decay in decays:
+            table = lattice.distance_weight_table(radius, decay, up_to=entry.max_distance)
+            cached_weights = table[entry.distances]
+            fresh_weights = kernel_weights(lattice, origin, fresh_candidates, decay)
+            # Bit-for-bit, not approximately: the sampler feeds these to the
+            # normalisation and the draw, so any float wobble IS a stream
+            # change.
+            assert np.array_equal(cached_weights, fresh_weights)
+
+
+def test_reach_cache_actually_memoises() -> None:
+    """Repeat calls return the STORED entry, not a rebuilt one.
+
+    Identity (`is`), not equality: equal-but-rebuilt entries would make the
+    equality pin pass while the precomputation silently did nothing — this
+    is the test that the flat-in-R bench claim rests on.
+    """
+    lattice = LatticeStructure(6, 6, "moore", "torus")
+    first = lattice.reach(7, 2)
+    assert lattice.reach(7, 2) is first
+    table = lattice.distance_weight_table(2, 0.5, up_to=first.max_distance)
+    assert lattice.distance_weight_table(2, 0.5, up_to=first.max_distance) is table
+
+
+def test_weight_table_regrowth_keeps_existing_values_exact() -> None:
+    """Unlimited radius on a bounded grid: the table grows, values do not move.
+
+    A 5×5 bounded Moore grid: the centre's farthest candidate sits at
+    distance 2, a corner's at distance 4 — the same (None, β) table must
+    serve both, regrowing for the corner without changing what the centre
+    already looked up.
+    """
+    lattice = LatticeStructure(5, 5, "moore", "bounded")
+    centre = lattice.reach(12, None)
+    small = lattice.distance_weight_table(None, 0.3, up_to=centre.max_distance)
+    centre_before = small[centre.distances].copy()
+    corner = lattice.reach(0, None)
+    assert corner.max_distance > centre.max_distance  # the regrowth premise
+    grown = lattice.distance_weight_table(None, 0.3, up_to=corner.max_distance)
+    assert len(grown) > len(small)
+    assert np.array_equal(grown[centre.distances], centre_before)
+    assert np.array_equal(
+        grown[corner.distances], kernel_weights(lattice, 0, corner.candidates, 0.3)
+    )
+
+
+def test_sample_draws_identically_cold_and_warm() -> None:
+    """The same seed draws the same sites through a cold and a warm cache.
+
+    Two identical lattices: one fresh per draw (every draw a cache miss),
+    one reused across all draws (every draw after the first a hit). If the
+    cache changed anything the streams would diverge somewhere across the
+    mixed radii, decays, and eligible sets.
+    """
+    warm = LatticeStructure(6, 6, "moore", "torus")
+    plans = [
+        (7, 1, 0.0, 3),
+        (7, 2, 0.7, 4),
+        (14, 2, 0.7, 4),  # same (radius, decay), different origin
+        (14, None, 1.3, 5),
+        (0, 1, 0.0, 8),
+    ]
+    eligible = frozenset(range(36)) - {7}
+    cold_rng = np.random.default_rng(99)
+    warm_rng = np.random.default_rng(99)
+    for origin, radius, decay, size in plans:
+        cold = neighbourhood_sample(
+            LatticeStructure(6, 6, "moore", "torus"),  # fresh: cold cache
+            origin,
+            radius=radius,
+            decay=decay,
+            size=size,
+            rng=cold_rng,
+            eligible=eligible,
+        )
+        again = neighbourhood_sample(
+            warm, origin, radius=radius, decay=decay, size=size, rng=warm_rng, eligible=eligible
+        )
+        assert cold == again
+
+
+# ---------------------------------------------------------------------------
 # The import guard, retired and replaced (Phase B)
 # ---------------------------------------------------------------------------
 #

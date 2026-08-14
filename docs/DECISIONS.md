@@ -3997,3 +3997,309 @@ carry churn — remains open exactly as #153(c) left it; E4b logs it
 as an open design question with its M11b deadline. Zero golden
 re-recordings; the run artefacts live outside the repo (scratchpad)
 and are not committed.
+
+**#156 — 2026-08-14 — Reach-kernel precomputation lands in the ENGINE
+(the design layer's 2026-08-13 ruling), draw-neutral by construction and
+pinned three ways; the bench gains the five-column structure grid;
+hypothesis (i) — cost flat in R once the cache is warm — CONFIRMED, and
+hypothesis (ii) — lattice at or below random_k at equal k — SPLIT: von
+Neumann holds, the Moore columns sit 4–17% ABOVE, with the excess
+attributed (as a hypothesis, held for the design layer, never tuned) to
+re-met fixed neighbours' history copies, NOT to the kernel draw (M11a
+Phase E, sub-prompt E4b; the spec's Bench section as implemented).**
+THE CACHE: two memoisations on `Structure`, safe precisely because a
+Structure is an immutable pure value (spec Design 3).
+`reach(origin, radius)` returns a `Reach` named tuple — ascending-id
+candidates, an aligned read-only distance array, their maximum — built
+on first use for each (origin, radius) key by calling `sites_within`
+ITSELF, so there is exactly one implementation of the enumeration and
+cached content cannot differ from a fresh one; and
+`distance_weight_table(radius, decay, up_to=…)` is the spec's one
+distance→weight lookup per (R, β) pair (entry d holds exp(−β·d), the
+same elementwise exp `kernel_weights` applies; regrown identically when
+an unlimited-radius caller on a bounded grid needs a longer table). The
+keys are exactly what the memoised computation reads and nothing else:
+the topology is the instance, so (origin, radius) and (radius, decay)
+close the input set. BUILD TIMING — lazy on first use, reported with
+its why as the prompt requires: the structure module is
+config-independent and cannot know which radii a run will consult
+(birth, interaction, and None all differ per config), eager building
+would either guess radii or plumb config knowledge into the topology
+layer, and a lazy first miss costs exactly what EVERY draw paid before
+the cache existed. CONSUMERS: `neighbourhood_sample` (all four locality
+draws share it), `Occupancy.empty_sites_within` (the placement gate's
+read), and the two async `fixed_n` candidate builds — every repeated
+per-event enumeration in the engine now reads through the cache, which
+is the ruling's point (live runs pay the same per-event cost the bench
+measures; bench-only scaffolding was the rejected alternative). DRAW
+NEUTRALITY, the whole game: the cached path hands the sampler
+value-identical inputs — the candidates ARE sites_within's tuple, and
+table[d] and the old per-draw exp(−β·d) are the same IEEE-754
+operations on the same numbers, so the bits agree — and everything
+downstream (zero-weight filtering, normalisation, the choice call) is
+untouched. The three safeguards, all landed as permanent tests and all
+green: (a) the equality pins in `test_structure.py` — cached candidate
+list AND weight vector asserted identical (`==` and `np.array_equal`,
+bit-for-bit) to a fresh direct enumeration across five geometries
+INCLUDING Moore R = 5 on torus AND bounded grids and a bounded
+von-Neumann case (the regimes outside golden coverage), populated
+first and asserted after across interleaved origins so a mis-keyed
+cache cannot hide — plus a memoisation identity pin (the repeat call
+returns the STORED object; equality alone would pass with the cache
+silently off, and the flat-in-R claim rests on it actually being on),
+a table-regrowth exactness pin, and a cold-versus-warm draw-identity
+pin over mixed radii, decays, and eligible sets; (b) all eight golden
+masters pass with ZERO re-recording; (c) every counting-wrapper
+draw-count pin unchanged. ONE IMPLEMENTATION FINDING, recorded because
+the spec's premise differs: the shipped enumerator was never O(R²) —
+`sites_within` walks EVERY site and filters by distance, so each
+pre-cache draw paid O(site count) regardless of R (WORSE than the
+premise on large grids). Flat-in-R therefore held trivially even
+before the cache; what the cache removes is the per-draw site-count
+scan. Micro-measured (this machine, scratch script, never shipped):
+20×20 — old enumeration+weights 206–276 µs per draw against 63–84 µs
+for the ENTIRE cached draw including the RNG call; 50×50 — old
+1,307–1,520 µs against 86 µs (R = 5) and 185 µs (R = 10), the residual
+R-growth being the per-draw eligibility filter over the candidate
+list, O(neighbourhood size), exactly the spec's designed scaling. THE
+BENCH COLUMN: `python -m pdsim.bench --structure` runs
+N × {round_robin, random_k, lattice_vn_r1, lattice_moore_r1,
+lattice_moore_r5} (the labels also parse directly in `--matchers`).
+Each lattice cell is synchronous IMITATION at constant N — the
+#91/#102 isolation discipline: no demography, so the columns time the
+kernel-draw-plus-match phase and nothing else — on a fully occupied
+most-square N-site torus (blank dimensions), `spatial_interaction` on,
+the same k = 5, the matcher pinned `random_k` as the honest aspatial
+counterpart (unconsulted while the toggle is on, #137(b)); combining a
+lattice label with the economy or async tunings is a config-time
+error (one tuning per measurement). Rendering stays out (#94's
+separate axis); output remains environment-specific and UNCOMMITTED —
+the numbers live in this entry and the handback only. MEASURED
+(2026-08-14, this machine, defaults k = 5 / 50 rounds, median
+s/generation, post-change engine, machine otherwise idle) — N = 50:
+round_robin 0.494, random_k 0.102, vn_r1 0.101, moore_r1 0.117,
+moore_r5 0.104; N = 100: 1.857 / 0.191 / 0.174 / 0.213 / 0.199;
+N = 200: 7.827 / 0.412 / 0.406 / 0.481 / 0.470; N = 400: 30.958 /
+0.778 / 0.754 / 0.904 / 0.808. (A pre-change control grid was run
+first but overlapped a concurrent test-suite load, so only its
+within-run column comparisons are usable; they show the same
+flat-in-R shape with the lattice columns drifting further above
+random_k as N grows — consistent with the O(site count) scan the
+cache removes.) VERDICTS, honestly: (i) CONFIRMED — moore_r5 sits at
+or marginally below moore_r1 at every N (0.808 vs 0.904 at N = 400).
+(ii) SPLIT, and the miss is REPORTED AND HELD: vn_r1 sits at or below
+random_k at every N (while playing 4 of k = 5, the #81 clamp — so per
+match it is ~21% dearer), and the Moore columns sit 4–17% ABOVE. The
+excess is NOT the kernel draw: the whole cached draw costs 63–84 µs
+while the moore_r1 excess is ≈ 300 µs per focal at N = 400. Per-match
+arithmetic localises it in the matches themselves: random_k ≈ 389
+µs/match, moore_r1 ≈ 452, vn_r1 ≈ 471 — lattice matches cost 16–21%
+more than random_k matches at every N. The candidate mechanism,
+offered to the design layer AS a hypothesis: under spatial interaction
+partners are FIXED, so pairs re-meet within a generation — on Moore at
+k = 5 each adjacent pair meets twice with probability 25/64 ≈ 39%
+(both draws forced at von Neumann's k ≥ 4: EVERY adjacent pair meets
+twice, and vn_r1's per-match cost is accordingly the highest), against
+≈ 2k/(N − 1) ≈ 2.5% under random_k at N = 400 — and a re-met pair's
+second match copies a match-length history through `view_of` every
+round: #91's pair-recurrence growth term operating WITHIN the
+generation. Nothing was tuned to close the gap; the M18 vectorization
+trigger stays untripped (absolute costs remain comparable and linear
+in N).
+
+**#157 — 2026-08-14 — The §12 audit ran item by item: 54 of 54 covered
+— 14 registry parameters, 17 individually-explained enum values, 14
+concepts, 9 derived readouts with visible numbers — with ONE wrong
+text found and fixed (the Economy panel's memory-depth note now has a
+spatial branch) and NO structural gaps beyond what #154 already holds
+by design (M11a Phase E, sub-prompt E4b; DESIGN §2.12's checklist
+obligation discharged).** THE PARAMETERS (14/14): every `structure.*`
+key, `matching.spatial_interaction`, and `dynamics.boundary_order`
+carries a plain-language registry description rendered as its widget's
+(?) — structurally guaranteed by DESIGN §5 and walked anyway;
+`PARAMETERS.md` regenerates from the same source, so app and docs
+cannot drift. THE ENUM VALUES (17/17), each explained individually
+inside its parameter's description — the part §12 exists for:
+`well_mixed`/`lattice` in `structure.kind` (including the
+imitation-stays-global caveat, #132); `moore`/`von_neumann` in
+`neighbourhood_shape` (each with its metric and neighbour count);
+`torus`/`bounded` in `boundary` (wrap-around, the rim, corner
+degrees, and why torus is the default); all seven layouts in
+`initial_layout` (`random`, `checkerboard`, `stripes`, `blocks`,
+`patches`, `central_block`, `from_file` — each with its arrangement
+story; the `stripes` text was re-examined against #150's sparse band
+and STANDS: the dealing it describes is unchanged and its
+fragment-of-a-row sentence covers the band's centred partial last
+row, matching #150's own no-registry-change call);
+`random`/`energy_priority` in `placement_contest` (luck versus the
+compounding-advantage claim); `death_first`/`birth_first` in
+`boundary_order` (both demographic consequences worked). THE CONCEPTS
+(14/14), each with a named single source: site and
+exclusivity/capacity (`structure.kind` description plus
+`STRUCTURE_HELP["site_count"]`); neighbour/neighbourhood
+(`neighbourhood_shape`); support radius R (`birth_radius` /
+`interaction_radius` — the hard edge); decay β (`birth_decay` /
+`interaction_decay` — exp(−β·d) spelled out); the reach kernel (the
+same two pairs plus `matching.spatial_interaction`'s pointer);
+viscosity (`ECONOMY_HELP["blocked_parents"]` names and defines
+spatial viscosity); wrap-around equalising degree (`boundary`);
+degree and why thresholds depend on it (`boundary` plus
+`STRUCTURE_HELP["effective_neighbours"]` — "the k the b/c > k
+threshold counts"); the two gates and why one is not enough, and a
+blocked parent (`ECONOMY_HELP["blocked_parents"]`, the #133(c)
+single source); arrangement versus composition (`initial_layout`);
+the b/c > k threshold with the additivity nuance
+(`GAME_HELP["payoff_additivity"]` carries exactly the required
+claim: b and c only EXIST when T − R = P − S, and a non-additive
+matrix makes the ratio AMBIGUOUS — four defensible readings — rather
+than merely inapplicable); spatial reciprocity
+(`matching.spatial_interaction`'s learn-more names and defines it).
+THE READOUTS (9/9, each a visible number with a (?)): Sites
+(`site_count`); Grid (resolved) (`resolved_dimensions`); Capacity K
+(resolved) beside the site count (`resolved_capacity`) — fires only
+while the K WIDGET is blank, the #141 design, NOT re-derived as a gap
+per #153(b), and the loader's loss-free inverse re-presenting
+stored-equals-auto values as blank-auto is likewise correct
+behaviour, not a gap; Effective neighbours (k)
+(`effective_neighbours`); Occupied with its fraction (`occupancy`);
+Isolated at founding (`isolated`); Blocked parents this generation
+(`ECONOMY_HELP["blocked_parents"]`, live metric, presence-gated by
+`blocked_parents_visible`); Pixel-array rendering
+(`STRUCTURE_HELP["pixel_array"]`, its value read from the SAME
+`charts.pixel_array_active` predicate the renderer consults, both
+#149 triggers described — verified present as #145(c) left it);
+payoff additivity (`GAME_HELP["payoff_additivity"]`, the #141(e)
+metric plus caption reporting b, c, and b/c when additive or the
+costs-a-different-amount reason when not). THE ONE TEXT FIX, logged
+as the audit's own obligation: the memory-depth note
+(`economy_helpers.calibration_report`) branched on the CONFIGURED
+matcher even while spatial interaction was active — the very
+staleness #154 reported into this audit — so a spatial run with a
+greyed round_robin got growth attributed to a mechanism that is not
+running, and one with a greyed random_k got "a given opponent recurs
+only occasionally", the OPPOSITE of the lattice truth (neighbours are
+fixed; an adjacent pair meets twice per generation, #139). The note
+now takes a third branch on the SAME #154 gate
+(`spatial_calibration_active`): fixed neighbours, twice-per-
+generation meetings, and the honest worst case ≈ 2 × rounds ×
+generations recorded moves — double round_robin's per-pair rate,
+exactly as #154's analysis said. Pinned by test (the flagship's note
+names fixed neighbours and 200 moves, never round_robin; the
+frontier keeps the random_k wording). The async context is untouched
+and keeps its #154-pinned pre-spatial behaviour. NOT GAPS, on
+pre-derived grounds honoured per #153(b)/#154: the whole
+asynchronous clock's calibration report still uses the configured
+matcher's arithmetic (deliberately held — the async
+per-generation-equivalent match count is unmeasured; pinned at
+N − 1 = 99 on `donation_game_threshold`; carried to M11b's advisory
+work by this session's ROADMAP amendment). No registry text changed,
+so no gendocs run was needed (the fix lives in the #38/#48
+Streamlit-free helper module and its tests).
+
+**#158 — 2026-08-14 — The tabs decision, recorded although nothing is
+built (the spec's Docs obligations named this the piece most likely to
+be lost, and the design layer confirmed 2026-08-13 it had never been
+written): the `run.mode` tab split is the ONE clean fork; everything
+else fails the total-fork criterion and gets collapse-with-summary;
+novice/advanced disclosure is a separate axis; implementation is
+M11b's (M11a Phase E, sub-prompt E4b).** THE SPLIT: evolution and
+tournament become separate TABS — the one fork the parameter panel
+has where hiding is honest. THE TOTAL-FORK CRITERION, the rule that
+makes it the only one: hide a parameter only where EVERY parameter on
+the far side of the fork is genuinely ignored, with no exceptions and
+no partial cases. The reason: a GREYED widget says "this exists and
+does nothing here", while a HIDDEN one says "this is irrelevant here"
+— and if that second claim is ever wrong, the user cannot see the
+parameter that is affecting their run. Tournament ignores structure,
+dynamics, and demography WHOLESALE (#120(a)/#144), so the mode fork
+passes; nothing else does. WHY `time_model` FAILS the criterion:
+`selection_beta` follows the imitation OVERLAY, not the mode (#101's
+carve-out), and the ledger knobs — L, engagement, r, σ — apply under
+the synchronous economy AND both asynchronous population modes;
+Dynamics has a shared core with two mode-specific wings, not a clean
+cut. WHY `reproduction_mode` FAILS it too: the same shared-ledger
+problem, plus async `variable_n` BEING the economy under a different
+clock. COLLAPSE-WITH-SUMMARY is the treatment for inert sections: a
+collapsed section that names itself and its state ("Structure —
+well-mixed, inactive"), rather than hiding — the disclosure form of
+the #34 grey-never-hide rule. NOVICE/ADVANCED DISCLOSURE is a
+separate, orthogonal axis deserving its own decision when M11b takes
+the panel apart — it cuts across sections, not along mode forks, and
+conflating the two axes is how a parameter ends up invisible for two
+unrelated reasons at once. IMPLEMENTATION is M11b, deliberately not
+beside this milestone's riskiest phases (the spec's own scoping); the
+ENABLING piece — the #141 `STRUCTURE_GREYING` predicate table both
+clock branches consume — already shipped, and M11b's tab/collapse
+work becomes a second renderer over that same table.
+
+**#159 — 2026-08-14 — OPEN QUESTION, deliberately unresolved here: when
+the carrying capacity rations births, is the global quota consumed by
+ADMISSION (today's behaviour) or by SUCCESSFUL PLACEMENT? Deadline:
+resolved in M11b at the latest, EXPLICITLY BEFORE M12 (M11a Phase E,
+sub-prompt E4b; logs the question #153(c) surfaced and #155 confirmed,
+as those entries directed).** THE QUESTION, stated for a future
+session with no context assumed: under the synchronous energy economy
+the capacity gate admits the wealth-ranked richest eligible parents up
+to the free-seat count, and only THEN does each admitted parent
+attempt local placement within its birth kernel. A parent that wins
+admission but finds no empty site in reach is BLOCKED — it pays
+nothing and stays eligible — but its admission slot is spent for the
+generation. Should unfilled quota instead roll to the next-richest
+eligible parent within the same boundary — equivalently, should the
+quota count PLACEMENTS rather than ADMISSIONS, or should admission see
+placement feasibility at all? THE EVIDENCE that this is a real regime,
+not a corner: #153(c)'s Filling Grid freeze — growth stops at ~265 of
+400 sites with `blocked_parents` equal to EXACTLY site count −
+population every generation from ~6 on, because the rich interior
+consumes the whole quota and is precisely the cohort the kernel
+blocks, while the poorer rim (all above θ, all with empty neighbour
+sites) never ranks inside it — and E4a's P = 0 rederivation (#155):
+the freeze broke only transiently and RE-FORMED LOWER at 235 of 400,
+so the deadlock is indifferent to payoffs — it is the admission
+mechanism itself. WHY IT WAS NOT SLIPPED INTO E4: the contest
+permutation is drawn over the ADMITTED set (#133(a)), so ANY change —
+roll-forward, placement-counted quota, feasibility-aware admission —
+alters RNG consumption and is a #80/#99-governed breaking change
+needing its own golden masters; exactly the class of change Phase E's
+zero-re-recording guard exists to keep out. THE STAKE, named: the
+Hammond–Axelrod frontier replication (M12) runs at K = site count
+with rich interior incumbents and poor frontier parents — precisely
+the configuration that starves the frontier of admission quota — so
+the question must be settled before that scenario can mean anything.
+
+**#160 — 2026-08-14 — M11a IS COMPLETE (M11a Phase E, sub-prompt E4b —
+the close-out entry: the V6 discharge record, the docs-obligations
+sweep verdict, one housekeeping fix, and the WIP disposition).**
+(a) THE V6 DISCHARGE RECORD: the spec's V6 validation item — the
+b/c > k threshold observed in the app — is DISCHARGED BY RECORD:
+executed in Phase D by manual configuration at 20 seeds per shape
+(#140) and re-exercised app-first through the registered
+`donation_game_threshold` scenario in E3, including the twelve-seed
+fixation check (#151). Per the #117 honesty rule the discharge stands
+WITH the observed result: NO visible reversal at this engine's
+selection strength — the spec's "von Neumann clears, Moore fails"
+expectation is what was measured against and not observed — and the
+shipped scenario text carries the caveat (the compass, not a
+prediction). (b) THE DOCS-OBLIGATIONS SWEEP, walked against the
+spec's list: build decisions #112–#155 exist (spot-checked, not
+re-audited); Open Question 1's resolution WITH the explicit
+scope-grounds decline of local sync-imitation comparison is #132; the
+`site_capacity` pinned-at-1 record with its three deferred questions
+is #135 (and ROADMAP's M19 entry carries the registration task line —
+verified present); the tabs decision is #158, written this session as
+the spec predicted it would need to be. No other missing obligation
+was found. (c) HOUSEKEEPING: `pdsim/io/results.py` defined
+`PER_AGENT_SCHEMA_VERSION = 3` twice in a row with identical
+docstrings (E4a's report); the duplicate is removed — no behaviour
+change. (d) WIP DISPOSITION, decided by the design layer: DELETED at
+milestone end — ROADMAP and CLAUDE.md now carry the next-effort
+pointer (the literature verification pass gating the M11a explainer,
+then M11b), and a baton carrying nothing tracked docs don't hold is
+clutter. (e) THE DECLARATION: M11a — population structure: sites,
+local birth, local interaction — is COMPLETE, Phases A through E4b,
+DECISIONS #111–#160, schema 5, eight golden masters (four negative,
+four positive) with the only re-recording across the whole milestone
+being #150's logged, confined pair; 1059 tests pass; ruff clean. The
+M11a explainer remains GATED on the four literature verifications
+(spec Out-of-scope; #103/#111) and is NOT part of the milestone;
+M11b is next per ROADMAP.

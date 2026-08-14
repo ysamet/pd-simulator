@@ -163,7 +163,7 @@ from pdsim.core.reproduction import StrategySwitchReproduction
 # copy that could drift from it.
 from pdsim.core.selection import _logistic
 from pdsim.core.strategies import strategy_name_of
-from pdsim.core.structure import SiteId, neighbourhood_sample, sites_within
+from pdsim.core.structure import SiteId, neighbourhood_sample
 
 _EPS = 1e-9
 """Float tolerance for clock comparisons.
@@ -885,7 +885,7 @@ class AsyncDynamics:
         structure = occupancy.structure
         candidate_sites = tuple(
             site
-            for site in sites_within(structure, freed_site, self._birth_radius)
+            for site in structure.reach(freed_site, self._birth_radius).candidates
             if occupancy.is_occupied(site)
         )
         by_id = {agent.agent_id: agent for agent in self._population}
@@ -929,7 +929,7 @@ class AsyncDynamics:
         assert origin is not None  # every living agent holds a site
         candidate_sites = tuple(
             site
-            for site in sites_within(structure, origin, self._birth_radius)
+            for site in structure.reach(origin, self._birth_radius).candidates
             if occupancy.is_occupied(site)
         )
         by_id = {agent.agent_id: agent for agent in self._population}

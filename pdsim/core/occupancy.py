@@ -237,14 +237,12 @@ class Occupancy:
             KeyError: If ``origin`` names no site in the structure.
             ValueError: If ``radius`` is negative.
         """
-        # Imported here rather than at module scope purely for readability of
-        # the dependency direction: occupancy is bookkeeping over a topology,
-        # and sites_within is the topology's own pure enumerator.
-        from pdsim.core.structure import sites_within
-
+        # The enumeration half is a pure function of the immutable topology,
+        # so it reads through the structure's reach cache (#156); only the
+        # emptiness filter is evaluated per call, against live occupancy.
         return tuple(
             site_id
-            for site_id in sites_within(self._structure, origin, radius)
+            for site_id in self._structure.reach(origin, radius).candidates
             if site_id not in self._agent_by_site
         )
 

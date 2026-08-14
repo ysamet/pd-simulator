@@ -449,7 +449,24 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
 
     memory_note = None
     if dynamics.reproduction_mode == "energy_economy" and config.population.memory_depth is None:
-        if config.matching.matcher == "round_robin":
+        if spatial:
+            # The E4b audit fix: the note used to branch on the CONFIGURED
+            # matcher here too, attributing the growth to a mechanism that is
+            # not running — and the random_k wording ("recurs only
+            # occasionally") is the opposite of the lattice truth, where
+            # neighbours are fixed and an adjacent pair meets twice per
+            # generation (#139), doubling round_robin's per-pair growth rate.
+            worst = 2 * rounds * dynamics.generations
+            memory_note = (
+                "Histories persist for an agent's whole life and memory depth "
+                "is unlimited: under spatial interaction an agent's "
+                "neighbours are FIXED, so a neighbouring pair meets twice "
+                f"every generation and one relationship can reach ≈ {worst:,.0f} "
+                f"recorded moves by generation {dynamics.generations}, with "
+                "the per-round history copy growing alongside (cost quadratic "
+                "in run length). Set the population memory depth to bound it."
+            )
+        elif config.matching.matcher == "round_robin":
             worst = rounds * dynamics.generations
             memory_note = (
                 "Histories persist for an agent's whole life and memory depth "

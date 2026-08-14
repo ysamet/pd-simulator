@@ -240,77 +240,58 @@ engines, symmetric imitation overlay, explicit birth/death/imitation
 events, recording cadence + schema 4; DECISIONS #85-#92, #93-#102)** are
 complete. M11 (population structure) is chat-designed (DESIGN §2.12,
 DECISIONS #103-#110) and splits into **M11a** (structure, local birth,
-local interaction) and **M11b** (movement + layout painter). M11a is **in
-progress** (spec: `docs/specs/M11a-population-structure-spec.md`; #111 =
-pre-implementation docs pass): **Phase A** — `pdsim/core/structure.py`
-plus the registry's Structure geometry block, wired to no engine code —
-landed 2026-08-01 (#112). **Phase B** — occupancy, founding via the seven
-initial layouts plus the layout file, the two registry entries, site-id
-persistence at schema 5, and the grid renderer — landed 2026-08-03
-(#116-#120, follow-ups #121-#126); VT-2 and VT-3 are answered there.
-**Phase C — local birth — landed 2026-08-06 (#127-#136)**: occupancy is
-LIVE in all three engines (death frees a site, birth occupies one,
-newborn `site_id` real from birth); the amended #80 birth step (contest
-permutation under the three-way gate, kernel placement, place-before-pay
-live, blocked parents counted and shown live in the app);
-`birth_radius`/`birth_decay`/`placement_contest`/`boundary_order`; K's
-site-count derived default plus the K-family validators; the
-stake+overhead fix (#129); the localised `fixed_n` breeder/victim draws
-with the R = 1 Ohtsuki reduction (#132); VT-4 runtime-confirmed (#130);
-four negative + three positive golden masters and the counting-wrapper
-no-draw pins (#133). **Phase D — local interaction — landed 2026-08-06
-(#137-#140)**: `matching.spatial_interaction` (Matching section, first,
-above `matcher`) with `interaction_radius`/`interaction_decay`; the thin
-`SpatialKernel(Matcher)` sync adapter and the async partner-draw
-substitution, both gated on lattice + toggle, both single calls into the
-Phase A `neighbourhood_sample` primitive; draw-unconditionally +
-empty-eligible RNG contract with no-call pins; the requires-lattice
-validator (tournament-ignored); the matcher.py docstring correction; the
-fourth positive golden recorded (#128 discharged); VT-6(b) measured
-EXACTLY 8 matches per agent per generation (#139); V6 run manually — no
-visible b/c > k separation at this engine's strong selection, reported
-to the design layer (#140). Zero golden re-recordings; 977 tests.
-**Phase E — polish — is IN PROGRESS, delivered as four sub-prompts.
-E1 landed 2026-08-07 (#141-#144)**: the `helpers.greying` inspection
-(Outcome A — the rule form admits predicates), the full greying map as
-the ONE `STRUCTURE_GREYING` predicate table consumed by BOTH branches
-(tournament wholesale-grey included, #144; `spatial_interaction` greys
-under well_mixed, #142; composition greys under `from_file`, #143), and
-the §12 paint-time readouts (resolved dims, resolved K beside the site
-count, effective neighbour count, payoff additivity) on two new pure
-functions in `experiment.py`; 1006 tests, zero golden re-recordings.
-**E2 landed 2026-08-09 (#145-#149), MINUS its Task 3**: the pixel-array
-rendering fallback (`PIXEL_ARRAY_THRESHOLD = 2500` sites OR cells below
-`BORDER_MIN_SIDE_PX = 6` px — the elongated-grid amendment from the
-owner's validation, #149 — heatmap → `go.Image`, same one
-`strategy_colors()` source) and the ≈ 3 px cell floor (`floored_canvas`,
-minimum 320 px canvas width for the figure chrome, rendered
-un-stretched), both inside the ONE
-`grid_chart` path all three consumers share (#145); the ninth §12
-readout, "Pixel-array rendering", on the grid's metric row (#145 — the
-nine derived readouts are now complete for E4's audit); the results
-browser's Founding | Final occupancy selector, presence-driven,
-defaulting to Final (#146, discharging #136's deferral); and the golden
-suite renamed to `pdsim/tests/test_golden_masters.py`, zero pins
-touched (#147 — run it as `pytest pdsim/tests/test_golden_masters.py`).
-E2's Task 3 was correctly HELD (#148) on two Phase C positive goldens
-pinning sparse-`stripes` foundings. **E2b landed 2026-08-09 (#150,
-discharging #148 by its option (a))**: the #127 sparse-`stripes`
-full-width band (`layouts._stripes_footprint` — ceil(N ÷ cols) rows
-centred vertically, all full-width except a centred partial LAST row;
-only `stripes` changes, no RNG, `fixed_n` unreachable by validator);
-the #120(f) test retirements (ball pin replaced by band pins including
-the two #148 footprints at the goldens' own compositions, a
-stripes ≠ blocks differentiation pin, a counting-wrapper zero-draw pin,
-the #125 fallback and blob-coincidence pins re-referenced onto
-`blocks`' footprint, and the new band-equals-rectangle coincidence at
-N=10 on 5×5 pinned as inherent); and the CONFINED re-record —
-`sync_economy_lattice` and `async_variable_n_lattice` re-recorded with
-the full #133(d) technique (both now carry the reload-and-re-run
-assertion; `async_fixed_n_lattice` alone keeps stream+folder-only
-scope), verified: only those two pins failed pre-re-record, foundings
-asserted against the #148 footprints before capture, and the diff shows
-exactly four constants moved. 1029 tests. Remaining: **E3** — the four
-named scenarios; **E4** — the bench structure column and the §12
-54-item audit with coverage reported. Design everything to not block the v2/v3 extensions
-listed in `docs/DESIGN.md` §6.
+local interaction) and **M11b** (movement + layout painter).
+
+**M11a is COMPLETE (2026-08-14; DECISIONS #111-#160; spec
+`docs/specs/M11a-population-structure-spec.md`, status: implemented;
+1059 tests passing).** What it delivered, phase by phase: **A** (#112) —
+`pdsim/core/structure.py` (graph of sites, lattice builder, the reach
+kernel, the ONE `neighbourhood_sample` primitive), wired to nothing.
+**B** (#116-#126) — occupancy, the seven founding layouts plus the
+layout file, site-id persistence at schema 5, the grid renderer.
+**C — local birth** (#127-#136) — occupancy LIVE in all three engines,
+the amended #80 birth step (contest permutation, kernel placement,
+place-before-pay, blocked parents counted and shown live),
+`birth_radius`/`birth_decay`/`placement_contest`/`boundary_order`, K's
+site-count derived default + the K-family validators, the localised
+`fixed_n` draws with the R = 1 Ohtsuki reduction (#132), four negative
++ three positive golden masters with the counting-wrapper no-draw pins
+(#133). **D — local interaction** (#137-#140) —
+`matching.spatial_interaction` + `interaction_radius`/`interaction_decay`,
+the thin `SpatialKernel` sync adapter and the async partner-draw
+substitution (both single calls into the one primitive), the
+draw-unconditionally/empty-eligible RNG contract, the fourth positive
+golden (#138); VT-6(b) measured EXACTLY 8 matches per agent per
+generation (#139); V6: no visible b/c > k separation at this engine's
+strong selection, reported honestly (#140). **E — polish, five
+sub-prompts** — E1 (#141-#144): the `STRUCTURE_GREYING` predicate table
+consumed by both clock branches + the §12 paint-time readouts; E2
+(#145-#149): pixel-array rendering fallback + ≈ 3 px cell floor in the
+one `grid_chart` path, the ninth §12 readout, the results browser's
+Founding | Final selector, golden suite renamed
+`pdsim/tests/test_golden_masters.py`; E2b (#150): the sparse-`stripes`
+band, with the milestone's ONLY golden re-record (logged, confined,
+two pins); E3 (#151-#153): the four registered scenarios
+(`spatial_reciprocity` flagship, `donation_game_threshold`,
+`the_drifting_frontier`, `the_filling_grid`), E3's findings reported
+and held; E4a (#154-#155): the Economy panel's spatial calibration
+branch (sync-gated; async pinned on current behaviour) and the Filling
+Grid's rise-then-freeze rewrite; E4b (#156-#160): reach-kernel
+precomputation in the ENGINE (`Structure.reach` +
+`distance_weight_table`, draw-neutral, pinned by equality tests +
+eight goldens zero re-recording + counting pins), the bench's
+five-column structure grid (`python -m pdsim.bench --structure`;
+hypothesis flat-in-R CONFIRMED, lattice-≤-random_k SPLIT — Moore
+4-17% above, attributed to re-met fixed neighbours' history copies,
+held for the design layer), the 54-item §12 audit (54/54 covered; one
+text fix — the memory-depth note's spatial branch), the tabs decision
+recorded (#158), the admission-quota OPEN question logged (#159,
+deadline M11b, explicitly before M12), and the close-out (#160).
+
+**Next per ROADMAP:** the M11a explainer remains GATED on the
+literature verification pass (a design-layer task — the four #103/#111
+publisher-record checks; NOT written from here); then **M11b**
+(movement + layout painter, `encounter_mode`, the advisory mechanism
+A1-A3, the #158 tab/collapse/disclosure work, and the #159
+admission-quota resolution). Design everything to not block the v2/v3
+extensions listed in `docs/DESIGN.md` §6.

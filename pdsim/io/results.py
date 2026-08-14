@@ -141,15 +141,6 @@ events, so they keep declaring schema 3, byte-identical to M10a
 recordings (the honest-presence rule, #83).
 """
 
-PER_AGENT_SCHEMA_VERSION = 3
-"""What a run with per-agent data but NO event-time data writes.
-
-Synchronous energy-economy runs under M10b code: they produce snapshots
-(``agents.parquet``) but no event-time clock or explicit demographic
-events, so they keep declaring schema 3, byte-identical to M10a
-recordings (the honest-presence rule, #83).
-"""
-
 PER_STRATEGY_SCHEMA_VERSION = 2
 """What a run WITHOUT per-agent data writes (synchronous imitation runs).
 

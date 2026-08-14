@@ -31,6 +31,18 @@ lives only in :func:`neighbourhood_sample`, which composes the two pure
 functions with one seeded draw at the end. Tests can therefore pin the
 candidate sets and weights exactly, with no RNG in the assertion path.
 
+Purity is also what makes the Phase E precomputation safe (#156): because
+the topology is immutable and the enumeration is pure, its result for a
+given (origin, radius) can be computed once and remembered —
+*memoisation* (new concept): caching a pure function's results keyed by its
+inputs, trading memory for repeat-call speed with NO change in behaviour.
+:meth:`Structure.reach` memoises the candidate list (built by
+:func:`sites_within` itself, so there is exactly one implementation of the
+enumeration), and :meth:`Structure.distance_weight_table` memoises one
+distance→weight lookup per (radius, decay) pair. The cache changes WHEN
+arrays are built, never what they contain — the draw stream is
+byte-identical, pinned by the equality tests and the golden masters.
+
 **The determinism rule (spec Design 2 — a rule, not advice):** every
 candidate site list is built in ascending site-id order before any draw
 touches it. Without this, draw outcomes would depend on set iteration
@@ -44,7 +56,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 
@@ -98,16 +110,44 @@ class Site:
     coordinate: tuple[int, int] | None = None
 
 
+class Reach(NamedTuple):
+    """One memoised enumeration: everything within radius R of one origin.
+
+    ``NamedTuple`` (new concept): a tuple whose positions have names — as
+    light as a plain tuple, but ``entry.candidates`` reads better than
+    ``entry[0]`` and type checkers see the field types.
+
+    Attributes:
+        candidates: The candidate site ids in ascending id order — EXACTLY
+            what :func:`sites_within` returns for the same (origin, radius),
+            because that function is what built it (one implementation of
+            the enumeration, memoised, never a second copy that could
+            drift).
+        distances: Integer distances from the origin, aligned with
+            ``candidates``, as a read-only numpy array ready for indexing a
+            distance→weight table.
+        max_distance: The largest value in ``distances`` (0 when there are
+            no candidates) — how long a weight table must be to cover this
+            reach.
+    """
+
+    candidates: tuple[SiteId, ...]
+    distances: np.ndarray
+    max_distance: int
+
+
 class Structure(ABC):
     """The immutable topology: sites, the neighbour relation, and distance.
 
     This is ALL the core ever sees (spec Design 0). A ``Structure`` is a pure
     value derived once from the config and never changed during a run — which
-    is what lets it be shared, cached, and (in Phase E) precomputed. The
-    mutable per-run counterpart, ``Occupancy`` (site → agent bookkeeping), is
-    a separate object that arrives in Phase B; keeping the two apart is the
-    difference between M19 writing a builder and M19 writing an engine
-    (spec Design 3).
+    is what lets it be shared, cached, and precomputed: :meth:`reach` and
+    :meth:`distance_weight_table` (Phase E, #156) memoise the pure
+    enumeration and weighting so a run pays for each (origin, radius)
+    enumeration once instead of once per draw. The mutable per-run
+    counterpart, ``Occupancy`` (site → agent bookkeeping), is a separate
+    object that arrives in Phase B; keeping the two apart is the difference
+    between M19 writing a builder and M19 writing an engine (spec Design 3).
 
     Subclasses build the site set and supply the metric; everything else —
     lookups, the neighbour relation, the shared validation — lives here.
@@ -151,6 +191,14 @@ class Structure(ABC):
                     f"Site {site.id} has neighbour id(s) {sorted(unknown)} that do not "
                     "exist in the structure."
                 )
+        # The Phase E memoisation caches (#156). Keyed on exactly what the
+        # memoised computation reads: the topology is this instance (fixed
+        # for its lifetime), so the reach cache keys on (origin, radius) and
+        # the weight tables on (radius, decay) — nothing else can move the
+        # results. Private mutable state on an otherwise immutable value is
+        # safe here because it only ever remembers pure-function results.
+        self._reach_cache: dict[tuple[SiteId, int | None], Reach] = {}
+        self._weight_tables: dict[tuple[int | None, float], np.ndarray] = {}
 
     @property
     def sites(self) -> tuple[Site, ...]:
@@ -213,6 +261,84 @@ class Structure(ABC):
             KeyError: If no site with this id exists.
         """
         return self.site(site_id).neighbours
+
+    def reach(self, origin: SiteId, radius: int | None) -> Reach:
+        """Return the memoised candidate list and distances for one origin.
+
+        The Phase E precomputation (#156): the first call for a given
+        (origin, radius) builds the entry through :func:`sites_within` — the
+        one implementation of the enumeration, so cached content CANNOT
+        differ from a fresh enumeration — and computes the aligned distance
+        array; every later call returns the stored entry. Topology is
+        immutable (spec Design 3), so an entry can never go stale.
+
+        Args:
+            origin: The site reach is measured from (never itself a
+                candidate).
+            radius: Support radius R, or ``None`` for unlimited reach.
+
+        Returns:
+            The :class:`Reach` entry — ascending-id candidates, aligned
+            read-only distances, and their maximum.
+
+        Raises:
+            KeyError: If ``origin`` names no site in the structure (a bad
+                origin is never cached, so this raises on every call).
+            ValueError: If ``radius`` is negative (likewise never cached).
+        """
+        key = (origin, radius)
+        cached = self._reach_cache.get(key)
+        if cached is None:
+            candidates = sites_within(self, origin, radius)
+            distances = np.array(
+                [self.distance(origin, site_id) for site_id in candidates], dtype=np.intp
+            )
+            # Read-only: callers index this shared array; nobody may bend it.
+            distances.setflags(write=False)
+            cached = Reach(
+                candidates=candidates,
+                distances=distances,
+                max_distance=int(distances.max()) if candidates else 0,
+            )
+            self._reach_cache[key] = cached
+        return cached
+
+    def distance_weight_table(self, radius: int | None, decay: float, *, up_to: int) -> np.ndarray:
+        """Return the memoised distance→weight lookup for one (R, β) pair.
+
+        Weight depends only on distance (``exp(−β·d)``), so ONE small table
+        covers every site on the grid (spec Bench section): entry ``d``
+        holds the kernel weight at distance ``d``, computed by the same
+        elementwise ``exp`` that :func:`kernel_weights` applies — the values
+        are bit-identical, pinned by test. The table for a (radius, decay)
+        pair is built on first use and regrown if a later caller needs a
+        larger distance (a bounded grid's corners under unlimited radius);
+        regrowth recomputes the same prefix values exactly.
+
+        Args:
+            radius: The support radius the table serves (part of the key so
+                each configured kernel keeps its own table).
+            decay: β — the non-negative decay rate.
+            up_to: The largest distance the caller will look up (typically
+                :attr:`Reach.max_distance`).
+
+        Returns:
+            A read-only float array of length at least ``up_to + 1`` where
+            index ``d`` holds ``exp(−decay·d)``.
+
+        Raises:
+            ValueError: If ``decay`` is negative (the same rule
+                :func:`kernel_weights` enforces).
+        """
+        if decay < 0:
+            raise ValueError(f"decay must be non-negative, got {decay}.")
+        key = (radius, decay)
+        table = self._weight_tables.get(key)
+        if table is None or len(table) <= up_to:
+            table = np.exp(-decay * np.arange(up_to + 1, dtype=float))
+            table.setflags(write=False)
+            self._weight_tables[key] = table
+        return table
 
     @abstractmethod
     def distance(self, a: SiteId, b: SiteId) -> int:
@@ -559,7 +685,9 @@ def neighbourhood_sample(
       ``place_offspring``'s failure signal (Design 4, Phase C).
 
     Determinism: the candidate list is built in ascending site-id order
-    before the draw (via :func:`sites_within`), and ``eligible`` is only
+    before the draw (via :func:`sites_within`, memoised by
+    :meth:`Structure.reach` — the Phase E precomputation changes when the
+    list is built, never its content, #156), and ``eligible`` is only
     ever membership-tested — its iteration order can never influence the
     outcome. Same seed, same inputs, same draw.
 
@@ -591,12 +719,15 @@ def neighbourhood_sample(
     """
     if size < 0:
         raise ValueError(f"size must be non-negative, got {size}.")
-    candidates = [
-        site_id for site_id in sites_within(structure, origin, radius) if site_id in eligible
-    ]
-    if not candidates or size == 0:
+    within = structure.reach(origin, radius)
+    selected = [index for index, site_id in enumerate(within.candidates) if site_id in eligible]
+    if not selected or size == 0:
         return ()
-    weights = kernel_weights(structure, origin, candidates, decay)
+    candidates = [within.candidates[index] for index in selected]
+    # Same values `kernel_weights` would compute, looked up by distance
+    # instead of recomputed per draw (bit-identical — pinned by test).
+    table = structure.distance_weight_table(radius, decay, up_to=within.max_distance)
+    weights = table[within.distances[selected]]
     if site_weights is not None:
         second = np.array([site_weights[site_id] for site_id in candidates], dtype=float)
         if np.any(second < 0):

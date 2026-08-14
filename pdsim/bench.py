@@ -5,6 +5,7 @@ Usage (with the project venv active)::
     python -m pdsim.bench                       # default N x matcher grid
     python -m pdsim.bench --sizes 50,100 --generations 3
     python -m pdsim.bench --time-model asynchronous   # M10b event loop
+    python -m pdsim.bench --structure           # M11a structure grid
     python -m pdsim.bench --out bench.csv       # also write CSV
 
 Purpose: make the vectorized-backend trigger EMPIRICAL. The v2 plan
@@ -46,6 +47,28 @@ DEFAULT_SIZES = (50, 100, 200, 400)
 DEFAULT_MATCHERS = ("round_robin", "random_k")
 """Matchers benchmarked by default."""
 
+STRUCTURE_CELLS: dict[str, tuple[str, int]] = {
+    "lattice_vn_r1": ("von_neumann", 1),
+    "lattice_moore_r1": ("moore", 1),
+    "lattice_moore_r5": ("moore", 5),
+}
+"""The M11a structure columns: label -> (neighbourhood shape, interaction radius).
+
+Each times a synchronous imitation run on a fully occupied lattice (blank
+dimensions resolve to a most-square grid of exactly N sites, torus boundary)
+with ``matching.spatial_interaction`` on, so the match phase routes through
+``SpatialKernel`` and the reach kernel instead of the configured matcher.
+Imitation keeps N constant with no demography — the same isolation
+discipline as the economy/async tunings (#91/#102) — so the columns time the
+kernel-draw + match-phase cost and nothing else. The three cells test the two
+falsifiable claims the spec states for Phase E: cost flat in R once the reach
+cache is warm (moore_r1 vs moore_r5), and the lattice at or below random_k
+at equal k (kernel draws no dearer than the matches they replace).
+"""
+
+STRUCTURE_MATCHERS = tuple(STRUCTURE_CELLS)
+"""The structure column labels, in grid order."""
+
 
 def _even_composition(size: int) -> dict[str, int]:
     """Split a population evenly across the registered roster.
@@ -80,8 +103,15 @@ def _cell_config(
 
     Args:
         size: Population size N.
-        matcher: Matching scheme machine name.
-        k: Opponents per agent (used only under random_k).
+        matcher: Matching scheme machine name, or one of the
+            :data:`STRUCTURE_CELLS` labels (``lattice_vn_r1``,
+            ``lattice_moore_r1``, ``lattice_moore_r5``) — a structure label
+            builds a synchronous imitation run on a fully occupied N-site
+            lattice with ``matching.spatial_interaction`` on, timing the
+            reach-kernel match phase at the same k as the random_k cell.
+        k: Opponents per agent (used under random_k and by the spatial
+            kernel — the lattice cells draw k partners per focal, clamped
+            to the neighbourhood by the primitive, #81).
         rounds: Fixed rounds per match.
         generations: Generations to run (timed; first is warmup).
         seed: Random seed (identical across cells — timing, not science).
@@ -99,7 +129,33 @@ def _cell_config(
 
     Returns:
         A validated evolution-mode config.
+
+    Raises:
+        ValueError: If a structure label is combined with the economy or
+            async tunings — the structure columns time the SYNCHRONOUS
+            imitation match phase at constant N, so mixing the tunings
+            would time two changes at once and attribute them to one.
     """
+    matching: dict[str, object] = {"matcher": matcher, "opponents_per_agent": k}
+    structure: dict[str, object] = {}
+    if matcher in STRUCTURE_CELLS:
+        if reproduction_mode != "imitation" or time_model != "synchronous":
+            raise ValueError(
+                f"structure column {matcher!r} times the synchronous imitation "
+                "match phase at constant N; drop --reproduction-mode/--time-model "
+                "to run it (one tuning per measurement, #91)."
+            )
+        shape, radius = STRUCTURE_CELLS[matcher]
+        # The matcher choice is unconsulted while the spatial toggle is on
+        # (#137(b)); random_k is set so the config states the honest aspatial
+        # counterpart. Blank rows/cols auto-size to a most-square grid of
+        # exactly N sites (full occupancy, torus default — uniform degree).
+        matching = {"matcher": "random_k", "opponents_per_agent": k, "spatial_interaction": True}
+        structure = {
+            "kind": "lattice",
+            "neighbourhood_shape": shape,
+            "interaction_radius": radius,
+        }
     dynamics: dict[str, object] = {"generations": generations}
     if reproduction_mode == "energy_economy" or time_model == "asynchronous":
         dynamics.update(
@@ -113,15 +169,16 @@ def _cell_config(
         )
     if time_model == "asynchronous":
         dynamics["time_model"] = "asynchronous"  # variable_n, no demography
-    return ExperimentConfig.model_validate(
-        {
-            "seed": seed,
-            "population": {"size": size, "composition": _even_composition(size)},
-            "matching": {"matcher": matcher, "opponents_per_agent": k},
-            "match": {"length_mode": "fixed", "rounds_per_match": rounds},
-            "dynamics": dynamics,
-        }
-    )
+    payload: dict[str, object] = {
+        "seed": seed,
+        "population": {"size": size, "composition": _even_composition(size)},
+        "matching": matching,
+        "match": {"length_mode": "fixed", "rounds_per_match": rounds},
+        "dynamics": dynamics,
+    }
+    if structure:
+        payload["structure"] = structure
+    return ExperimentConfig.model_validate(payload)
 
 
 def time_cell(config: ExperimentConfig, generations: int) -> float:
@@ -222,6 +279,18 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--structure",
+        action="store_true",
+        help=(
+            "Run the M11a structure grid: N x {round_robin, random_k, "
+            "lattice_vn_r1, lattice_moore_r1, lattice_moore_r5} under synchronous "
+            "imitation at constant N. The lattice columns route the match phase "
+            "through the reach kernel on a fully occupied most-square grid; the "
+            "two aspatial columns stay as the baseline. Individual lattice labels "
+            "are also accepted directly in --matchers."
+        ),
+    )
+    parser.add_argument(
         "--out", default=None, help="Optional CSV output path (no default — never committed)."
     )
     return parser
@@ -248,6 +317,21 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --generations must be at least 2 (the first is warmup).", file=sys.stderr)
         return 1
 
+    if args.structure:
+        if args.time_model == "asynchronous" or args.reproduction_mode == "energy_economy":
+            # The async grid collapses the matcher axis and the economy cell
+            # retunes the dynamics; silently combining either with the
+            # structure grid would time two changes at once (#91).
+            print(
+                "error: --structure times the synchronous imitation match phase; "
+                "drop --time-model/--reproduction-mode.",
+                file=sys.stderr,
+            )
+            return 1
+        # The full five-column structure grid (spec M11a Phase E): the two
+        # aspatial baselines plus the three lattice cells.
+        matchers = list(DEFAULT_MATCHERS) + list(STRUCTURE_MATCHERS)
+
     asynchronous = args.time_model == "asynchronous"
     if asynchronous:
         # The matcher axis has no event-time meaning (#34): partners are
@@ -256,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         matchers = ["event_time"]
 
     rows: list[dict[str, object]] = []
-    print(f"{'N':>6}  {'matcher':<12}  {'s/generation':>12}")
+    print(f"{'N':>6}  {'matcher':<16}  {'s/generation':>12}")
     for size in sizes:
         for matcher in matchers:
             try:
@@ -275,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             seconds = time_cell(config, args.generations)
             rows.append({"n": size, "matcher": matcher, "seconds_per_generation": seconds})
-            print(f"{size:>6}  {matcher:<12}  {seconds:>12.4f}")
+            print(f"{size:>6}  {matcher:<16}  {seconds:>12.4f}")
 
     if args.out is not None:
         out = Path(args.out)

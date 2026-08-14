@@ -74,6 +74,12 @@ structure (M11) runs before the sweep browser (M13) by #75's own logic:
 the browser is a read-only view over run data, and structure changes what
 run data exists.
 
+**Standing priority (owner decision 2026-08-13): performance
+opportunities are examined at EVERY milestone's scoping** from here on,
+and the M18 vectorization review-at can be pulled forward the moment
+slowness genuinely blocks the owner's experiments — large-N runs already
+strain the app. The bench (#58/#91/#102/#156) supplies the data.
+
 - **M9 — Selection rules, score accounting, cooperation recording.**
   ✅ M9a landed 2026-07-08: four selection rules (DECISIONS #63), the
   ScoreAccounting seam (#64), and the benchmark rider (`python -m
@@ -162,8 +168,29 @@ run data exists.
     generation (#139); V6 run by manual configuration — no visible
     b/c > k separation at strong selection, reported honestly to the
     design layer (#140); 977 tests passing, zero golden re-recordings.
-    **E — polish — is next** (opens with the `helpers.greying`
-    conjunction inspection).
+    **E — polish — landed 2026-08-07 through 2026-08-14 as five
+    sub-prompts**: E1 (#141-#144) — the `STRUCTURE_GREYING` predicate
+    table consumed by both clock branches (tournament wholesale-grey,
+    `spatial_interaction` greyed under well_mixed, composition greyed
+    under `from_file`) and the first §12 paint-time readouts; E2
+    (#145-#149) — the pixel-array rendering fallback with the ≈ 3 px
+    cell floor in the one `grid_chart` path, the ninth §12 readout,
+    the results browser's Founding | Final selector, the golden suite
+    renamed `test_golden_masters.py`; E2b (#150) — the #127
+    sparse-`stripes` band with the milestone's only (logged, confined)
+    golden re-record; E3 (#151-#153) — the four registered scenarios
+    (`spatial_reciprocity`, `donation_game_threshold`,
+    `the_drifting_frontier`, `the_filling_grid`) and the E3 findings
+    reported and held; E4a (#154-#155) — the Economy panel's spatial
+    calibration branch and the Filling Grid's rise-then-freeze truth;
+    E4b (#156-#160) — reach-kernel precomputation in the engine
+    (draw-neutral, pinned three ways), the bench's five-column
+    structure grid with both hypothesis verdicts, the 54-item §12
+    audit (54/54 covered, one text fix), the tabs decision (#158),
+    the admission-quota open question (#159), and the close-out
+    (#160). **M11a complete 2026-08-14, 1059 tests passing.** The
+    M11a explainer remains gated on the literature verification pass
+    (a design-layer task) and is not part of the milestone.
 
     Calibration-guide residue (DECISIONS #113–#115) folded into the
     remaining phases: Phase B measures the #114 shifted-weight spread;
@@ -198,7 +225,29 @@ run data exists.
     — warning-shaped derived readouts on the same predicate-table pattern
     as the greying map. Owned here rather than earlier because where a
     warning appears is a disclosure question, so the rules and the
-    parameter-panel redesign are designed together.
+    parameter-panel redesign are designed together. While the panel is
+    open: the asynchronous clock's Economy calibration readout still
+    reports the unconsulted matcher's arithmetic (pre-existing, held
+    and pinned in #154) — a candidate to fix alongside A1/A2.
+
+    **User-interface simplification** (per the tabs decision, #158):
+    the `run.mode` tab split — evolution and tournament as separate
+    tabs, the one fork that passes the total-fork criterion —
+    collapse-with-summary for inert sections, and novice/advanced
+    disclosure taken up as its own orthogonal decision; built as a
+    second renderer over the #141 `STRUCTURE_GREYING` predicate table
+    (the enabling piece that already shipped).
+
+    **Resolve the admission-quota open question (#159)** — whether the
+    carrying capacity's birth quota is consumed by ADMISSION (today's
+    behaviour: a wealth-ranked parent that fails local placement still
+    spends a slot) or by SUCCESSFUL PLACEMENT (unfilled quota rolls to
+    the next-richest eligible parent). M11b at the latest, EXPLICITLY
+    BEFORE M12: the Hammond–Axelrod frontier replication runs at
+    K = site count with rich interior incumbents and poor frontier
+    parents, precisely the configuration #153(c)'s freeze starves. Any
+    change alters RNG consumption (#80/#99) and needs its own golden
+    masters.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
@@ -231,6 +280,14 @@ run data exists.
   threshold exactly would require this as a NEW mechanism — declined for
   M11a explicitly on scope grounds (the death-birth threshold b/c > k is
   the one testable with what we have).
+- **Weak-selection mode for the `fixed_n` reproduction lottery (backlog,
+  owner-requested 2026-08-13; examine at M12 scoping).** An explicit
+  selection-intensity dial (tickets = equal base + dial × fitness) plus
+  fitness read as RECENT income rather than accumulated lifetime energy
+  — the two ingredients needed to approach the weak-selection limit in
+  which the b/c > k threshold is derived. Motivation: #140's
+  no-visible-reversal finding (this engine's selection is far from that
+  limit); reproduction dynamics reopen at M12 anyway.
 - **M13 — Sweep browser.** Member-run drilldown from a sweep's summary,
   multi-sweep interactive browsing, multi-curve overlays, summary-table
   filtering, side-by-side member comparison — the affordances deferred out
