@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
-from pdsim.config.experiment import ExperimentConfig
+from pdsim.config.experiment import ExperimentConfig, effective_neighbour_count
 from pdsim.core.economy import age_mortality_active
 
 ECONOMY_HELP: dict[str, str] = {
@@ -48,7 +49,10 @@ ECONOMY_HELP: dict[str, str] = {
     "expected_matches": (
         "How many matches one agent is expected to play per generation: N − 1 "
         "under round_robin (everyone meets everyone), ≈ 2k under random_k "
-        "(each agent starts k matches and is drawn into ≈ k more)."
+        "(each agent starts k matches and is drawn into ≈ k more), and "
+        "2 × the effective neighbour count while spatial interaction is on "
+        "(each agent starts a match with every reachable neighbour and is "
+        "drawn into as many in return)."
     ),
     "income": (
         "The two income extremes per generation: what an agent earns if every "
@@ -98,14 +102,176 @@ ECONOMY_HELP: dict[str, str] = {
 """The single source for the Economy panel's inline (?) explainer texts."""
 
 
+SPATIAL_FINE_PRINT = (
+    "The figure is the fully-occupied, uniform-degree case — an agent in "
+    "the interior of a full grid; edge agents on a bounded grid, and agents "
+    "beside empty sites, play fewer matches and earn less."
+)
+"""The spatial calibration's fine print, in one sentence (DECISIONS #154).
+
+The single source (the §12 discipline) for the caveat the spatial readout
+must carry: the 2 × effective-neighbour-count figure describes an interior
+agent on a full grid, and every other agent earns less than it says.
+"""
+
+_SPATIAL_REGIME_NOTE = (
+    "Under spatial interaction the interaction budget is set by the grid's "
+    "geometry — 2 × the effective neighbour count — no matter how large the "
+    "population grows, so this window stays put for the whole run. " + SPATIAL_FINE_PRINT
+)
+"""The spatial branch's regime caption: bounded budget, plus the fine print."""
+
+
+def _expected_rounds(
+    length_mode: str, rounds_per_match: int, continuation_probability: float
+) -> float:
+    """Expected rounds per match — the one place both arithmetics compute it.
+
+    Args:
+        length_mode: ``"fixed"`` (exact round count) or ``"continuation"``
+            (coin-flip after each round).
+        rounds_per_match: The fixed round count (read under ``"fixed"``).
+        continuation_probability: w, the keep-playing chance (read under
+            ``"continuation"``; the expected match length is 1 / (1 − w)).
+
+    Returns:
+        The expected number of rounds one match lasts.
+    """
+    if length_mode == "fixed":
+        return float(rounds_per_match)
+    return 1.0 / (1.0 - continuation_probability)
+
+
+class SpatialIncome(NamedTuple):
+    """The spatial branch's worked income arithmetic (DECISIONS #154).
+
+    Attributes:
+        matches_per_agent: 2 × the effective neighbour count — each agent
+            starts a match with every reachable neighbour and is drawn into
+            as many in return (the calibration guide §4.2's third regime,
+            measured exactly in #139).
+        rounds_per_agent: Matches × expected rounds per match.
+        all_c_income: Per-generation income if every round is mutual
+            cooperation (rounds per agent × R).
+        all_d_income: Per-generation income if every round is mutual
+            defection (rounds per agent × P).
+        window_low: The survival window's lower bound (= all-D income).
+        window_high: The survival window's upper bound (= all-C income);
+            the window is ``window_low ≤ cost < window_high``.
+    """
+
+    matches_per_agent: float
+    rounds_per_agent: float
+    all_c_income: float
+    all_d_income: float
+    window_low: float
+    window_high: float
+
+
+def spatial_income_arithmetic(
+    *,
+    neighbourhood_shape: str,
+    boundary: str,
+    opponents_per_agent: int,
+    length_mode: str,
+    rounds_per_match: int,
+    continuation_probability: float,
+    payoff_reward: float,
+    payoff_punishment: float,
+) -> SpatialIncome:
+    """The spatial survival-window arithmetic, as a pure paint-time function.
+
+    Matches per agent = 2 × :func:`~pdsim.config.experiment.
+    effective_neighbour_count` (reused, not re-derived — DECISIONS #141(e)):
+    an interior agent initiates a match against each of its min(k, degree)
+    reachable neighbours and is drawn into as many in return (§4.2 of the
+    calibration guide; measured exactly in #139). Everything downstream —
+    rounds per agent, the two income extremes, the window bounds — follows
+    the same shape as the aspatial calibration branches. The figure is the
+    fully-occupied, uniform-degree case (:data:`SPATIAL_FINE_PRINT` states
+    it; any readout showing these numbers must carry that sentence).
+
+    Registry-value inputs only, deliberately (DECISIONS #154): the M11b
+    advisories A1 and A2 trigger on exactly these quantities, so this
+    function is shaped for them to CALL rather than re-derive.
+
+    Args:
+        neighbourhood_shape: ``"moore"`` (8 neighbours) or ``"von_neumann"``
+            (4 neighbours) — ``structure.neighbourhood_shape``.
+        boundary: ``"torus"`` or ``"bounded"`` — ``structure.boundary``
+            (documented in :func:`effective_neighbour_count` as not moving
+            the interior number).
+        opponents_per_agent: The configured k —
+            ``matching.opponents_per_agent``.
+        length_mode: ``match.length_mode`` (``"fixed"`` or
+            ``"continuation"``).
+        rounds_per_match: ``match.rounds_per_match`` (read under
+            ``"fixed"``).
+        continuation_probability: ``match.continuation_probability`` (read
+            under ``"continuation"``; expected length 1 / (1 − w)).
+        payoff_reward: R — ``game.payoff_reward``.
+        payoff_punishment: P — ``game.payoff_punishment``.
+
+    Returns:
+        The full :class:`SpatialIncome` arithmetic.
+    """
+    matches = 2.0 * effective_neighbour_count(neighbourhood_shape, boundary, opponents_per_agent)
+    rounds_per_agent = matches * _expected_rounds(
+        length_mode, rounds_per_match, continuation_probability
+    )
+    all_c = rounds_per_agent * payoff_reward
+    all_d = rounds_per_agent * payoff_punishment
+    return SpatialIncome(
+        matches_per_agent=matches,
+        rounds_per_agent=rounds_per_agent,
+        all_c_income=all_c,
+        all_d_income=all_d,
+        window_low=all_d,
+        window_high=all_c,
+    )
+
+
+def spatial_calibration_active(config: ExperimentConfig) -> bool:
+    """Whether the calibration report should use the spatial branch (#154).
+
+    Mirrors the engine's own gate as #141(c) sharpened it — an EVOLUTION
+    run on a LATTICE with the spatial-interaction toggle on — not the
+    toggle alone: with the toggle stranded on under ``well_mixed`` (a
+    greyed checkbox keeps its value) or under tournament, the configured
+    matcher genuinely IS consulted, and the aspatial arithmetic remains the
+    correct report there. The synchronous-clock conjunct is the
+    config-level equivalent of #141(c)'s table position (that cell lives in
+    the greying table's SYNC column): the 2 × effective-neighbour-count
+    figure was measured on the synchronous engine (#139), and the
+    asynchronous clock's per-generation-equivalent match count has not been
+    measured — so the async context keeps its pre-#154 report rather than
+    getting a guessed formula (#154's scope clause).
+
+    Args:
+        config: The experiment being calibrated.
+
+    Returns:
+        True when the spatial arithmetic describes the configured run.
+    """
+    return (
+        config.mode == "evolution"
+        and config.dynamics.time_model == "synchronous"
+        and config.structure.kind == "lattice"
+        and config.matching.spatial_interaction
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CalibrationReport:
     """Everything the Economy panel shows, derived straight from a config.
 
     Attributes:
-        matcher: The matching scheme the numbers assume.
+        matcher: The CONFIGURED matching scheme. While ``spatial`` is True
+            it is greyed and unconsulted (#141(c)) — the numbers then come
+            from the grid's geometry, not from it.
         expected_matches: Matches one agent is expected to play per
-            generation (N − 1 round-robin; ≈ 2k random_k).
+            generation (N − 1 round-robin; ≈ 2k random_k; 2 × the
+            effective neighbour count under spatial interaction, #154).
         expected_rounds_per_match: Fixed round count, or 1 / (1 − w) in
             continuation mode.
         all_c_income: Per-generation income if every round is mutual
@@ -144,6 +310,11 @@ class CalibrationReport:
             copy cost grows with relationship length — named with the
             projected worst case; ``None`` when a bound is set or the mode
             is imitation.
+        spatial: Whether the spatial branch produced the matches figure —
+            True exactly on the engine's own gate as #154 mirrors it
+            (synchronous evolution on a lattice with spatial interaction
+            on); the ``regime_note`` then carries
+            :data:`SPATIAL_FINE_PRINT`.
     """
 
     matcher: str
@@ -164,6 +335,7 @@ class CalibrationReport:
     generations_to_threshold: float | None
     expected_offspring: float | None
     memory_note: str | None
+    spatial: bool
 
 
 def calibration_report(config: ExperimentConfig) -> CalibrationReport:
@@ -183,7 +355,24 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
     """
     dynamics = config.dynamics
     n = config.population.size
-    if config.matching.matcher == "round_robin":
+    spatial = spatial_calibration_active(config)
+    if spatial:
+        # The spatial branch (#154): while partners genuinely come from the
+        # grid, the greyed matcher's arithmetic would describe a mechanism
+        # that is not running — the figures come from the geometry instead.
+        arithmetic = spatial_income_arithmetic(
+            neighbourhood_shape=config.structure.neighbourhood_shape,
+            boundary=config.structure.boundary,
+            opponents_per_agent=config.matching.opponents_per_agent,
+            length_mode=config.match.length_mode,
+            rounds_per_match=config.match.rounds_per_match,
+            continuation_probability=config.match.continuation_probability,
+            payoff_reward=config.game.payoff_reward,
+            payoff_punishment=config.game.payoff_punishment,
+        )
+        matches = arithmetic.matches_per_agent
+        regime_note = _SPATIAL_REGIME_NOTE
+    elif config.matching.matcher == "round_robin":
         matches = float(n - 1)
         regime_note = (
             "Under round_robin, income scales with the population size: as N "
@@ -198,10 +387,11 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             "per agent) no matter how large the population grows, so this "
             "window stays put for the whole run."
         )
-    if config.match.length_mode == "fixed":
-        rounds = float(config.match.rounds_per_match)
-    else:
-        rounds = 1.0 / (1.0 - config.match.continuation_probability)
+    rounds = _expected_rounds(
+        config.match.length_mode,
+        config.match.rounds_per_match,
+        config.match.continuation_probability,
+    )
 
     all_c = matches * rounds * config.game.payoff_reward
     all_d = matches * rounds * config.game.payoff_punishment
@@ -297,6 +487,7 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
         generations_to_threshold=to_threshold,
         expected_offspring=offspring,
         memory_note=memory_note,
+        spatial=spatial,
     )
 
 

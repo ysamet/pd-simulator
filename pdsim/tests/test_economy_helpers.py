@@ -8,8 +8,10 @@ from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import get_scenario_info
 from pdsim.ui.economy_helpers import (
     ECONOMY_HELP,
+    SPATIAL_FINE_PRINT,
     calibration_report,
     chart_carrying_capacity,
+    spatial_income_arithmetic,
 )
 
 
@@ -121,6 +123,118 @@ class TestScenarioCalibration:
         data["match"] = {"length_mode": "continuation", "continuation_probability": 0.9}
         report = calibration_report(ExperimentConfig.model_validate(data))
         assert report.expected_rounds_per_match == pytest.approx(10.0)
+
+
+def _spatial_arithmetic_for(scenario_name: str) -> object:
+    """Run the #154 pure function on a shipped scenario's registry values.
+
+    Args:
+        scenario_name: The registered scenario whose configuration to use.
+
+    Returns:
+        The scenario's :class:`~pdsim.ui.economy_helpers.SpatialIncome`.
+    """
+    config = get_scenario_info(scenario_name).config
+    return spatial_income_arithmetic(
+        neighbourhood_shape=config.structure.neighbourhood_shape,
+        boundary=config.structure.boundary,
+        opponents_per_agent=config.matching.opponents_per_agent,
+        length_mode=config.match.length_mode,
+        rounds_per_match=config.match.rounds_per_match,
+        continuation_probability=config.match.continuation_probability,
+        payoff_reward=config.game.payoff_reward,
+        payoff_punishment=config.game.payoff_punishment,
+    )
+
+
+class TestSpatialCalibration:
+    """The #154 spatial branch: the gate, the worked numbers, the fine print."""
+
+    def test_pure_function_flagship_numbers(self) -> None:
+        """spatial_reciprocity: k = 5 clamps to 4, so 8 matches, window 0 ≤ L < 24."""
+        arithmetic = _spatial_arithmetic_for("spatial_reciprocity")
+        assert arithmetic.matches_per_agent == 8.0
+        assert arithmetic.rounds_per_agent == 8.0  # one round per match
+        assert arithmetic.all_c_income == 24.0
+        assert arithmetic.all_d_income == 0.0
+        assert (arithmetic.window_low, arithmetic.window_high) == (0.0, 24.0)
+
+    def test_pure_function_filling_grid_numbers(self) -> None:
+        """the_filling_grid: Moore play-all, 16 matches, all-D 160, all-C 480."""
+        arithmetic = _spatial_arithmetic_for("the_filling_grid")
+        assert arithmetic.matches_per_agent == 16.0
+        assert arithmetic.rounds_per_agent == 160.0  # 16 matches × 10 rounds
+        assert arithmetic.all_c_income == 480.0
+        assert arithmetic.all_d_income == 160.0
+        assert (arithmetic.window_low, arithmetic.window_high) == (160.0, 480.0)
+
+    def test_flagship_report_uses_the_spatial_branch(self) -> None:
+        """The report shows 8 matches and 0 ≤ cost < 24, not the matcher's 199."""
+        report = calibration_report(get_scenario_info("spatial_reciprocity").config)
+        assert report.spatial is True
+        assert report.expected_matches == 8.0
+        assert report.all_c_income == 24.0
+        assert report.all_d_income == 0.0
+        assert report.total_cost == 12.0  # L = 12, engagement free
+        assert report.window_verdict == "inside"
+
+    def test_filling_grid_report_uses_the_spatial_branch(self) -> None:
+        """16 matches; L = 40 sits BELOW the saturated 160 ≤ cost < 480 window."""
+        report = calibration_report(get_scenario_info("the_filling_grid").config)
+        assert report.spatial is True
+        assert report.expected_matches == 16.0
+        assert report.all_c_income == 480.0
+        assert report.all_d_income == 160.0
+        assert report.window_verdict == "below"  # the scenario text's own point
+
+    def test_drifting_frontier_stays_aspatial(self) -> None:
+        """Spatial deliberately OFF: the random_k arithmetic is unchanged."""
+        report = calibration_report(get_scenario_info("the_drifting_frontier").config)
+        assert report.spatial is False
+        assert report.expected_matches == 10.0
+        assert report.all_c_income == 300.0
+        assert report.all_d_income == 100.0
+        assert report.total_cost == 200.0
+        assert report.window_verdict == "inside"
+
+    def test_stranded_toggle_under_well_mixed_uses_aspatial(self) -> None:
+        """Toggle on without a lattice: the configured matcher IS consulted.
+
+        The #137(e) validator forbids this state for a run, so it cannot be
+        built through validation — but the widget layer strands exactly this
+        combination (#141(c)/#142: a greyed checkbox keeps its value), and
+        the gate must answer the aspatial branch for it. ``model_copy``
+        deliberately skips re-validation, letting the test state the
+        stranded combination directly.
+        """
+        flagship = get_scenario_info("spatial_reciprocity").config
+        stranded = flagship.model_copy(
+            update={"structure": flagship.structure.model_copy(update={"kind": "well_mixed"})}
+        )
+        report = calibration_report(stranded)
+        assert report.spatial is False
+        assert report.expected_matches == 199.0  # round_robin's N − 1 at N = 200
+
+    def test_async_context_keeps_its_current_behaviour(self) -> None:
+        """The #154 scope clause: no spatial branch under the async clock.
+
+        The asynchronous per-generation-equivalent match count has not been
+        measured (#139 measured the synchronous engine), so the async
+        context keeps the pre-#154 report — the configured (greyed)
+        matcher's arithmetic — until the design layer rules on a formula.
+        This pin guards that the spatial branch does not silently extend.
+        """
+        report = calibration_report(get_scenario_info("donation_game_threshold").config)
+        assert report.spatial is False
+        assert report.expected_matches == 99.0  # round_robin's N − 1 at N = 100
+
+    def test_fine_print_present_in_the_spatial_readout(self) -> None:
+        """The single-source sentence rides the spatial regime note only."""
+        assert "fully-occupied" in SPATIAL_FINE_PRINT
+        spatial = calibration_report(get_scenario_info("spatial_reciprocity").config)
+        assert SPATIAL_FINE_PRINT in spatial.regime_note
+        aspatial = calibration_report(get_scenario_info("the_drifting_frontier").config)
+        assert SPATIAL_FINE_PRINT not in aspatial.regime_note
 
 
 class TestChartCarryingCapacity:

@@ -3849,3 +3849,151 @@ and this finding logged beside it. (The flagship and the frontier do
 NOT hit this: the flagship's population sits far below its K = 400,
 so admission is never rationed, and the frontier's 5% hazard keeps
 deaths freeing seats and churning the rim.)
+
+**#154 — 2026-08-13 — The Economy panel learns about spatial
+interaction: a third calibration branch, gated on the engine's own
+sharpened predicate, its arithmetic a pure paint-time function shaped
+for the M11b advisories (M11a Phase E, sub-prompt E4a; discharges
+#153(a); the design layer's 2026-08-13 ruling as implemented).**
+THE GATE: `economy_helpers.spatial_calibration_active(config)` —
+evolution mode AND synchronous clock AND lattice AND
+`matching.spatial_interaction` on — mirroring #141(c)'s sharpened
+matcher-cell predicate, NOT the toggle alone. Rationale, as the ruling
+requires the entry to carry: with the toggle stranded on under
+`well_mixed` (a greyed checkbox keeps its value) or under tournament,
+the configured matcher genuinely IS consulted, and the existing
+aspatial arithmetic remains the correct report there. The
+synchronous-clock conjunct is the config-level equivalent of #141(c)'s
+table position — that cell lives in the greying table's SYNC column,
+consulted only under the synchronous clock — and it enacts the
+prompt's scope caution: code inspection showed the calibration report
+IS reachable under the asynchronous clock (`dynamics.reproduction_mode`
+is async-inert with its widget value stranded, and the panel renders
+on that raw value), and the asynchronous per-generation-equivalent
+match count has never been measured (#139 measured the synchronous
+engine), so no formula was guessed — the async context keeps its
+pre-#154 behaviour (the greyed matcher's arithmetic), pinned by a test
+on `donation_game_threshold` (N − 1 = 99) so the spatial branch cannot
+silently extend without a design ruling. THE FORMULA: matches per
+agent = 2 × `effective_neighbour_count(shape, boundary, k)` — the
+#141(e) pure function REUSED, not re-derived — with rounds per agent,
+all-C income, all-D income, and the survival window following the
+aspatial branches' shape exactly (including 1 ÷ (1 − w) under
+continuation, now computed in ONE shared `_expected_rounds` helper so
+the two arithmetics cannot drift). THE FINE PRINT, part of the fix:
+`SPATIAL_FINE_PRINT`, one sentence from one described source (§12
+discipline), rides the spatial branch's regime note — the figure is
+the fully-occupied, uniform-degree case (an interior agent on a full
+grid); edge agents on a bounded grid, and agents beside empty sites,
+play fewer matches and earn less. SHAPE FOR REUSE:
+`spatial_income_arithmetic(...)` is pure and Streamlit-free,
+registry-value inputs → `SpatialIncome` (matches per agent, rounds per
+agent, both incomes, both window bounds), callable at paint time —
+advisories A1 and A2 (M11b) trigger on exactly these quantities, so
+the M11b advisory becomes a CALLER rather than a re-derivation. Module
+home: `pdsim/ui/economy_helpers.py`, beside `calibration_report`,
+chosen over `experiment.py` because this is the Economy panel's income
+arithmetic (the #38/#48 Streamlit-free-helper module already
+unit-tested without the UI), the M11b advisory surfaces are UI-layer
+work that imports it with no layering concern, and `experiment.py`'s
+paint-time functions are registry-value resolvers and geometry facts —
+the function still consumes #141(e)'s `effective_neighbour_count` from
+there, so the geometry number has exactly one source. REJECTED
+ALTERNATIVE, recorded per the ruling: a per-site expectation over
+actual occupancy and true (bounded-edge) degrees — rejected because
+the calibration report is a paint-time PLANNING readout: occupancy is
+run state that does not exist before Run is pressed and changes every
+generation after it, so the "precise" figure would require simulating
+the founding at paint time and would be stale one generation into any
+run; the min-degree figure matches §4.5's average-agent framing and
+the shipped scenario texts' own arithmetic. ALSO IN THE CHANGE:
+`CalibrationReport` gained a `spatial` bool (which branch produced the
+figures — the `matcher` field's docstring now says it is unconsulted
+while True), and `ECONOMY_HELP["expected_matches"]` gained the third
+regime's sentence so the (?) beside the number cannot contradict it.
+Loaded results: `spatial_reciprocity` now reads 8 matches and
+0 ≤ cost < 24 (was 199 and < 597), `the_filling_grid` 16 / 480 / 160
+with L = 40 below the saturated window (was 59 / 1770 / 590),
+`the_drifting_frontier` unchanged (10 matches, 100 ≤ cost < 300).
+One adjacent staleness REPORTED, not fixed (E4b audit territory): the
+memory-depth note still branches on the configured matcher, so a
+spatial run whose greyed matcher is round_robin gets the "under
+round_robin every pair meets every generation" wording — directionally
+right on a lattice (fixed neighbours DO recur; adjacent pairs meet
+twice per generation, so the named worst case understates by about
+2×), but attributed to a mechanism that is not running. No RNG path
+touched; all eight golden masters pass with zero re-recording.
+
+**#155 — 2026-08-13 — The Filling Grid tells the truth: the scenario
+text now describes the observed RISE-THEN-FREEZE (the design layer's
+2026-08-10 ruling), the configuration is byte-unchanged, and the
+one-time P = 0 rederivation run is reported honestly — the freeze
+broke only transiently and RE-FORMED LOWER, at 235 of 400 (M11a
+Phase E, sub-prompt E4a; discharges #153(c)'s text half; the engine
+half is explicitly NOT resolved here).** THE TEXT: the description is
+kept verbatim through "…cooperation's share can rise early." and the
+old rise-then-fall tail (the grind endgame stated as the expected
+observable) is replaced by the ruling's rise-then-freeze wording: the
+two reproduction gates (wealth-ranked global admission, then local
+placement within Moore radius 1) and their population-scale deadlock,
+the ~265-of-400 standstill with zero deaths, the verifiable Economy
+panel signature ('Blocked parents this generation' = 400 − population,
+every generation from about 6 on — the label matches the app's metric
+verbatim), the old grind endgame retained in parentheses as the
+counterfactual had the grid filled, and the horizon's new reason (rise
+completes, freeze proves permanent). The things-to-try is likewise
+replaced: the P = 0 rederivation with its defector-starvation
+arithmetic, the freed-interior-sites reasoning, and the explicit
+MAY-break hedge (arithmetic, not a promise). TWO DEVIATIONS from the
+prescribed verbatim text, both reported in-session: (a) the
+"**Things to try:**" prefix is NOT stored in the registry string —
+both renderers supply that label themselves (`app.py`'s caption and
+`gendocs.py`'s PARAMETERS section), so storing it would print it
+twice. (b) A RULE 7 COLLISION found during Task 0 verification, fixed
+by one inserted clause on the #152 walked-into-a-validation-error
+principle: this scenario ships S = 0 (payoffs at the registry
+defaults, per #151), so setting P to 0 as instructed ties P and S and
+the `enforce_pd_ordering` validator (default ON, untouched by this
+scenario) REJECTS the config — the app confirms with "Payoffs must
+satisfy T > R > P > S …" and never runs. The shipped things-to-try
+therefore tells the user to first untick 'Enforce PD payoff ordering
+(T > R > P > S)' in the Game section and says why (P = 0 ties P and
+S). The prescribed wording carried no such step; the alternative —
+shipping it verbatim and letting the reader dead-end on a validation
+error — was rejected on #152's own precedent, and the design layer
+owns any better wording. `python -m pdsim.gendocs` rerun;
+`docs/PARAMETERS.md` regenerated; the drift test is green. THE P = 0
+REDERIVATION RUN, executed and observed (one deviation of method: run
+HEADLESSLY via `python -m pdsim.run` on the scenario's exact config
+with P = 0 and `enforce_pd_ordering` off, seed 11 unchanged — this
+session cannot click the app; same engine path, and the ordering
+toggle had to be off for the config to validate at all): the freeze
+BROKE ONLY TRANSIENTLY, and what replaced it is a SECOND, LOWER
+freeze. Observed trajectory (post-boundary snapshots): the fill runs
+75 → 238 agents across generations 0–7 (peak 238 at 7); every death
+in the entire run is an always_defect starving — 68 of them, from
+generation 3 through 59, in punctuated waves (18 at generation 3,
+then bursts of ~5-7 every four generations — all-defector pockets
+draining to insolvency exactly as the new text's 16 × 10 × 0 = 0
+arithmetic says); cooperation's share climbs 0.50 → 0.906; the freed
+interior sites ARE refilled (births continue through the starvation
+phase). But the fill never resumes toward saturation: by generation
+~60 every surviving defector evidently holds at least one cooperator
+contact (one such contact earns 2 × 10 × 5 = 100 against the 40-point
+bill, so it never starves), deaths go to zero, births go to
+near-zero, and the population sits FLAT at 235 of 400 sites (213
+always_cooperate / 22 always_defect) for the remaining ~240
+generations — 30 sites BELOW the P = 1 freeze at ~265. Honest
+summary, now quoted in no scenario text and owned by the design
+layer: P = 0 switches the metabolic filter on for defector pockets
+and purges them, but the two-gate admission deadlock is indifferent
+to P — once the purge completes the deadlock re-forms around the
+(now richer, more cooperative) frozen population. The new
+things-to-try's hedge is vindicated: watched, not guaranteed. NOT
+RESOLVED HERE, explicitly: the underlying admission-quota design
+question — whether wealth-ranked K-admission should see placement
+feasibility, or the gate order should change, or the scenario should
+carry churn — remains open exactly as #153(c) left it; E4b logs it
+as an open design question with its M11b deadline. Zero golden
+re-recordings; the run artefacts live outside the repo (scratchpad)
+and are not committed.
