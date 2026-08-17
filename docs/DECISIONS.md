@@ -4346,3 +4346,112 @@ prompt rather than as a separate prompt; one consolidated entry rather
 than per-claim entries, so M12 inherits a single pointer. The standing
 rule restated: claims derived by consistency check are not citations, and
 nothing enters an explainer until verified against publisher records.
+
+**#162 — 2026-08-16 — Calibration guide §7.1 corrected to the #139-measured
+arithmetic: the Moore defector-interior counterfactual at the default
+punishment P = 1 earns 8 neighbours × 2 matches × P = 1 = 16 per
+generation, not the naive one-match-per-neighbour 8 (docs-only small fix;
+no code, no registry, zero golden re-recording).** THE STALE SPOT: §7.1's
+"Punishment set to 0" paragraph, written before #139 dissolved the ≈, said
+a Moore defector interior at P = 1 "earns 8 per generation" — a
+per-neighbour count that ignores the no-deduplication doubling (every
+adjacent pair meets twice, once at each side's initiative). The
+correction shows the arithmetic the guide's own way so a reader can
+reproduce it, cites §4.2 and #139 inline, and names the flagship's one
+round per match (matches = rounds). CASCADE RECOMPUTED, CONCLUSION
+SHARPENED NOT REVERSED: the paragraph's hedged conclusion ("which may
+well clear the living cost, in which case nobody starves") becomes
+definite — the flagship ships L = 12 (#151), and 16 > 12, so under the
+all-defaults counterfactual (Moore is the registry default shape, P = 1
+the default punishment) the defector interior clears the bill and nobody
+starves; worked as a §4.5 window, Moore at P = 1 gives all-D 16 / all-C
+8 × 2 × 3 = 48, so 16 ≤ L < 48 and L = 12 sits BELOW the window: the
+metabolic filter is switched off outright, not merely loosened. The
+exhibit's stated conclusion — that P = 0 is load-bearing because at the
+default punishment the scenario "silently demonstrates nothing" — is
+UNCHANGED in direction and STRENGTHENED in force (the naive 8 vs L = 12
+would have had the defector still starving and the paragraph's own hedge
+was doing the work; the measured 16 makes the claim true without the
+hedge). No other number in §7.1 depends on that income (the paragraph
+never stated a window or a cooperator/defector comparison; those live in
+§3.7 and §4.6). NUANCE REPORTED TO THE DESIGN LAYER, NOT EDITED: the
+"P = 0 is load-bearing" claim rests on the Moore reading of the
+counterfactual; under the flagship's OWN von Neumann shape, P = 1 alone
+gives 4 × 2 × 1 = 8 < 12, so interior defectors would still starve —
+at a third of the P = 0 deficit (−4 vs −12 per generation) — and the
+window 8 ≤ L < 24 keeps L = 12 inside; §3.7's table already carries that
+exact figure ("8 × 1 = 8", hedged on where L sits). §7.1 remains
+internally consistent because it names Moore explicitly; whether the
+paragraph should also say that the von Neumann-only override keeps the
+filter on is the design layer's call. THE REST-OF-GUIDE SWEEP (task step
+4): §4.2 carries ≈ 2 × min(k, degree) with the #139 measured-note; §4.3's
+table (≈ 8 / ≈ 16), §4.4's twice-per-pair statement, §4.6's Moore →
+von Neumann drill (16 rounds / 8 rounds), §8 step 4 and §3.7's "8 × 1 = 8"
+(von Neumann, 4 × 2) are ALL the doubled arithmetic — no other naive
+occurrence found, nothing else edited. One near-miss noted and LEFT: §3.7
+says "roughly 8 matches per agent per generation" where #139 measured
+EXACTLY 8 on a fully occupied uniform-degree torus — the correct figure
+with a now-unnecessary hedge, not the same error, so outside this fix's
+"unambiguously the same error" rule; the design layer may tighten it.
+HISTORICAL COPIES LEFT BY POLICY: the same pre-#139 sentence survives in
+the frozen M11a spec (Validation section, "earns 8 per round, which may
+well clear L") and in the archived delivery prompts under
+`docs/design-notes/` (BLOCK-A2, M11a-prompt-2); specs are frozen intent
+never retro-edited beyond their status line, and design-notes are the
+as-delivered record — this entry is the pointer that supersedes both.
+RATIONALE: a standing calibration reference must match the platform's
+measured arithmetic — the M11a explainer and the Filling Grid scenario
+text (#151: 16 × 10 × 1 = 160) already do, and a reader cross-checking
+§7.1 against either would have found the guide contradicting them.
+Alternatives rejected: leaving the hedge ("may well clear") in place with
+only the number changed — the flagship's L is a known scenario fact
+(#151) and stating it makes the exhibit reproducible, which is the
+guide's own standard ("every number is worked rather than asserted");
+and rewording §7.1's P = 0 rationale around the von Neumann nuance — that
+is a conclusion-shaping change the design layer must see first (Rule 7),
+so it travels in this entry and the handback rather than in the guide.
+
+**#163 — 2026-08-16 — Calibration guide §7.1 gains the von Neumann
+sentence the design layer ruled on after #162, and §3.7's "roughly 8" is
+LEFT on referent grounds (docs-only micro-fix; no code, no registry, zero
+golden re-recording).** (1) THE §7.1 SENTENCE, added directly after the
+#162 Moore-counterfactual window: under the shape the flagship actually
+ships, von Neumann, the default punishment alone would NOT switch the
+metabolic filter off — 4 neighbours × 2 matches × P = 1 = 8 < L = 12, so
+interior defectors still starve, at −4 rather than −12 per generation,
+with the window 8 ≤ L < 24 and L inside it; therefore the P = 0 override
+is BELT-AND-BRACES under the shipped shape and LOAD-BEARING for the Moore
+switch the scenario's things-to-try text invites (verified: the flagship's
+second things-to-try item is exactly that switch, k raised to 8, P kept at
+0, window 0 ≤ L < 48). The false inference this prevents: a reader taking
+§7.1's "each override is load-bearing" as "P = 0 is universally necessary
+for the mechanism," when the arithmetic says it is Moore-flip-necessary
+(flip the shape without zeroing P and defector interiors earn 16 > 12 —
+mechanism gone) and shipped-shape belt-and-braces (P = 1 under von
+Neumann still starves interiors, only more slowly). §7.1's existing
+conclusion is intact; the sentence qualifies its scope. Cross-checked
+against #111(c) (the override's original rationale, written pre-#139
+with the "8 per round … may well clear L" wording — that rationale is the
+Moore reading, now made explicit) and #151 (L = 12, von Neumann, one
+round per match). (2) §3.7 REFERENT DETERMINATION — CASE TWO, LEFT
+UNCHANGED: the sentence reads "at the flagship's settings: a grid with
+four neighbours per site, one round per match, and roughly 8 matches PER
+AGENT per generation" — an unspecified-agent statement about the
+flagship's world, which is half-empty (N = 200 on 400 sites, #151), where
+edge and corner agents have fewer than four occupied neighbour sites and
+play fewer than 8; #139's exactly-8 holds for a FULLY-NEIGHBOURED agent
+on a fully occupied torus. So "roughly" is the correct hedge for that
+referent. The table beneath it ("Defector surrounded by defectors" 8 × 0,
+"Cooperator inside a cooperator cluster" 8 × 3) and the following
+sentence ("At P = 1 it earns 8 per generation") take the interior case,
+where 8 is exact — and they already carry NO hedge, so §3.7 is internally
+consistent as written: hedged prose for the population, unhedged
+arithmetic for the interior. No tightening applied, no restructuring;
+this closes the near-miss #162 flagged. RATIONALE: the design layer
+ruled the von Neumann qualification in (Rule 7's report-first path
+discharged by ruling); and a hedge is removed only where its referent
+makes it wrong, not merely where a stronger statement is available for a
+narrower referent. Alternatives rejected: tightening §3.7 to "exactly 8"
+— true of interiors, false of the flagship population the sentence
+names; and adding an interior-vs-population gloss to §3.7 — that is the
+restructuring the ruling excluded, and the table already does the work.
