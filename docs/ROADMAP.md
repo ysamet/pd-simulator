@@ -249,6 +249,11 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     parents, precisely the configuration #153(c)'s freeze starves. Any
     change alters RNG consumption (#80/#99) and needs its own golden
     masters.
+
+    **Spec frozen 2026-08-17**
+    (`docs/specs/M11b-movement-and-panel-spec.md`; design rulings
+    DECISIONS #164–#170 — the #103 movement-schedule question and #159
+    are RESOLVED; phases A–E per the spec).
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

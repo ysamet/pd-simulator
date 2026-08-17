@@ -35,11 +35,13 @@ together rather than one retrofitted into the other.
 
 ### A2 — Income-multiplying parameter changed without recalibration
 
-- **Trigger:** any change to `matching.matcher`, `matching.opponents_per_agent`, `match.rounds_per_match`, `match.continuation_probability`, `structure.neighbourhood_shape`, or `structure.kind` while `reproduction_mode = energy_economy`
+- **Trigger:** any change to `matching.matcher`, `matching.opponents_per_agent`, `match.rounds_per_match`, `match.continuation_probability`, `structure.neighbourhood_shape`, `structure.kind`, `matching.spatial_interaction`, `matching.encounter_mode`, or `matching.interaction_radius` while `reproduction_mode = energy_economy`
 - **Message:** This change multiplies every agent's income. Recompute the survival window before trusting the living cost.
 - **Severity:** caution
 - **Surface:** inline at the changed widget
 - **Owner:** M11b
+
+Trigger list amended per DECISIONS #170 (2026-08-17): `movement.rate` and `interaction_decay` deliberately excluded — see the entry for reasons.
 
 ### A3 — Spatial interaction with k at or above the neighbourhood size
 

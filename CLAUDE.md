@@ -291,8 +291,16 @@ deadline M11b, explicitly before M12), and the close-out (#160).
 The M11a explainer shipped 2026-08-16
 (`docs/explainers/M11a-population-structure-explainer.md`) after the
 design-layer literature verification pass discharged the four #103/#111
-publisher-record checks (DECISIONS #161). **Next per ROADMAP: M11b**
-(movement + layout painter, `encounter_mode`, the advisory mechanism
-A1-A3, the #158 tab/collapse/disclosure work, and the #159
-admission-quota resolution). Design everything to not block the v2/v3
-extensions listed in `docs/DESIGN.md` §6.
+publisher-record checks (DECISIONS #161). **Next per ROADMAP: M11b —
+spec FROZEN 2026-08-17** (`docs/specs/M11b-movement-and-panel-spec.md`;
+design rulings DECISIONS #164–#170: feasibility-aware admission resolves
+#159, the in-activation / end-of-boundary movement schedule resolves the
+#103 open item, `encounter_mode`, the `advanced` disclosure flag,
+live-run display continuity, the measurement-gated async calibration,
+and the A2 trigger amendment). Phases A–E, one per fresh session. **The
+next implementation effort is Phase A — feasibility-aware admission
+(#164)**, which carries the milestone's ONLY golden re-recording; then
+B (movement), C (`encounter_mode`), D (calibration + advisories A1-A3),
+E (tabs, disclosure, live-run continuity, layout painter, close-out).
+Design everything to not block the v2/v3 extensions listed in
+`docs/DESIGN.md` §6.

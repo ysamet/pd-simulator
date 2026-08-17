@@ -4455,3 +4455,188 @@ narrower referent. Alternatives rejected: tightening §3.7 to "exactly 8"
 — true of interiors, false of the flagship population the sentence
 names; and adding an interior-vs-population gloss to §3.7 — that is the
 restructuring the ruling excluded, and the table already does the work.
+
+**#164 — 2026-08-17 — #159 RESOLVED: feasibility-aware admission (the
+M11b design session's option B), HARDWIRED, no new parameter (M11b Phase
+0; spec `docs/specs/M11b-movement-and-panel-spec.md`, ruling 1;
+implemented in Phase A).** THE RULING: the synchronous economy's capacity
+gate ranks and seats ONLY parents that currently have at least one empty
+site within birth reach; the contest permutation is still drawn over the
+admitted set (#107/#133 untouched); residual contention waste — two
+seated parents sharing one reachable empty site, so the loser's seat is
+spent that generation — is accepted as rare, self-healing (the next
+generation re-ranks against changed occupancy), and semantically fair;
+and a permanent freeze becomes PROVABLY IMPOSSIBLE, because at least one
+seated parent always places. RATIONALE: a capacity seat is an economic
+license to breed, and handing licenses to parents who physically cannot
+use them was never a designed claim — #153(c) records the freeze as an
+emergent interaction of three separately designed mechanisms; this
+restores each gate to its intended job (K decides HOW MANY, the kernel
+decides WHERE). ALTERNATIVES REJECTED: (A) per-scenario churn/hazard —
+leaves the artifact as the platform default and would contaminate the
+M12 Hammond–Axelrod replication with a foreign mechanism; (C)
+placement-counted roll-forward quota — done naively the richest wins
+contested cells, silently reintroducing the compounding #107 rejected as
+a default, and done correctly it costs rounds of admit-permute-place,
+multiplying the draw surface for a benefit B mostly delivers; (D) B plus
+roll-forward — both complexities at once. NO COMPATIBILITY KNOB: a
+parameter whose only use is reproducing a pathology earns no registry
+place; the #150 precedent (a deliberate, logged behaviour change with
+its own goldens) is the sanctioned path, and #159 itself anticipated the
+re-recording. GATED LATTICE-ACTIVE (#80/#99 idiom): well-mixed runs stay
+byte-identical. PHASE A CARRIES: the metric redefinition (blocked =
+contention-only; a NEW infeasible-parents count), the Filling Grid
+re-run and honest rewrite (#152's arithmetic-not-predictions rule), and
+the golden re-record — the affected sync-lattice positive goldens,
+re-recorded ONCE under Phase A's own entry with the full #133(d)
+technique; that is the milestone's entire re-recording budget. HAND-OFF
+TO M12 SCOPING, named so it is not lost: with feasibility filtering at
+K = site count, WEALTH still ranks the feasible — Hammond–Axelrod's
+reproduction order is purely random — so whether M12 needs
+`admission_ranking` ∈ {wealth, random} is M12's question, not resolved
+here.
+
+**#165 — 2026-08-17 — The movement schedule (the #103 open item) and the
+movement parameters (M11b Phase 0; spec rulings 2 and 3; implemented in
+Phase B).** (a) ASYNCHRONOUS CLOCK: movement is a step INSIDE the focal
+activation — activate, (possibly) move, play the match bundle,
+demographic step — NOT a new event type; a movement event class would
+break the one-event-one-activation correspondence the Δt = 1/N(t)
+convention rests on, putting a movement-rate-dependent correction factor
+into every chart axis, cadence, and calibration figure. (b) SYNCHRONOUS
+CLOCK: movement is the FINAL step of the demographic boundary, after
+deaths and births — movers see the freshest vacancies; matches are
+always played from the positions the previous boundary settled
+(move-then-play under BOTH clocks — the cross-clock symmetry); the
+founding layout governs generation 0's matches, so a painted arrangement
+is honoured before movement reshapes it; newborns may move in the same
+boundary — one uniform rule. MOVER CONTENTION: one permutation over the
+movers, iterated with occupancy updating (the #107/#133 pattern), no
+wealth priority. (c) ONE RATE PARAMETER `movement.rate`: a per-agent
+per-period probability, default 0 (hard rule 8 — old configs re-run
+identically); sync attempts at the boundary's movement step, async
+attempts at activation — the same number means expected moves per agent
+per generation(-equivalent) under both clocks. All movement draws are
+GATED on rate > 0 (the #80/#99 active-flag idiom): zero additional draws
+when off, so no existing golden moves — including Phase A's fresh ones.
+A BLOCKED MOVE (no empty site in walk reach) fails in place and is
+counted. ALTERNATIVES REJECTED: a separate movement event type (breaks
+the clock, above); a cadence schedule (synchronized global reshuffling
+pulses are a modelling artifact and have no async meaning). THE
+`MovementRule` ABSTRACT BASE CLASS (#46) ships with ONE implementation,
+the kernel-weighted random walk over the third radius/decay pair (#105:
+`movement.radius`, `movement.decay`), consuming the #156 cached reach;
+success-driven and walk-away styles are future implementations of the
+same interface. NAMED FUTURE OPTION, deliberately out of M11b: a
+movement ENERGY COST — it adds a calibration surface A1/A2 would have to
+learn; movement ships free.
+
+**#166 — 2026-08-17 — `matching.encounter_mode` ∈ {`per_initiator`,
+`per_pair`}, default `per_initiator`; SPATIAL-ONLY;
+deduplicate-after-draws; greyed under the asynchronous clock (M11b Phase
+0; spec ruling 4; implemented in Phase C).** (a) SCOPE: the knob is live
+only while `matching.spatial_interaction` is on. The well-mixed
+`random_k` coincidental doubling (≈ 2k/(N − 1) per pair) is UNTOUCHED —
+the lattice is where the artifact is systematic (every adjacent pair,
+every generation, the #139 ×2), and reopening the platform's oldest
+golden-mastered path to fix a rare coincidence buys near-nothing;
+recorded as a possible future extension. (b) IMPLEMENTATION CONTRACT,
+protecting the goldens: partner draws are made exactly as today — the
+same random-number consumption — and deduplication applies to the
+resulting PAIR LIST before matches are played; the knob changes WHICH
+matches run, never HOW randomness is consumed, so the default is
+byte-identical trivially. (c) ASYNCHRONOUS CLOCK: greyed, with a
+greying-table entry (#141's `STRUCTURE_GREYING`) and help text — the
+async activation structure is per-initiator by construction, and
+cross-event deduplication would require remembering encounters through
+time and would distort the activation clock #165 protects. RIPPLES
+ASSIGNED: `spatial_income_arithmetic` gains the encounter branch (2× vs
+1× the effective neighbour count; Phase D); A3's message becomes
+mode-conditional; A2 gains the trigger (#170); the bench gains a
+`per_pair` column beside the #156 structure grid (Phase C) — the first
+real test of #156's held hypothesis that re-met pairs' within-generation
+history copies explain the Moore cost excess. All four shipped scenarios
+keep the default; no scenario text changes. ALTERNATIVE REJECTED:
+extending the knob to the well-mixed matchers now (above, (a)).
+
+**#167 — 2026-08-17 — Novice/advanced disclosure (the axis #158
+deliberately left open) RESOLVED: a registry-level boolean `advanced`
+flag, rendered as a collapsed-but-present per-section expander (M11b
+Phase 0; spec ruling 5; implemented in Phase E2).** THE MECHANISM: the
+flag lives beside the parameter's registry entry (hard rule 3 — single
+source of truth, never in UI code); the panel renders each section's
+everyday parameters as now and its advanced ones inside a labelled
+expander that names itself, opens on a click, and keeps greying LIVE
+inside — disclosure by folding, the same honest shape as #158's
+collapse-with-summary, one level down. ORTHOGONAL to the mode tabs, as
+#158 demanded, sparing the two-unrelated-reasons-at-once invisibility.
+FLAGGING CRITERION: the default is the canonical choice AND changing it
+presupposes a mechanism the novice tooltips don't assume. The spec
+carries the candidate list (`birth_decay`, `interaction_decay`,
+`movement.decay`, `dynamics.boundary_order`,
+`structure.placement_contest`, `matching.encounter_mode`,
+`match.continuation_probability`, the selection-rule internals); the
+OWNER confirms it at the Phase E2 prompt. ALTERNATIVES REJECTED:
+declining for M11b (M11b IS the panel-rewrite milestone; reopening the
+panel later just for this contradicts #158's reason for parking it
+here); a global novice/advanced MODE that HIDES advanced widgets
+(violates the total-fork criterion — an advanced parameter still affects
+the run, which is exactly the false irrelevance claim #158 forbids).
+
+**#168 — 2026-08-17 — Live-run display continuity joins M11b (owner
+request, 2026-08-17 design session; spec ruling 6; implemented in Phase
+E3).** THE RULING: the four display toggles — update granularity,
+playback delay, score view, time scope — become changeable MID-RUN
+without stopping the run. MECHANISM: the run loop stops living as an
+in-script loop that a widget rerun destroys; engine state survives in
+session memory, and each script pass advances the engine, repaints with
+the toggles' CURRENT values, and schedules the next pass — so a mid-run
+toggle change resumes the run and re-renders on the fly. LEGITIMACY: all
+four toggles are display-side — none reaches the engine, the registry
+semantics, or any random draw — so hard rules 4 and 8 and the golden
+masters are untouched by construction. RULE 7 REPORT REQUIRED from Phase
+E3: which toggles govern PAINT CADENCE only (freely switchable in both
+directions) versus RECORDING RESOLUTION (finer detail only from the
+switch point onward); the granularity toggle's mid-run wording — a
+caption versus stays-pre-run — is the OWNER'S call on that report.
+ALTERNATIVE REJECTED: leaving the toggles pre-run-only (the status quo,
+which forces a stop-and-restart to change what one is watching).
+
+**#169 — 2026-08-17 — The asynchronous spatial calibration branch
+EXTENDS, gated on measurement (resolves the question #154 deliberately
+held and pinned; M11b Phase 0; spec ruling 7; executed in Phase D).**
+THE EXPECTED FORMULA is the SAME 2 × min(k, degree) per
+generation-equivalent the synchronous branch uses — on its own
+activation an agent plays its k matches (capped at its neighbour count),
+and it is also played by each neighbour on theirs, the same two-sided
+accounting that produces the synchronous ×2 (#139) — but as an
+EXPECTATION rather than an exact count, since activation order is
+random. PHASE D instruments an asynchronous spatial run, counts matches
+per agent per generation-equivalent, and compares. ON AGREEMENT within
+sampling noise: the branch extends (`spatial_calibration_active` loses
+its sync-clock conjunct), the #154 pin (N − 1 = 99 on
+`donation_game_threshold`) is RETIRED WITH A REPLACEMENT pin on the new
+behaviour (#120(f)'s retire-with-replacement rule), advisory A1 works
+under both clocks, and the fine print marks the async figure "expected"
+where the synchronous figure was exact. ON DISAGREEMENT: Rule 7 — report
+the measured number and hold for a design ruling. ALTERNATIVE REJECTED:
+leaving the async context pinned wrong — A1 would either stay silent
+under async (a warning system dark in one of the two regimes) or warn
+from numbers known to be false.
+
+**#170 — 2026-08-17 — ADVISORIES.md A2's trigger list amended (EXECUTED
+in M11b Phase 0; spec ruling 8).** ADDED to A2's triggers:
+`matching.spatial_interaction` (flipping it swaps the entire income
+arithmetic regime — 199 → 8 in the flagship's case),
+`matching.encounter_mode` (`per_pair` halves every income figure, #166),
+and `matching.interaction_radius` (a larger radius enlarges the
+reachable neighbourhood, so where k exceeds the smaller neighbourhood
+the effective match count rises). EXCLUDED, with reasons recorded so the
+list is not "completed" later by mistake: `movement.rate` — movement
+changes WHO an agent's neighbours are, not how many matches it plays; it
+moves income around rather than multiplying it — and `interaction_decay`
+— it reweights which neighbours are drawn, never how many draws occur.
+A2's message, severity, and surface are UNCHANGED. The file predates
+M11a's knobs and this session's rulings; ROADMAP anticipated exactly
+this re-examination. Phase D implements A1–A3 against the amended list;
+any further edit the implementation forces is a Rule 7 report.
