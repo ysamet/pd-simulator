@@ -288,9 +288,10 @@ text fix — the memory-depth note's spatial branch), the tabs decision
 recorded (#158), the admission-quota OPEN question logged (#159,
 deadline M11b, explicitly before M12), and the close-out (#160).
 
-**Next per ROADMAP:** the M11a explainer remains GATED on the
-literature verification pass (a design-layer task — the four #103/#111
-publisher-record checks; NOT written from here); then **M11b**
+The M11a explainer shipped 2026-08-16
+(`docs/explainers/M11a-population-structure-explainer.md`) after the
+design-layer literature verification pass discharged the four #103/#111
+publisher-record checks (DECISIONS #161). **Next per ROADMAP: M11b**
 (movement + layout painter, `encounter_mode`, the advisory mechanism
 A1-A3, the #158 tab/collapse/disclosure work, and the #159
 admission-quota resolution). Design everything to not block the v2/v3

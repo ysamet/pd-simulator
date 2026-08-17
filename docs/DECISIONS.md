@@ -4303,3 +4303,46 @@ being #150's logged, confined pair; 1059 tests pass; ruff clean. The
 M11a explainer remains GATED on the four literature verifications
 (spec Out-of-scope; #103/#111) and is NOT part of the milestone;
 M11b is next per ROADMAP.
+
+**#161 — 2026-08-14 — The four literature gates are DISCHARGED: all four
+claims VERIFIED TRUE against publisher records or author-institutional
+deposits, recorded as one consolidated entry since they were gated as one
+batch (the design-layer literature verification pass; discharges the
+verification debt of #103(ii) and #111(d); unblocks the M11a explainer per
+the spec's Out-of-scope section and #160).** (1) Hammond & Axelrod 2006
+(JCR 50(6), DOI 10.1177/0022002706293470, authors' institutional deposit):
+the 50×50 space IS toroidal — "wraparound borders so that every site has
+exactly four neighboring sites" — with von Neumann geometry stated in both
+the model section and the appendix. M12's replication scenario inherits a
+VERDICT: wrap-around, von Neumann. (2) Kaznatcheev & Shultz 2011 (Proc.
+33rd CogSci, 3174–3179, publisher-hosted full text): no-tag local
+child-placement matches the full model "up to around 300 cycles";
+saturation "at about 300 cycles, on average" is the paper's own figure,
+attributed therein to Shultz, Hartshorn & Kaznatcheev 2009; the M10
+explainer's "roughly the first 300 periods" is ACCURATE — no correction
+required; a one-line verified-note added to its provenance note instead.
+Nuance recorded: the tags-maintain effect weakens as b/c rises (no decay
+at b/c = 4). (3) Tarnita et al. 2009 (JTB 259(3), DOI
+10.1016/j.jtbi.2009.03.035, Harvard DASH deposit): σR + S > T + σP
+confirmed; σ = 1 is risk-dominance; σ = (k+1)/(k−1) for death-birth on
+regular graphs confirmed WITH the attribution chain — the paper credits
+the value to Ohtsuki et al. 2006's online-material eq. 24 via
+σ = ((b/c)*+1)/((b/c)*−1); finite-N formula ((k+1)N − 4k)/((k−1)N) is
+their eq. 18; birth-death is explicitly outside their proof
+(payoff-dependent death step), condition "expected to hold" pending a
+different proof. Calibration guide §2.4/§2.5 and its References SHIP
+CORRECT — no edits. (4) Ohtsuki, Hauert, Lieberman & Nowak 2006 (Nature
+441, DOI 10.1038/nature04605, full Supplementary Information from Hauert's
+institutional reprint): assumption set confirmed — donation game, one-shot
+summed payoffs, fitness (1−w)+w·payoff with weak selection, N ≫ k, pair
+approximation on Bethe lattices with looped-graph discrepancy expected;
+b/c > k derived for death-birth in SI §1.5; imitation b/c > k+2 in SI §2;
+and SI §3 — titled "'Birth-death' (BD) updating" — proves cooperators are
+never favoured for any b > c > 0, so ADVISORIES.md A4's pinpoint
+"Supplementary Information §3" ships CORRECT as written. HANDLING DECIDED:
+all four claims enter the explainer with citations (no omissions, no
+unverified markers); the M10-explainer note rides inside the explainer
+prompt rather than as a separate prompt; one consolidated entry rather
+than per-claim entries, so M12 inherits a single pointer. The standing
+rule restated: claims derived by consistency check are not citations, and
+nothing enters an explainer until verified against publisher records.

@@ -823,4 +823,7 @@ pass (Hammond & Axelrod 2006 and Nowak 2006 cite them with full volume and page)
 rather than independently by DOI. Moran (1958) is deliberately absent — it belongs
 to M10b's explainer. The Verhulst / Pearl & Reed logistic tradition
 (density-dependent living cost) and Greenwood's natal-dispersal work (M11's birth
-radius) are likewise deferred to the milestones that build them.*
+radius) are likewise deferred to the milestones that build them. The Kaznatcheev
+& Shultz (2011) figure of roughly 300 periods was verified against the published
+proceedings full text during the M11a literature verification pass (2026-08-14;
+DECISIONS #161); no correction was required.*

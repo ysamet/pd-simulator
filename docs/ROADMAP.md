@@ -189,8 +189,9 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     audit (54/54 covered, one text fix), the tabs decision (#158),
     the admission-quota open question (#159), and the close-out
     (#160). **M11a complete 2026-08-14, 1059 tests passing.** The
-    M11a explainer remains gated on the literature verification pass
-    (a design-layer task) and is not part of the milestone.
+    literature verification pass landed 2026-08-14 (all four gates
+    verified true, DECISIONS #161) and the M11a explainer shipped
+    2026-08-16 as `docs/explainers/M11a-population-structure-explainer.md`.
 
     Calibration-guide residue (DECISIONS #113–#115) folded into the
     remaining phases: Phase B measures the #114 shifted-weight spread;
