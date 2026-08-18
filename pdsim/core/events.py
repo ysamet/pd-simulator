@@ -224,12 +224,28 @@ class GenerationFinished:
         blocked_parents: How many admitted parents failed the LOCAL
             placement gate this period (M11a Phase C, spec Design 4):
             cleared the capacity gate, found no empty site within the
-            birth kernel's reach, paid nothing, and stay eligible. Always
-            0 without a lattice (well-mixed placement never fails), and 0
-            under imitation and ``fixed_n`` (no θ-births exist there). A
-            LIVE readout for the Economy panel — deliberately not
-            persisted (the additive-field precedent again: recorded
-            folders are unchanged).
+            birth kernel's reach at the moment of their placement draw,
+            paid nothing, and stay eligible. Under the synchronous
+            economy this is RESIDUAL CONTENTION only since M11b Phase A
+            (#164): admission seats only feasible parents, so a blocked
+            one lost the last reachable empty site to an earlier-iterated
+            parent this boundary. Under the asynchronous clock the count
+            keeps its original, undivided meaning (#171, ruling R1).
+            Always 0 without a lattice (well-mixed placement never
+            fails), and 0 under imitation and ``fixed_n`` (no θ-births
+            exist there). A LIVE readout for the Economy panel —
+            deliberately not persisted (the additive-field precedent
+            again: recorded folders are unchanged).
+        infeasible_parents: How many threshold-eligible parents the
+            feasibility filter excluded from admission this generation
+            because no empty site lay within their birth reach (M11b
+            Phase A, #164; ruling R2: ALL such eligibles, so on a full
+            grid every eligible parent counts — that is what saturation
+            looks like). Populated by the synchronous economy on a
+            lattice only; always 0 under the asynchronous clock, off
+            lattice, and under imitation. LIVE-only, exactly like
+            ``blocked_parents`` — not persisted, not shown by the results
+            browser.
     """
 
     index: int
@@ -240,6 +256,7 @@ class GenerationFinished:
     agents: tuple[AgentSnapshot, ...] = ()
     gen_equiv_time: float | None = None
     blocked_parents: int = 0
+    infeasible_parents: int = 0
 
 
 @dataclass(frozen=True, slots=True)

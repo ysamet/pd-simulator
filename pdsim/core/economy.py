@@ -2,7 +2,8 @@
 
 The arithmetic of the growth economy, kept out of the generation loop so each
 rule is unit-testable on its own: the energy ledger, the mortality curve, the
-capacity gate, the structural placement gate, and founder age staggering.
+capacity gate, the feasibility filter in front of it (M11b Phase A), the
+structural placement gate, and founder age staggering.
 Headless (hard rule 4) and side-effect-free — every function here is a pure
 function of its arguments (a functional-programming note: the boundary in
 ``dynamics.py`` is a pipeline of these, which is what makes its nine steps
@@ -18,6 +19,7 @@ from collections.abc import Sequence
 
 from pdsim.config.experiment import DynamicsConfig
 from pdsim.core.agent import Agent
+from pdsim.core.occupancy import Occupancy
 
 
 def energy_update(
@@ -109,6 +111,55 @@ def admit_births(eligible: Sequence[Agent], slots: int) -> list[Agent]:
     """
     ranked = sorted(eligible, key=lambda agent: (-agent.energy, agent.agent_id))
     return ranked[: max(0, slots)]
+
+
+def feasible_parents(
+    eligible: Sequence[Agent], occupancy: Occupancy, birth_radius: int | None
+) -> list[Agent]:
+    """The FEASIBILITY filter in front of the capacity gate (M11b Phase A, #164).
+
+    A parent is *feasible* when at least one EMPTY site lies within its
+    birth reach — the same support the placement draw samples
+    (``Structure.reach`` at the birth radius, filtered to empty sites), so
+    "feasible" means exactly "the placement draw would return a site if it
+    ran now". Under the synchronous energy economy on a lattice the capacity
+    gate ranks and seats ONLY feasible parents: a seat is an economic
+    licence to breed, and #153(c)'s Filling Grid freeze showed what happens
+    when licences go to parents who physically cannot use them — the rich
+    walled-in interior consumed the whole quota every generation while the
+    poorer rim, beside empty sites, never ranked inside it. With this
+    filter a seated parent always has somewhere to place, so at least one
+    admitted parent places every generation and a permanent freeze of that
+    kind is impossible.
+
+    Pure and RNG-FREE: a read of live occupancy through the memoised reach
+    cache (#156), consuming zero generator calls — pinned by the counting
+    wrapper. The order of the returned list is the caller's order (this is
+    a filter, not a ranking; ``admit_births`` ranks). Callers OFF the
+    three-way gate (well-mixed, imitation, the asynchronous clock) never
+    call it — the asynchronous engine keeps its undivided blocked count
+    (DECISIONS #171, ruling R1).
+
+    Args:
+        eligible: Parents at or above the reproduction threshold, in any
+            order.
+        occupancy: The live occupancy at the moment of assessment — the same
+            snapshot the slot ration reads (post-death under
+            ``death_first``, pre-death under ``birth_first``).
+        birth_radius: The birth kernel's support radius R, or ``None`` for
+            unlimited reach.
+
+    Returns:
+        The eligible parents that have at least one empty site within
+        reach, in the input order.
+    """
+    feasible: list[Agent] = []
+    for agent in eligible:
+        origin = occupancy.site_of(agent.agent_id)
+        assert origin is not None  # every living agent holds a site
+        if occupancy.empty_sites_within(origin, birth_radius):
+            feasible.append(agent)
+    return feasible
 
 
 def place_offspring(population: Sequence[Agent], parent: Agent) -> bool:

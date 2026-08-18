@@ -32,7 +32,11 @@ ECONOMY_HELP: dict[str, str] = {
         "When more agents qualify to breed than the carrying capacity has free "
         "seats, admission is by energy priority: the richest eligible parents "
         "get the seats (ties broken by lower id). Deterministic on purpose — "
-        "no lottery, no extra randomness in the birth phase."
+        "no lottery, no extra randomness in the birth phase. On a lattice "
+        "under the synchronous clock only FEASIBLE parents are ranked at all "
+        "— those with at least one empty site within their birth radius — so "
+        "a seat never goes to a parent who has nowhere to put the child (see "
+        "the infeasible-parents readout)."
     ),
     "estate_destruction": (
         "When an agent dies, its remaining energy vanishes — nothing is "
@@ -89,14 +93,39 @@ ECONOMY_HELP: dict[str, str] = {
         "knowing."
     ),
     "blocked_parents": (
-        "A BLOCKED parent cleared the capacity gate (it holds enough energy "
-        "to breed and won a free seat) but found every site within its birth "
-        "radius occupied — so it paid nothing, keeps its energy, stays "
-        "eligible, and simply tries again. An agent sitting at several times "
-        "the breeding bar and not breeding is therefore CORRECT, not stuck: "
-        "being unable to spend reproductive wealth because the neighbourhood "
-        "is full is exactly what spatial viscosity means, and it is the "
-        "mechanism that lets clusters keep their shape."
+        "A BLOCKED parent won a free seat under the carrying capacity but "
+        "found no empty site within its birth radius when its turn came to "
+        "place the child — so it paid nothing, keeps its energy, stays "
+        "eligible, and simply tries again. What that means depends on the "
+        "clock. Under the SYNCHRONOUS economy every seated parent had an "
+        "empty site in reach when seats were handed out (only feasible "
+        "parents are ranked), so a blocked parent here LOST A PLACEMENT "
+        "CONTEST: an earlier-placed parent took the last empty site within "
+        "its reach this generation — rare, and self-healing next generation. "
+        "Under the ASYNCHRONOUS clock there is no feasibility filter and no "
+        "shuffled contest step, so blocked keeps its original, undivided "
+        "meaning: no empty "
+        "site was in reach at that birth event, whether the neighbourhood "
+        "was simply full or an earlier birth in the same event took the last "
+        "site. Either way, an agent sitting at several times the breeding "
+        "bar and not breeding is CORRECT, not stuck: being unable to spend "
+        "reproductive wealth because the neighbourhood is full is exactly "
+        "what spatial viscosity means, and it is the mechanism that lets "
+        "clusters keep their shape."
+    ),
+    "infeasible_parents": (
+        "An INFEASIBLE parent holds enough energy to breed but has NO empty "
+        "site within its birth radius, so under the synchronous economy it "
+        "is not ranked for a seat at all this generation — the seats go to "
+        "parents who can actually place a child (K decides how many, the "
+        "birth radius decides where). It pays nothing, keeps its energy, "
+        "stays eligible, and is re-assessed every generation against the "
+        "changing occupancy. The count is ALL such parents, not just the "
+        "ones who would have won a seat: on a completely full grid every "
+        "eligible parent is infeasible — that is what saturation looks like "
+        "in this readout. Under the asynchronous clock this readout does not "
+        "apply (there is no feasibility filter there; such parents show up "
+        "as blocked instead)."
     ),
 }
 """The single source for the Economy panel's inline (?) explainer texts."""
@@ -546,6 +575,29 @@ def blocked_parents_visible(config: ExperimentConfig) -> bool:
     return dynamics.reproduction_mode == "energy_economy"
 
 
+def infeasible_parents_visible(config: ExperimentConfig) -> bool:
+    """Whether the infeasible-parents readout applies to this run (M11b Phase A).
+
+    The feasibility filter runs under the three-way gate ONLY — synchronous
+    clock + lattice + ``energy_economy`` (#164) — so the readout is shown
+    exactly there. The asynchronous clock never populates the field
+    (DECISIONS #171, ruling R1: its blocked count stays undivided), so it
+    is hidden rather than shown as a permanent zero.
+
+    Args:
+        config: The run's config.
+
+    Returns:
+        True when the readout should be shown.
+    """
+    if config.mode != "evolution" or config.structure.kind != "lattice":
+        return False
+    dynamics = config.dynamics
+    if dynamics.time_model == "asynchronous":
+        return False
+    return dynamics.reproduction_mode == "energy_economy"
+
+
 def blocked_parents_metric(blocked: list[int]) -> tuple[int, int] | None:
     """The numbers behind the live blocked-parents readout (Design 4, #89(e)).
 
@@ -566,3 +618,24 @@ def blocked_parents_metric(blocked: list[int]) -> tuple[int, int] | None:
     if not blocked:
         return None
     return blocked[-1], sum(blocked)
+
+
+def infeasible_parents_metric(infeasible: list[int]) -> tuple[int, int] | None:
+    """The numbers behind the live infeasible-parents readout (M11b Phase A).
+
+    The same shape as :func:`blocked_parents_metric` — the two metrics sit
+    side by side in the Economy panel and are read the same way. The
+    explanation lives in ``ECONOMY_HELP["infeasible_parents"]`` (the §12
+    single-source rule).
+
+    Args:
+        infeasible: The per-period infeasible-parent counts so far (the
+            timeseries' live series).
+
+    Returns:
+        ``(latest period's count, run total)``, or ``None`` before any
+        period has finished.
+    """
+    if not infeasible:
+        return None
+    return infeasible[-1], sum(infeasible)

@@ -211,8 +211,10 @@ match phase (unchanged) → report-as-played → **energy update**
 order, only when the mortality trio is active; then insolvency deaths,
 `e < 0`, strictly negative, deterministic — each death vacates its site
 on a lattice) and the **birth phase** (eligible at `e ≥ θ`; free seats
-under carrying capacity K filled by energy-priority admission, RNG-free;
-then per parent — in parent-id order well-mixed, in the contest order
+under carrying capacity K filled by energy-priority admission, RNG-free —
+on a lattice ranked over the FEASIBLE eligibles only, those with an empty
+site within birth reach (#164/#171, a pure occupancy read); then per
+parent — in parent-id order well-mixed, in the contest order
 under sync + lattice + economy (#107/#133): the placement check, which on
 a lattice is one kernel draw over the empty sites within the birth
 radius and can FAIL — a blocked parent pays nothing and stays eligible
@@ -389,10 +391,26 @@ global-births-with-local-interaction separable experiments.
 
 **The two seams keep distinct jobs.** `admit_births()` is the GLOBAL gate
 — are we under carrying capacity, rationed by energy priority when seats
-are scarce. `place_offspring()` is the LOCAL gate — is there an empty site
-in reach, sampled by the birth kernel and contested per below. A parent
-must clear both. Place-before-pay (#80) is load-bearing at last: a parent
-that cannot place a child pays NO stake and stays eligible next period.
+are scarce. Under structure (the synchronous economy on a lattice) the
+global gate ranks and seats ONLY FEASIBLE parents — those with at least
+one empty site within birth reach, a pure occupancy read through the reach
+cache that consumes no RNG (M11b Phase A, DECISIONS #164 resolving #159,
+built per #171): K decides HOW MANY, the kernel decides WHERE, and a seat
+never goes to a parent who physically cannot use it. The excluded eligibles
+are counted as INFEASIBLE (all of them, not merely those who would have
+ranked inside the quota — #171 ruling R2). `place_offspring()` is the
+LOCAL gate — is there an empty site in reach, sampled by the birth kernel
+and contested per below. A parent must clear both. Place-before-pay (#80)
+is load-bearing at last: a parent that cannot place a child pays NO stake
+and stays eligible next period. Since #164 the only way a seated
+synchronous parent fails the local gate is RESIDUAL CONTENTION — an
+earlier-iterated parent took the last empty site in its reach this
+boundary — accepted as rare and self-healing (next generation re-ranks
+against the changed occupancy); a permanent freeze of #153(c)'s kind is
+impossible, because at least one seated parent always places. The
+asynchronous clock has no feasibility filter: it admits by energy alone
+and its blocked count keeps the undivided pre-#164 meaning (#171 ruling
+R1; unifying its vocabulary is a named future option).
 
 **Carrying capacity survives under structure** as a second, tighter cap
 (#106 — resolving §2.10's "may become emergent" open line). Validator:
@@ -410,8 +428,16 @@ structural rather than a rule we impose.
 — see DECISIONS #107). Contention exists only where several births resolve
 at one instant: synchronous + structure + `energy_economy`, and nowhere
 else (async resolves one birth per event; `fixed_n` never calls
-`admit_births` per #97d; sync well_mixed placement never fails). Under
-structure, the admitted birth set is resolved by
+`admit_births` per #97d; sync well_mixed placement never fails). [As
+implemented, found in M11b Phase A and HELD for the design layer (#171,
+Rule 7): the asynchronous `variable_n` engine admits the WHOLE
+θ-eligible, refractory-clear set at each event and iterates it in
+ascending id order, so several births CAN resolve in one event — probed on
+the `async_variable_n_lattice` golden, two events fire two births each.
+No contest permutation exists there; a shared last reachable site goes to
+the lower id. Whether async should enforce one birth per event, or the
+id-order resolution is acceptable, is an open design question; the engine
+is byte-untouched.] Under structure, the admitted birth set is resolved by
 `structure.placement_contest` ∈ {`random`, `energy_priority`}, default
 `random` — ONE permutation then iterate, matching Hammond–Axelrod's random
 reproduction order and keeping energy's role at eligibility (θ) rather
@@ -691,7 +717,17 @@ event-time types M10b added (async runs only — see below):
   also carries `blocked_parents: int` — how many admitted parents failed
   the local placement gate this period (always 0 off-lattice) — a
   LIVE-only field feeding the Economy panel's readout, deliberately not
-  persisted (#133).
+  persisted (#133). Since M11b Phase A (#164/#171) its meaning is
+  clock-scoped: under the synchronous economy it counts RESIDUAL-CONTENTION
+  losers only (a seated, feasible parent whose last reachable empty site an
+  earlier-iterated parent took this boundary); under the asynchronous clock
+  it keeps its undivided original meaning (no empty site in reach at that
+  birth event). Beside it, `infeasible_parents: int` — how many
+  threshold-eligible parents the feasibility filter excluded from admission
+  this generation for want of an empty site in reach (all of them, so a
+  full grid counts every eligible parent) — populated by the synchronous
+  lattice economy ONLY, always 0 under the asynchronous clock and
+  off-lattice; LIVE-only and unpersisted exactly like `blocked_parents`.
 - **`BirthEvent` / `DeathEvent` / `ImitationEvent`** (M10b, async only —
   #82/#95): explicit event-time records with `event_index`,
   `gen_equiv_time`, agent identity, and cause (`threshold`/`moran` for

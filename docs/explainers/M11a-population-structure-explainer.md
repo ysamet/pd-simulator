@@ -734,6 +734,17 @@ and why; it does not resolve it, and it makes no claim about what the
 filling regime's endgame will be under any rule beyond what was measured
 above.
 
+> **Provenance note, added 2026-08-17 (M11b Phase A).** Question #159 was
+> resolved by DECISIONS #164 and implemented in M11b Phase A (#171): the
+> synchronous economy's capacity gate now ranks and seats only *feasible*
+> parents (at least one empty site within birth reach), so the freeze
+> described in this section — a property of the pre-#164 admission rule —
+> no longer forms, and the scenario's things-to-try no longer invites the
+> P = 0 rederivation. The Filling Grid's registry text now describes the
+> trajectory observed under #164 (recorded in #171); this section is left
+> as the historical record of what M11a measured and why the question was
+> opened.
+
 ## 9. References
 
 All entries below were verified against publisher records or

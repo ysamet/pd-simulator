@@ -1105,8 +1105,14 @@ def _run_live(
         chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
         # The blocked-parents readout (M11a Phase C, spec Design 4): live
         # only where the local placement gate exists — a lattice economy.
-        blocked_note = st.empty()
+        # Beside it, the infeasible-parents readout (M11b Phase A, #164):
+        # live only under the three-way gate, where the feasibility filter
+        # runs (the async clock never populates it, so it stays hidden).
+        blocked_col, infeasible_col = st.columns(2)
+        blocked_note = blocked_col.empty()
+        infeasible_note = infeasible_col.empty()
         show_blocked = economy_helpers.blocked_parents_visible(config)
+        show_infeasible = economy_helpers.infeasible_parents_visible(config)
         # The LIVE grid (Phase C): the latest snapshot IS the render state
         # (Design 10), so a lattice run with per-agent data redraws its
         # occupancy as periods finish — this is what lets V5's drifting
@@ -1116,7 +1122,7 @@ def _run_live(
         grid_live = st.empty()
 
         def _draw_blocked() -> None:
-            """Refresh the blocked-parents metric from the live series."""
+            """Refresh the blocked- and infeasible-parents metrics from the live series."""
             numbers = economy_helpers.blocked_parents_metric(timeseries.blocked_parents)
             if show_blocked and numbers is not None:
                 latest, total = numbers
@@ -1126,6 +1132,16 @@ def _run_live(
                     delta=f"run total {total}",
                     delta_color="off",
                     help=ECONOMY_HELP["blocked_parents"],
+                )
+            infeasible = economy_helpers.infeasible_parents_metric(timeseries.infeasible_parents)
+            if show_infeasible and infeasible is not None:
+                latest, total = infeasible
+                infeasible_note.metric(
+                    "Infeasible parents this generation",
+                    latest,
+                    delta=f"run total {total}",
+                    delta_color="off",
+                    help=ECONOMY_HELP["infeasible_parents"],
                 )
 
         def _draw_live_grid(draw_id: int) -> None:

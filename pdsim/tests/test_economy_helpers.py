@@ -9,8 +9,12 @@ from pdsim.config.scenarios import get_scenario_info
 from pdsim.ui.economy_helpers import (
     ECONOMY_HELP,
     SPATIAL_FINE_PRINT,
+    blocked_parents_metric,
+    blocked_parents_visible,
     calibration_report,
     chart_carrying_capacity,
+    infeasible_parents_metric,
+    infeasible_parents_visible,
     spatial_income_arithmetic,
 )
 
@@ -287,9 +291,74 @@ class TestEconomyHelp:
             "escape_velocity",
             "generations_to_threshold",
             "effective_max_age",
+            "blocked_parents",
+            "infeasible_parents",
         }
+
+    def test_the_parent_readouts_are_clock_aware(self) -> None:
+        """Both (?) texts say what each clock means (M11b Phase A, #171 ruling R1)."""
+        blocked = ECONOMY_HELP["blocked_parents"].lower()
+        infeasible = ECONOMY_HELP["infeasible_parents"].lower()
+        assert "synchronous" in blocked and "asynchronous" in blocked
+        assert "contest" in blocked
+        assert "asynchronous" in infeasible and "does not apply" in infeasible
+        assert "full grid" in infeasible  # ruling R2's saturation consequence
 
     def test_texts_are_real_prose(self) -> None:
         """Each explainer is a sentence, not a stub."""
         for key, text in ECONOMY_HELP.items():
             assert len(text.split()) >= 10, f"ECONOMY_HELP[{key!r}] too thin"
+
+
+class TestParentReadoutVisibility:
+    """Where the blocked and infeasible readouts apply (M11a Phase C; M11b Phase A)."""
+
+    def _lattice(self, **dynamics: object) -> ExperimentConfig:
+        """A 3x3 stripes lattice evolution config with the given dynamics."""
+        return ExperimentConfig.model_validate(
+            {
+                "population": {
+                    "size": 8,
+                    "composition": {"always_cooperate": 4, "always_defect": 4},
+                },
+                "structure": {"kind": "lattice", "rows": 3, "cols": 3, "initial_layout": "stripes"},
+                "dynamics": {"generations": 2, **dynamics},
+            }
+        )
+
+    def test_sync_lattice_economy_shows_both(self) -> None:
+        """The three-way gate: the feasibility filter runs, both readouts apply."""
+        config = self._lattice(reproduction_mode="energy_economy", carrying_capacity=9)
+        assert blocked_parents_visible(config)
+        assert infeasible_parents_visible(config)
+
+    def test_async_variable_n_shows_blocked_only(self) -> None:
+        """Ruling R1: the async clock keeps its undivided blocked count."""
+        config = self._lattice(
+            time_model="asynchronous", async_population="variable_n", carrying_capacity=9
+        )
+        assert blocked_parents_visible(config)
+        assert not infeasible_parents_visible(config)
+
+    def test_well_mixed_and_imitation_show_neither(self) -> None:
+        """Off the gate nothing can be blocked or infeasible."""
+        well_mixed = ExperimentConfig.model_validate(
+            {
+                "population": {
+                    "size": 8,
+                    "composition": {"always_cooperate": 4, "always_defect": 4},
+                },
+                "dynamics": {"generations": 2, "reproduction_mode": "energy_economy"},
+            }
+        )
+        imitation = self._lattice()
+        for config in (well_mixed, imitation):
+            assert not blocked_parents_visible(config)
+            assert not infeasible_parents_visible(config)
+
+    def test_the_metrics_read_latest_and_total(self) -> None:
+        """Same shape for both: (latest period, run total); None before any period."""
+        assert blocked_parents_metric([]) is None
+        assert infeasible_parents_metric([]) is None
+        assert blocked_parents_metric([0, 2, 1]) == (1, 3)
+        assert infeasible_parents_metric([6, 8, 8]) == (8, 22)

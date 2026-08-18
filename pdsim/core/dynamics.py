@@ -50,7 +50,11 @@ by M11a Phase C per #107 — the spec's Design 9 diff):
     2. the mortality sub-phase — ONLY when age-mortality is active: exactly
        one coin per living agent, in ascending agent-id order,
        unconditionally (even at p = 0.0 or 1.0),
-    3. the birth phase — admission by energy priority is RNG-FREE, then:
+    3. the birth phase — admission by energy priority is RNG-FREE; under
+       the three-way gate it ranks ONLY the FEASIBLE eligibles (at least
+       one empty site within birth reach — a pure occupancy read through
+       the reach cache, zero draws; M11b Phase A, DECISIONS #164/#171),
+       then:
        a. the CONTEST PERMUTATION — ONLY when the three-way gate holds
           (synchronous + lattice + ``energy_economy``): one
           ``rng.permutation`` over the admitted set, drawn regardless of
@@ -64,7 +68,9 @@ by M11a Phase C per #107 — the spec's Design 9 diff):
           the PLACEMENT KERNEL DRAW — only on a lattice: one draw via
           ``neighbourhood_sample`` over the empty sites within the birth
           kernel (no draw when no site is in reach — the parent is
-          BLOCKED, pays nothing, and stays eligible), then σ payment on
+          BLOCKED, pays nothing, and stays eligible; since #164 this can
+          only be residual contention, an earlier-iterated parent having
+          taken the last reachable site this boundary), then σ payment on
           success, passport id, and the μ-mutation draw (coin only when
           μ > 0, roster index only when it hits, per ``reproduction.py``).
 Everything else at the boundary (energy update, insolvency deaths, capacity
@@ -99,6 +105,7 @@ from pdsim.core.economy import (
     admit_births,
     age_mortality_active,
     energy_update,
+    feasible_parents,
     mortality_probability,
     place_offspring,
     staggered_founder_ages,
@@ -208,9 +215,23 @@ class GenerationReport:
             ``GenerationFinished``. Always empty in synchronous reports.
         blocked_parents: How many admitted parents failed the LOCAL gate
             this period (M11a Phase C, Design 4): they cleared the capacity
-            gate but found no empty site within the birth kernel's reach,
-            paid nothing, and stay eligible. Always 0 without a lattice —
+            gate but found no empty site within the birth kernel's reach at
+            the moment of their placement draw, paid nothing, and stay
+            eligible. Under the synchronous economy this is RESIDUAL
+            CONTENTION only since M11b Phase A (#164): every seated parent
+            was feasible at assessment, so a blocked one lost the last
+            reachable empty site to an earlier-iterated parent. Under the
+            asynchronous clock the count keeps its original, undivided
+            meaning (ruling R1, #171). Always 0 without a lattice —
             well-mixed placement never fails.
+        infeasible_parents: How many threshold-eligible parents (energy ≥
+            θ) the feasibility filter excluded from admission this
+            generation because NO empty site lay within their birth reach
+            (M11b Phase A, #164; ruling R2: the absolute count of ALL
+            excluded eligibles, not merely those who would have ranked
+            inside the quota — on a full grid every eligible parent is
+            infeasible). Synchronous economy + lattice only; always 0
+            elsewhere (the asynchronous clock never populates it).
     """
 
     index: int
@@ -222,6 +243,7 @@ class GenerationReport:
     gen_equiv_time: float | None = None
     demographic_events: tuple[DemographicEvent, ...] = ()
     blocked_parents: int = 0
+    infeasible_parents: int = 0
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -575,9 +597,13 @@ class EconomyDynamics:
         self._birth_decay = structure.birth_decay
         self._placement_contest = structure.placement_contest
         # Blocked parents this generation (Design 4): admitted at the global
-        # gate, refused at the local one. Reset every boundary; reported so
-        # correct viscosity does not read as a stall.
+        # gate, refused at the local one — since #164 only by residual
+        # contention. Infeasible parents (M11b Phase A): eligible by energy
+        # but excluded from admission for want of an empty site in reach.
+        # Both reset every boundary; reported so correct viscosity does not
+        # read as a stall.
         self._blocked_parents = 0
+        self._infeasible_parents = 0
         # Monotonic passport counter: ids are never reused, so lineage and
         # the id-ordered RNG contract stay exact across deaths.
         self._next_id = len(founders)
@@ -688,6 +714,7 @@ class EconomyDynamics:
         #    phase then runs over survivors AND newborns alike, so a child
         #    faces the age-mortality coin in the round it was born.
         self._blocked_parents = 0
+        self._infeasible_parents = 0
         if dynamics.boundary_order == "birth_first":
             living = list(self._population)
             newborns = self._birth_phase(living)
@@ -743,6 +770,7 @@ class EconomyDynamics:
             cooperation=cooperation.table(),
             agents=agents,
             blocked_parents=self._blocked_parents,
+            infeasible_parents=self._infeasible_parents,
         )
         self._generation += 1
         return report
@@ -789,22 +817,40 @@ class EconomyDynamics:
     def _birth_phase(self, living: list[Agent]) -> list[Agent]:
         """Run the amended #80 step 6: admission, contest, placement, birth.
 
-        Admission is unchanged — ``admit_births`` decides THE SET by energy
-        priority, RNG-free. Iteration then follows :meth:`_contest_order`,
-        and each parent in turn faces the LOCAL gate: on a lattice, one
-        kernel draw over the empty sites within the birth radius of its own
-        site; an empty result means the parent is BLOCKED — it pays NO
-        stake, stays eligible next period, and keeps accumulating (the
-        place-before-pay branch of #80, load-bearing at last). Payment,
-        passport id, μ-mutation draw, and site occupation follow only on
-        placement success. One birth per parent per generation, even at
-        e ≥ 2θ.
+        Admission — ``admit_births`` decides THE SET by energy priority,
+        RNG-free. On a lattice (the three-way gate: this class is
+        synchronous + ``energy_economy``, the occupancy is the lattice half)
+        the set is ranked from the FEASIBLE eligibles only — those with at
+        least one empty site within birth reach, a pure occupancy read that
+        consumes zero draws (M11b Phase A, #164, resolving #159): K decides
+        HOW MANY, the kernel decides WHERE, and a seat never goes to a
+        parent who cannot use it. The excluded eligibles are counted as
+        INFEASIBLE (ruling R2: all of them, whether or not they would have
+        ranked inside the quota). Iteration then follows
+        :meth:`_contest_order` (the permutation is UNTOUCHED mechanically —
+        drawn under the gate as before, over the admitted set in id order;
+        only its input set may differ, the sanctioned #164 breaking
+        change), and each parent in turn faces the LOCAL gate: on a
+        lattice, one kernel draw over the empty sites within the birth
+        radius of its own site; an empty result means the parent is
+        BLOCKED — it pays NO stake, stays eligible next period, and keeps
+        accumulating (the place-before-pay branch of #80). Since #164 a
+        blocked parent is always a RESIDUAL-CONTENTION loser: it was
+        feasible at assessment, and an earlier-iterated parent took the
+        last empty site in its reach this boundary — rare, self-healing
+        (next generation re-ranks against the changed occupancy), and the
+        empty-before-drawing primitive still consumes no RNG for it.
+        Payment, passport id, μ-mutation draw, and site occupation follow
+        only on placement success. One birth per parent per generation,
+        even at e ≥ 2θ.
 
         Args:
             living: The population the ration is computed against — the
                 post-death survivors under ``death_first``, the pre-death
                 living under ``birth_first`` (the slots computation reads
-                whatever list exists at that moment; VT-4).
+                whatever list exists at that moment; VT-4). The feasibility
+                filter reads the occupancy of the SAME moment — no second
+                snapshot is introduced.
 
         Returns:
             The newborns, in iteration order (their ids ascend with it).
@@ -812,7 +858,14 @@ class EconomyDynamics:
         dynamics = self._config.dynamics
         eligible = [a for a in living if a.energy >= dynamics.reproduction_threshold]
         slots = max(0, dynamics.carrying_capacity - len(living))
-        admitted = admit_births(eligible, slots)
+        if self._occupancy is None:
+            # Off the gate: the untouched #80 admission — no feasibility
+            # code runs, well-mixed streams stay byte-identical.
+            admitted = admit_births(eligible, slots)
+        else:
+            feasible = feasible_parents(eligible, self._occupancy, self._birth_radius)
+            self._infeasible_parents = len(eligible) - len(feasible)
+            admitted = admit_births(feasible, slots)
         newborns: list[Agent] = []
         for parent in self._contest_order(admitted):
             if self._occupancy is None:
@@ -836,9 +889,11 @@ class EconomyDynamics:
                 )
                 if not drawn:
                     # The local gate failed (Design 4): no empty site within
-                    # reach. No stake leaves the parent; it stays eligible
-                    # and keeps accumulating — correct viscosity, counted so
-                    # the Economy panel can say so.
+                    # reach — since #164 only because an earlier-iterated
+                    # parent took the last one this boundary (residual
+                    # contention). No stake leaves the parent; it stays
+                    # eligible and keeps accumulating — counted so the
+                    # Economy panel can say so.
                     self._blocked_parents += 1
                     continue
                 site_id = drawn[0]

@@ -24,6 +24,14 @@ real from birth), the blocked-parent semantics (no stake, stays eligible,
 counted), ``boundary_order``, and the async amendments (the ``variable_n``
 placement insertion; the localised ``fixed_n`` breeder/victim draws with
 the R = 1 Ohtsuki reduction).
+
+M11b Phase A (DECISIONS #164/#171) replaced Phase C's blocked-parent group
+with the feasibility-aware admission suite: the #153(c) mechanism in
+miniature (rich walled-in interior never seated, poorer feasible rim
+seated and placed), the blocked/infeasible metric split with a manufactured
+residual-contention loser, the counting-wrapper pin that the feasibility
+filter consumes zero draws, RULING R2's full-grid corner, and the
+observed reason the ``sync_economy_lattice`` golden did not move.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ from pdsim.config.experiment import ExperimentConfig
 from pdsim.core import engine
 from pdsim.core.async_dynamics import AsyncDynamics
 from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics
+from pdsim.core.economy import admit_births, feasible_parents
 from pdsim.core.events import GenerationFinished
 from pdsim.core.structure import kernel_weights, sites_within
 from pdsim.tests.counting_rng import CountingGenerator
@@ -436,112 +445,348 @@ class TestOccupancyGoesLive:
 
 
 # ---------------------------------------------------------------------------
-# The blocked parent (Design 4: cleared the global gate, failed the local one)
+# Feasibility-aware admission (M11b Phase A, DECISIONS #164/#171) and the
+# blocked / infeasible split. Replaces Phase C's ``TestBlockedParents``,
+# which pinned the pre-#164 semantics (a walled-in parent ADMITTED and then
+# blocked) — retired with replacement per #120(f).
 # ---------------------------------------------------------------------------
 
 
-class TestBlockedParents:
-    """No stake, stays eligible, counted — the place-before-pay branch live."""
+def _von_neumann_config(
+    size: int, composition: dict[str, int], **overrides: object
+) -> ExperimentConfig:
+    """A 3x3 bounded VON NEUMANN lattice economy with a deterministic deal.
 
-    def _prepared(self, rich_agent_id: int) -> EconomyDynamics:
-        """Build the stripes fixture with exactly one θ-eligible parent.
+    Under ``stripes`` the deal is run-length, row-major, ascending machine
+    name, so agent i sits on site i for a full row band; with 8 founders
+    site 8 (bottom-right corner) is the one empty site, with 7 founders the
+    band's last row holds one centred agent (site 7) and sites 6 and 8 are
+    empty. Von Neumann + ``bounded`` keeps reaches small and exact: the
+    centre site 4 reaches {1, 3, 5, 7}; corner 8 is reached only from
+    {5, 7}; corner 6 only from {3, 7}.
 
-        Args:
-            rich_agent_id: The one agent set above threshold. Agent 0 sits
-                on site 0 (a bounded corner whose neighbours 1, 3, 4 are
-                all occupied — walled in); agent 7 sits on site 7, adjacent
-                to the one empty site 8.
+    Args:
+        size: Founder count (7 or 8 in these fixtures).
+        composition: The strategy counts, summing to ``size``.
+        **overrides: Extra ``dynamics`` fields; ``structure_overrides``
+            (a dict) is popped and merged into the structure block.
 
-        Returns:
-            The dynamics, energies hand-set, generator repositioned.
+    Returns:
+        A validated sync economy config, seed 42, K = 9 (the site count).
+    """
+    structure: dict[str, object] = {
+        "kind": "lattice",
+        "rows": 3,
+        "cols": 3,
+        "neighbourhood_shape": "von_neumann",
+        "boundary": "bounded",
+        "initial_layout": "stripes",
+        "birth_radius": 1,
+    }
+    structure.update(overrides.pop("structure_overrides", {}))  # type: ignore[arg-type]
+    dynamics: dict[str, object] = {
+        "generations": 3,
+        "reproduction_mode": "energy_economy",
+        "mutation_rate": 0.0,
+        "reproduction_threshold": 500.0,
+        "offspring_stake": 100.0,
+        "basic_living_cost": 0.0,
+        "carrying_capacity": 9,
+    }
+    dynamics.update(overrides)
+    return ExperimentConfig.model_validate(
+        {
+            "seed": 42,
+            "population": {"size": size, "composition": composition},
+            "match": {"length_mode": "fixed", "rounds_per_match": 2},
+            "structure": structure,
+            "dynamics": dynamics,
+        }
+    )
+
+
+def _prepared(
+    config: ExperimentConfig, energies: dict[int, float], rng_seed: int
+) -> EconomyDynamics:
+    """Build an EconomyDynamics with hand-set energies and a repositioned generator.
+
+    Args:
+        config: The fixture config.
+        energies: Agent id → energy; every other agent gets 100 (below
+            the fixtures' θ = 500).
+        rng_seed: The seed the birth phase's first draw is taken from.
+
+    Returns:
+        The prepared dynamics.
+    """
+    dynamics = EconomyDynamics(config, np.random.default_rng(config.seed))
+    for agent in dynamics._population:
+        agent.energy = energies.get(agent.agent_id, 100.0)
+    dynamics._rng = np.random.default_rng(rng_seed)
+    return dynamics
+
+
+class TestFeasibilityFilter:
+    """The #153(c) mechanism in miniature: rich walled-in interior, poorer feasible rim."""
+
+    def _miniature(self, rng_seed: int = 1) -> EconomyDynamics:
+        """8 founders, site 8 empty; agent 4 (centre) rich, agent 7 (rim) poorer.
+
+        Agent 4 sits on the centre site 4 whose von Neumann reach {1, 3, 5,
+        7} is fully occupied — the walled-in interior at 1000. Agent 7 sits
+        on site 7, adjacent to the one empty site 8 — the rim at 600, above
+        θ = 500 but poorer. K = 9 leaves exactly one seat.
         """
-        dynamics = EconomyDynamics(_stripes_config(), np.random.default_rng(42))
-        for agent in dynamics._population:
-            agent.energy = 1000.0 if agent.agent_id == rich_agent_id else 100.0
-        dynamics._rng = np.random.default_rng(1)
-        return dynamics
+        return _prepared(_von_neumann_config(8, {AC: 4, AD: 4}), {4: 1000.0, 7: 600.0}, rng_seed)
 
-    def test_a_walled_in_parent_pays_nothing_and_is_counted(self) -> None:
-        """Blocked: no newborn, no stake, the counter moves."""
-        dynamics = self._prepared(rich_agent_id=0)
-        newborns = dynamics._birth_phase(list(dynamics._population))
-        assert newborns == []
-        assert dynamics._blocked_parents == 1
-        walled_in = next(a for a in dynamics.population if a.agent_id == 0)
-        assert walled_in.energy == 1000.0  # not a unit of stake left it
+    def test_pre_change_admission_would_have_seated_the_walled_in_interior(self) -> None:
+        """By construction: ranking ALL eligibles hands the seat to the interior.
 
-    def test_a_blocked_parent_stays_eligible_and_breeds_once_room_opens(self) -> None:
-        """Blocked is a delay, not a verdict: free a neighbour and it breeds."""
-        dynamics = self._prepared(rich_agent_id=0)
-        dynamics._birth_phase(list(dynamics._population))
+        This is what #153(c)'s freeze was made of — the richest parent wins
+        the seat and cannot use it. The pure ``admit_births`` still ranks
+        that way; what changed is what it is handed.
+        """
+        dynamics = self._miniature()
+        eligible = [a for a in dynamics.population if a.energy >= 500.0]
+        assert sorted(a.agent_id for a in eligible) == [4, 7]
+        assert [a.agent_id for a in admit_births(eligible, 1)] == [4]
         occupancy = dynamics.occupancy
         assert occupancy is not None
-        # A neighbour of the walled-in parent dies; its site frees up.
-        victim = next(a for a in dynamics._population if a.agent_id == 1)
-        occupancy.remove_agent(victim.agent_id)
-        living = [a for a in dynamics._population if a.agent_id != 1]
-        newborns = dynamics._birth_phase(living)
-        assert [n.parent_id for n in newborns] == [0]
-        assert occupancy.site_of(newborns[0].agent_id) == 1  # the freed site
+        assert [a.agent_id for a in feasible_parents(eligible, occupancy, 1)] == [7]
 
-    def test_a_parent_with_reach_places_into_the_empty_site(self) -> None:
-        """The unblocked control: the only in-reach empty site is taken."""
-        dynamics = self._prepared(rich_agent_id=7)
+    def test_the_poorer_feasible_rim_parent_is_seated_and_places(self) -> None:
+        """Post-#164: the interior is never admitted; the rim breeds into site 8."""
+        dynamics = self._miniature()
         newborns = dynamics._birth_phase(list(dynamics._population))
         assert [n.parent_id for n in newborns] == [7]
-        assert dynamics._blocked_parents == 0
         occupancy = dynamics.occupancy
         assert occupancy is not None
         assert occupancy.site_of(newborns[0].agent_id) == 8
-        parent = next(a for a in dynamics.population if a.agent_id == 7)
-        assert parent.energy == 900.0  # stake paid on success
+        rim = next(a for a in dynamics.population if a.agent_id == 7)
+        interior = next(a for a in dynamics.population if a.agent_id == 4)
+        assert rim.energy == 500.0  # the stake left the parent who placed
+        assert interior.energy == 1000.0  # not admitted, not charged
 
-    def test_blocked_counts_reach_the_event_stream(self) -> None:
-        """The readout's channel: report → GenerationFinished.blocked_parents.
+    def test_an_infeasible_eligible_counts_as_infeasible_not_blocked(self) -> None:
+        """The metric split, first half: excluded at assessment → infeasible."""
+        dynamics = self._miniature()
+        dynamics._birth_phase(list(dynamics._population))
+        assert dynamics._infeasible_parents == 1
+        assert dynamics._blocked_parents == 0
 
-        Under von Neumann the richest founder — the first AlwaysDefect,
-        agent 4, sitting on the CENTRE site 4 of the stripes deal — has
-        neighbours 1, 3, 5, 7, all occupied, while the one empty site (8)
-        sits outside its reach. Every generation the single free seat under
-        K = 9 admits exactly that agent, and every generation it is
-        blocked; the count must ride the event stream to the app.
+    def test_an_infeasible_parent_stays_eligible_and_breeds_once_room_opens(self) -> None:
+        """Infeasible is a delay, not a verdict: free a neighbour and it breeds.
+
+        The successor of Phase C's blocked-then-breeds test: the same
+        walled-in agent, now excluded rather than admitted-and-blocked,
+        keeps its energy and is re-assessed next boundary.
         """
-        config = ExperimentConfig.model_validate(
-            {
-                "seed": 42,
-                "population": {"size": 8, "composition": {AC: 4, AD: 4}},
-                "match": {"length_mode": "fixed", "rounds_per_match": 2},
-                "structure": {
-                    "kind": "lattice",
-                    "rows": 3,
-                    "cols": 3,
-                    "neighbourhood_shape": "von_neumann",
-                    "boundary": "bounded",
-                    "initial_layout": "stripes",
-                    "birth_radius": 1,
-                },
-                "dynamics": {
-                    "generations": 3,
-                    "reproduction_mode": "energy_economy",
-                    "mutation_rate": 0.0,
-                    "initial_energy": 1000.0,
-                    "reproduction_threshold": 500.0,
-                    "offspring_stake": 100.0,
-                    "basic_living_cost": 0.0,
-                    "carrying_capacity": 9,
-                },
-            }
+        dynamics = _prepared(_von_neumann_config(8, {AC: 4, AD: 4}), {4: 1000.0}, 1)
+        assert dynamics._birth_phase(list(dynamics._population)) == []
+        assert dynamics._infeasible_parents == 1
+        occupancy = dynamics.occupancy
+        assert occupancy is not None
+        # A neighbour of the walled-in parent dies; its site frees up.
+        occupancy.remove_agent(1)
+        living = [a for a in dynamics._population if a.agent_id != 1]
+        newborns = dynamics._birth_phase(living)
+        assert [n.parent_id for n in newborns] == [4]
+        assert occupancy.site_of(newborns[0].agent_id) == 1  # the freed site
+        assert dynamics._infeasible_parents == 0
+
+    def test_feasible_parents_is_a_filter_not_a_ranking(self) -> None:
+        """The pure function keeps the caller's order; ``admit_births`` ranks."""
+        dynamics = _prepared(_von_neumann_config(8, {AC: 4, AD: 4}), {5: 700.0, 7: 900.0}, 1)
+        occupancy = dynamics.occupancy
+        assert occupancy is not None
+        by_id = sorted(dynamics.population, key=lambda a: a.agent_id)
+        assert [a.agent_id for a in feasible_parents(by_id, occupancy, 1)] == [5, 7]
+        reversed_in = list(reversed(by_id))
+        assert [a.agent_id for a in feasible_parents(reversed_in, occupancy, 1)] == [7, 5]
+
+
+class TestResidualContention:
+    """Two seated parents, one shared reachable site: the loser is BLOCKED, not infeasible."""
+
+    def _contention(self, rng_seed: int) -> EconomyDynamics:
+        """7 founders on the 3x3 VN grid; sites 6 and 8 empty; K = 9 → 2 seats.
+
+        Agent 3 (site 3) reaches empty site 6 ONLY; agent 6 (site 7) reaches
+        BOTH 6 and 8. Both are above θ, agent 6 richer, and
+        ``placement_contest = energy_priority`` makes agent 6 iterate first
+        (the permutation is still drawn — #133(a) — its result unused). Its
+        placement draw is uniform over {6, 8}: at ``rng_seed = 2`` it takes
+        6 and agent 3 finds its only site gone; at ``rng_seed = 1`` it takes
+        8 and both place. Seeds probed and pinned — the counterfactual pair
+        is what shows contention is a draw outcome, not a rule.
+        """
+        config = _von_neumann_config(
+            7,
+            {AC: 4, AD: 3},
+            mutation_rate=0.1,
+            structure_overrides={"placement_contest": "energy_priority"},
         )
+        return _prepared(config, {3: 800.0, 6: 900.0}, rng_seed)
+
+    def test_the_loser_is_blocked_not_infeasible(self) -> None:
+        """Both were feasible at assessment; the later-iterated one is blocked."""
+        dynamics = self._contention(rng_seed=2)
+        counted = CountingGenerator(dynamics._rng)
+        dynamics._rng = counted  # type: ignore[assignment]
+        newborns = dynamics._birth_phase(list(dynamics._population))
+        occupancy = dynamics.occupancy
+        assert occupancy is not None
+        assert [(n.parent_id, occupancy.site_of(n.agent_id)) for n in newborns] == [(6, 6)]
+        assert dynamics._blocked_parents == 1
+        assert dynamics._infeasible_parents == 0
+        # The loser pays no stake and draws no mutation coin: the log holds
+        # the permutation, the winner's placement draw, and the winner's
+        # μ-coin only — nothing for the blocked parent (the empty-before-
+        # drawing primitive, #133(b)).
+        assert [call[0] for call in counted.calls] == ["permutation", "choice", "random"]
+        loser = next(a for a in dynamics.population if a.agent_id == 3)
+        assert loser.energy == 800.0
+
+    def test_the_loser_is_eligible_next_generation_and_breeds_when_the_site_frees(self) -> None:
+        """Blocked is a delay: kill the newborn on site 6 and the loser takes it."""
+        dynamics = self._contention(rng_seed=2)
+        newborns = dynamics._birth_phase(list(dynamics._population))
+        occupancy = dynamics.occupancy
+        assert occupancy is not None
+        occupancy.remove_agent(newborns[0].agent_id)  # site 6 frees again
+        living = list(dynamics._population)  # the loser is still among them, still ≥ θ
+        dynamics._blocked_parents = 0  # what step() does at every boundary
+        second = dynamics._birth_phase(living)
+        # The loser takes site 6 this time (agent 6, now at 800 = agent 3's
+        # energy, still breeds — into 8 — the tie iterating id-ascending).
+        placed = sorted((n.parent_id, occupancy.site_of(n.agent_id)) for n in second)
+        assert placed == [(3, 6), (6, 8)]
+        assert dynamics._blocked_parents == 0
+
+    def test_the_sibling_draw_places_both(self) -> None:
+        """Same fixture, other draw: agent 6 takes 8, agent 3 takes 6, nobody blocked."""
+        dynamics = self._contention(rng_seed=1)
+        newborns = dynamics._birth_phase(list(dynamics._population))
+        occupancy = dynamics.occupancy
+        assert occupancy is not None
+        assert sorted((n.parent_id, occupancy.site_of(n.agent_id)) for n in newborns) == [
+            (3, 6),
+            (6, 8),
+        ]
+        assert dynamics._blocked_parents == 0
+        assert dynamics._infeasible_parents == 0
+
+
+class TestFeasibilityConsumesNoDraws:
+    """The #133/#150 counting idiom: the filter itself never touches the generator."""
+
+    def test_the_call_log_is_explained_by_the_admitted_set_alone(self) -> None:
+        """Miniature fixture: one permutation + one placement draw, nothing more.
+
+        The infeasible interior parent contributes NO call — the log is the
+        same as it would be with the interior not eligible at all.
+        """
+        with_interior = _prepared(_von_neumann_config(8, {AC: 4, AD: 4}), {4: 1000.0, 7: 600.0}, 1)
+        without = _prepared(_von_neumann_config(8, {AC: 4, AD: 4}), {7: 600.0}, 1)
+        logs = []
+        for dynamics in (with_interior, without):
+            counted = CountingGenerator(dynamics._rng)
+            dynamics._rng = counted  # type: ignore[assignment]
+            dynamics._birth_phase(list(dynamics._population))
+            logs.append([call[0] for call in counted.calls])
+        assert logs[0] == logs[1] == ["permutation", "choice"]
+        assert with_interior._infeasible_parents == 1
+        assert without._infeasible_parents == 0
+
+    def test_a_full_grid_consumes_only_the_size_zero_permutation(self) -> None:
+        """RULING R2's corner: nobody admitted, everyone eligible counted infeasible.
+
+        9 founders fill the 3x3 grid; K = 9 leaves no seat and no empty site.
+        With five founders above θ, ``infeasible_parents`` is 5 — ALL the
+        eligibles, not "those who would have ranked" — and the one recorded
+        call is the size-0 permutation (the #133(a) no-op that still
+        happens).
+        """
+        config = _von_neumann_config(9, {AC: 5, AD: 4})
+        rich = {agent_id: 900.0 for agent_id in range(5)}
+        dynamics = _prepared(config, rich, 1)
+        counted = CountingGenerator(dynamics._rng)
+        dynamics._rng = counted  # type: ignore[assignment]
+        assert dynamics._birth_phase(list(dynamics._population)) == []
+        assert dynamics._infeasible_parents == 5
+        assert dynamics._blocked_parents == 0
+        assert counted.calls == [("permutation", (0,), ())]
+
+    def test_the_sync_economy_golden_never_meets_the_filter(self) -> None:
+        """Why the ``sync_economy_lattice`` pin did not move (the unused #164 budget).
+
+        On the golden's 3x4 torus every Moore neighbourhood spans all three
+        rows and the population never exceeds 7 of 12 sites, so at every
+        boundary every eligible parent is feasible and slots exceed the
+        eligibles: old and new admission produce the SAME set, generation by
+        generation. Observed, not assumed — this pins the evidence.
+        """
+        from pdsim.tests.test_golden_masters import _positive_config
+
+        config = _positive_config("sync_economy_lattice")
+        dynamics = EconomyDynamics(config, np.random.default_rng(config.seed))
+        original = dynamics._birth_phase
+        seen: list[tuple[list[int], list[int]]] = []
+
+        def instrumented(living: list) -> list:  # type: ignore[type-arg]
+            threshold = config.dynamics.reproduction_threshold
+            eligible = [a for a in living if a.energy >= threshold]
+            occupancy = dynamics.occupancy
+            assert occupancy is not None
+            feasible = feasible_parents(eligible, occupancy, dynamics._birth_radius)
+            slots = max(0, config.dynamics.carrying_capacity - len(living))
+            seen.append(
+                (
+                    [a.agent_id for a in admit_births(eligible, slots)],
+                    [a.agent_id for a in admit_births(feasible, slots)],
+                )
+            )
+            return original(living)
+
+        dynamics._birth_phase = instrumented  # type: ignore[method-assign]
+        for _ in dynamics.run():
+            pass
+        assert len(seen) == config.dynamics.generations
+        assert all(old == new for old, new in seen)
+        assert any(old for old, _ in seen)  # the golden does breed — the check is not vacuous
+
+
+class TestSplitCountersOnTheStream:
+    """The readouts' channel: report → GenerationFinished, both counters."""
+
+    def test_the_split_reaches_the_event_stream(self) -> None:
+        """Every founder rich; one empty corner; then a full grid.
+
+        Generation 0: 8 eligibles, only the two beside site 8 feasible, one
+        seat → one birth, ``infeasible_parents = 6``, no contention. From
+        generation 1 the grid is full: no seat, and every parent above θ
+        (the founders; the newborn is not yet) counts infeasible = 8.
+        Blocked stays 0 throughout — nothing here can contend.
+        """
+        config = _von_neumann_config(8, {AC: 4, AD: 4}, initial_energy=1000.0)
+        events = [e for e in engine.run(config) if isinstance(e, GenerationFinished)]
+        assert [e.blocked_parents for e in events] == [0, 0, 0]
+        assert [e.infeasible_parents for e in events] == [6, 8, 8]
+        assert [len(e.agents) for e in events] == [9, 9, 9]
+
+    def test_well_mixed_streams_report_both_counters_zero(self) -> None:
+        """Gate off: no feasibility code runs and both fields stay inert."""
+        config = _sync_economy_config(kind="well_mixed")
         events = [e for e in engine.run(config) if isinstance(e, GenerationFinished)]
         assert events
-        assert all(event.blocked_parents == 1 for event in events)
+        assert all(e.blocked_parents == 0 and e.infeasible_parents == 0 for e in events)
 
-    def test_well_mixed_streams_report_zero_blocked(self) -> None:
-        """The new field stays inert off-lattice (the goldens' companion pin)."""
-        config = _sync_economy_config(kind="well_mixed")
-        for event in engine.run(config):
-            if isinstance(event, GenerationFinished):
-                assert event.blocked_parents == 0
+    def test_the_async_clock_never_populates_infeasible(self) -> None:
+        """RULING R1: async keeps its undivided blocked count; infeasible stays 0."""
+        config = _async_lattice_config()
+        events = [e for e in engine.run(config) if isinstance(e, GenerationFinished)]
+        assert events
+        assert all(e.infeasible_parents == 0 for e in events)
 
 
 # ---------------------------------------------------------------------------

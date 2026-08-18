@@ -4640,3 +4640,183 @@ A2's message, severity, and surface are UNCHANGED. The file predates
 M11a's knobs and this session's rulings; ROADMAP anticipated exactly
 this re-examination. Phase D implements A1–A3 against the amended list;
 any further edit the implementation forces is a Rule 7 report.
+**#171 — 2026-08-17 — M11b Phase A BUILT: feasibility-aware admission
+lands in the synchronous lattice economy (#164 as implemented, resolving
+#159); the blocked/infeasible metric split with rulings R1 and R2; the
+re-recording budget observed UNUSED; the Filling Grid re-run and
+rewritten to the observed post-#164 trajectory; two Rule 7 findings
+held for the design layer (M11b Phase A; spec ruling 1 and the Phase A
+paragraph).** (a) THE IMPLEMENTATION AND THE GATE. `economy.py` gains
+`feasible_parents(eligible, occupancy, birth_radius)` — a pure,
+RNG-free filter: a parent is feasible iff `Occupancy.empty_sites_within`
+at the birth radius is non-empty, the SAME support the placement draw
+samples (`Structure.reach` filtered to empty sites, through the #156
+cache), so "feasible" means exactly "the placement draw would return a
+site now". `EconomyDynamics._birth_phase` calls it under the three-way
+gate ONLY (the class is synchronous + `energy_economy`; a non-`None`
+occupancy is the lattice half): eligible = (energy ≥ θ) AND feasible;
+slots = K − len(living) as before; `admit_births` ranks the feasible
+eligibles by the untouched (energy DESC, id ASC) order. Off the gate the
+old line runs verbatim — no feasibility code — so the four negative
+goldens and both async positives pass byte-identically (verified: the
+whole 23-pin golden suite green before AND after the change). The
+occupancy read is the SAME snapshot the ration reads: post-death under
+`death_first`, pre-death under `birth_first` (no second snapshot). The
+contest permutation is UNTOUCHED mechanically — still drawn whenever the
+gate holds regardless of the contest setting, still over the admitted
+set in ascending parent-id order; only its INPUT set can differ (the
+sanctioned #164 breaking change). Residual contention — two seated
+parents sharing one reachable empty site, the later-iterated one
+finding it taken — keeps the #133(b) semantics: no stake, no μ-draw,
+eligible next period, no RNG consumed by the empty-before-drawing
+primitive; the counting wrapper shows the loser leaves NO call in the
+log. Hardwired: no registry parameter (#164: no compatibility knob).
+(b) RULING R2 (infeasible definition): `infeasible_parents` counts ALL
+threshold-eligible parents excluded by the filter that generation, not
+merely those who would have ranked inside the quota absent the filter.
+Quota-relative counting would make the number depend on a
+counterfactual ranking; the absolute count is the directly observable
+fact and matches #153(c)'s style of evidence. Stated consequence, in
+the help text and pinned by test: on a full grid EVERY eligible parent
+is infeasible — that is what saturation looks like in this readout
+(observed on the Filling Grid: 400 = the population, every generation
+from saturation on). (c) RULING R1 (metric scope): the ASYNCHRONOUS
+clock's population of `blocked_parents` is byte-untouched — it has no
+feasibility filter and never populates `infeasible_parents` (stays 0,
+pinned; the readout is hidden there, not shown as a permanent zero).
+Only the synchronous economy adopts the split: `blocked_parents` there
+now counts residual-contention losers ONLY. Both `ECONOMY_HELP` entries
+are rewritten CLOCK-AWARE (single source, #133(c)): sync blocked = lost
+the last reachable empty site to an earlier-placed parent; infeasible =
+eligible by energy but no empty site within birth reach; async blocked
+keeps its original, undivided meaning and the infeasible readout does
+not apply. NAMED FUTURE OPTION, recorded so the terminological wart is
+on the books and cleaned up deliberately rather than forgotten:
+unifying the asynchronous clock's blocked/infeasible vocabulary under
+the split at a later milestone (a feasibility read before the async
+`admit_births` call, with its own no-draw pin and — since it changes
+which parents are admitted per event — its own golden entry). THE
+CHANNEL: `GenerationReport`/`GenerationFinished` gain `infeasible_parents:
+int = 0` (additive, default-valued — the #133(c) shape), the engine
+threads it in both clock branches, `RunTimeseries.infeasible_parents`
+mirrors the blocked series, `economy_helpers` gains
+`infeasible_parents_visible` (the three-way gate exactly) and
+`infeasible_parents_metric` (same latest/total shape), and the app's
+live view shows "Infeasible parents this generation" in a second column
+beside the blocked metric with its (?) from `ECONOMY_HELP`. Deliberately
+NOT persisted, exactly like `blocked_parents`: recorded folders stay
+byte-identical, the results browser does not show it. `ECONOMY_HELP
+["admission"]` gains the feasibility clause; the `structure.birth_radius`
+registry description's "the parent is BLOCKED this round" parenthetical
+is reworded clock-neutral (a walled-in parent cannot breed this round —
+counted as INFEASIBLE under the synchronous clock, where it is not even
+ranked for a seat, as BLOCKED under the asynchronous; hard rule 1;
+`docs/PARAMETERS.md` regenerated). (d) THE GOLDEN OUTCOME — the budget
+UNUSED, observed not assumed. Task 4's expected-failure check: with the
+change in place the full golden suite passed 23/23 — `sync_economy_lattice`
+INCLUDED. Before touching any constant the admitted sets were compared
+generation by generation on the actual golden config (old = rank all
+eligibles, new = rank feasible eligibles, same state): identical at
+every one of the six boundaries — eligibles {3,4} / {} / {1,2} / {} /
+{6,7} / {}, every eligible feasible, slots (7, 6, 7, 6, 6, 5) always
+exceeding the eligibles — because on the 3 × 4 torus every Moore
+neighbourhood spans all three rows and the population never exceeds 7
+of 12 sites. Therefore NOTHING was re-recorded and NO pinned field list
+was extended (extending alone would move a digest and force an
+out-of-budget re-record); the reason is pinned as
+`test_the_sync_economy_golden_never_meets_the_filter`. The milestone's
+entire re-recording budget is intact and unspent; a later phase MUST
+NOT read that as licence — spec ruling 1 stands. (e) THE FILLING GRID,
+re-run headlessly (`python -m pdsim.run --scenario the_filling_grid`
+plus an in-process instrumented twin for the LIVE-only counters; same
+engine path, seed 11, shipped configuration byte-unchanged, 300
+generations). OBSERVED (post-boundary populations): the grid FILLS —
+60 → 85 → 112 → 144 → 181 → 227 → 272 → 313 → 346 → 380 → 390 → 396 →
+399 → 400, full at generation index 12 (the thirteenth generation
+played); ZERO deaths at every generation of the entire run; cooperation's
+share 0.50 → 0.625 (250 always_cooperate, 150 always_defect) at
+saturation and unchanged thereafter; `infeasible_parents` climbs 32 →
+39 → 58 → 82 → 116 → 152 → 203 → 253 → 285 → 337 → 368 → 382 → 391 during
+the fill and reads 400 (= the population) every generation from
+saturation on; `blocked_parents` (residual contention) small during the
+fill — 1, 5, 9, 13, 9, 18, 14, 10, 17, 10, 4, 1, 0 — and 0 thereafter.
+The endgame is a STANDSTILL BY SATURATION, not the #153(c) deadlock (a
+seated parent always places, so the fill completes) and not the old
+text's grind (no death ever occurs): on the full torus every agent
+plays 16 matches of 10 rounds; a defector among defectors earns 16 ×
+10 × 1 = 160, a defector beside cooperators up to 800, a cooperator
+with even one cooperator neighbour at least 2 × 10 × 3 = 60 — all
+against the living cost of 40; only a cooperator with NO cooperator
+neighbour earns 0 and would starve, and since children land beside
+their parents no such cooperator exists on this seed. Once full with no
+death the state is a fixed point (deterministic strategies, static
+neighbour sets), so 250/150 holds from index 12 through 299. THE TEXT
+REPLACEMENT (the logged deviation record for the superseded #155
+wording; #152's arithmetic-not-predictions rule): the description is
+kept verbatim through "…cooperation's share can rise early." (still
+accurate) and the entire #155 rise-then-freeze tail is replaced by the
+observed fill, the two-readout signature, the saturation standstill
+and its income arithmetic, and the horizon's new reason (13
+generations of fill, then the standstill proven permanent). The
+things-to-try's P = 0 rederivation — including its `enforce_pd_ordering`
+untick step — is superseded (the freeze it targeted no longer forms) by
+a churn experiment: set 'Base hazard' (Dynamics section) to 0.02 —
+about 0.02 × 400 = 8 deaths per generation on the full grid, each
+freeing one site only its neighbours can breed into; seats go to the
+richest FEASIBLE parents; the income contrast (interior cooperator 480,
+interior defector 160, a defector on a cooperator cluster's edge up to
+800) is stated and the outcome left as something to watch, not
+promised; validated to load without a validator error (no preparatory
+step needed). Neither the description nor the things-to-try promises
+saturation for other seeds or configurations — the standstill by
+saturation is what THIS run showed; a legitimate standstill short of
+saturation (empty sites with none in reach of any eligible parent)
+remains possible in principle and is not claimed either way. The
+"Things to try:" prefix is not stored (#155(a)). `python -m
+pdsim.gendocs` rerun; drift test green. Run artefacts live in the
+session scratchpad, not the repo. (f) RULE 7 FINDINGS AND IN-SESSION
+RULINGS. (f1) The golden file pins ONE `GenerationFinished` field list
+for BOTH clocks — there is no per-clock event type or list — and
+`blocked_parents` is NOT in it (the #133(d) capture-date set left it
+outside the pin, the additive-field precedent). The prompt's "extend
+its sync-economy explicit field list" was therefore unexecutable as
+written; the in-session ruling was a per-golden overlay for
+`sync_economy_lattice` alone had the pin moved — moot, since it did not
+(d). Recorded so the next re-record of that pin knows the shape.
+`blocked_parents` stays unpinned everywhere; not reopened here. (f2)
+DESIGN §2.12, #107 and the M11a spec state "async resolves one birth
+per event, so no two births ever contend"; the engine does NOT: async
+`variable_n` admits the WHOLE θ-eligible, refractory-clear set at each
+event and iterates it in ascending id order — probed on the
+`async_variable_n_lattice` golden, events 9 and 41 each fire two births
+— so several births CAN resolve in one event, and a shared last
+reachable site goes to the lower id (an id-order priority of the kind
+#107 rejected for sync). The prompt's help-text rationale
+("one-birth-per-event makes contention impossible") inherits the
+statement. Rulings: R1 stands (async byte-untouched); the async help
+text states the true, undivided fact instead (no empty site in reach
+at that birth event — a full neighbourhood, or an earlier birth in the
+same event took the last site); DESIGN §2.12 carries a bracketed
+as-implemented note at the sentence; whether async should enforce one
+birth per event, or the id-order resolution is acceptable, is HELD as
+an open design question — the engine is not touched. REVIEW
+CHECKPOINT: the NEXT MILESTONE'S SCOPING SESSION (M12 scoping) —
+one-birth-per-event versus DOCUMENTED id-order contention resolution;
+either resolution that touches the engine is an asynchronous breaking
+change (#80/#99) requiring its own golden budget, so it is scoped
+there, never slipped into a later M11b phase. (f3) The
+`structure.birth_radius` description and `ECONOMY_HELP["admission"]`
+carried the pre-#164 vocabulary; both reworded (c). (f4) Test
+retirements per #120(f) retire-with-replacement: `TestBlockedParents`
+(Phase C) pinned a walled-in parent as admitted-then-blocked; it is
+replaced by `TestFeasibilityFilter` (the #153(c) miniature — rich
+walled-in centre at 1000 never seated, poorer rim at 600 seated and
+placed; pre-change admission asserted by construction via the pure
+`admit_births`), `TestResidualContention` (a manufactured loser at a
+pinned seed, its counterfactual sibling draw placing both),
+`TestFeasibilityConsumesNoDraws` (the call log identical with and
+without an infeasible eligible; the full-grid corner's single size-0
+permutation; the golden evidence), and `TestSplitCountersOnTheStream`
+(gate-off both zero; async never populates infeasible; the VN fixture's
+[6, 8, 8] infeasible / [0, 0, 0] blocked stream). ADVISORIES.md:
+untouched, as expected. Test count: 1073 passing (1059 before this phase; the two retired Phase C pins replaced by sixteen).

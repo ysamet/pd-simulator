@@ -1,8 +1,9 @@
 # M11b — Agent movement, encounter mode, calibration + advisories, and the parameter-panel redesign
 
-**Status: frozen** (created 2026-08-17, Phase 0). This spec is a frozen
-historical record (#62): deviations during implementation become new
-DECISIONS entries, never retro-edits of this file beyond this status line.
+**Status: frozen; in progress** (created 2026-08-17, Phase 0; Phase A
+landed 2026-08-17 — DECISIONS #171). This spec is a frozen historical
+record (#62): deviations during implementation become new DECISIONS
+entries, never retro-edits of this file beyond this status line.
 
 ## Purpose
 

@@ -526,7 +526,7 @@ The consequence is the single thing in the spatial layer most likely to be misre
 
 **A parent walled in by occupied neighbours pays nothing, stays eligible, and keeps accumulating energy indefinitely.** You will see agents sitting at five times the reproduction threshold, doing nothing. On a dashboard that reads as a defect. It is not. Being unable to spend reproductive wealth because the neighbourhood is full is the entire content of what population biologists call *viscosity* — and viscosity is precisely what spatial structure is for.
 
-The app reports **blocked parents this generation** in the Economy panel so you can see the mechanism rather than infer it.
+The app reports **blocked parents this generation** in the Economy panel so you can see the mechanism rather than infer it. *(Since M11b Phase A — DECISIONS #164/#171 — the synchronous economy no longer hands a capacity seat to a walled-in parent at all: only parents with an empty site in reach are ranked for a seat, and the walled-in ones appear in the panel's **infeasible parents** readout instead, still paying nothing and still eligible; "blocked" under the synchronous clock is now the rare case of losing the last reachable site to an earlier-placed parent. Under the asynchronous clock the blocked readout keeps the meaning described here.)*
 
 **Real-life anchor.** A prosperous farming family with the capital for another household and no land next door. The money is real; the constraint is geographic.
 
@@ -635,7 +635,7 @@ How far does the climb go? This was measured rather than left open (DECISIONS #1
 
 The project's own scenario text already notes the mirror image on the death side: when the reaper targets the poorest, newborns live dangerously.
 
-**Artifact three: blocked parents become privileged.** Per §5.4, a walled-in parent pays nothing and accumulates without limit. Its energy then dominates **both** this fitness draw **and** the energy-priority rationing at the capacity gate. So *being stuck* turns into *being favoured* the moment a seat opens nearby. *Mitigation: watch the blocked-parents readout. A run with many long-blocked parents is one where birth priority is measuring immobility rather than performance.*
+**Artifact three: blocked parents become privileged.** Per §5.4, a walled-in parent pays nothing and accumulates without limit. Its energy then dominates **both** this fitness draw **and** the energy-priority rationing at the capacity gate. So *being stuck* turns into *being favoured* the moment a seat opens nearby. *Mitigation: watch the blocked-parents readout (under the synchronous clock, since M11b Phase A, the walled-in cohort is the **infeasible parents** readout — watch that one there; blocked keeps this meaning under the asynchronous clock). A run with many long-blocked parents is one where birth priority is measuring immobility rather than performance.*
 
 **Artifact four: the rentier**, per §6.3. *Mitigation: leave the capital return rate at zero, or watch the escape-velocity readout.*
 

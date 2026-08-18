@@ -93,6 +93,12 @@ class RunTimeseries:
             per period — a derived view over the snapshots (#47).
         mean_age: Mean entering age per strategy, one value per period —
             a derived view over the snapshots (#47).
+        blocked_parents: Blocked-parent count per period (M11a Phase C) —
+            a LIVE-only series: the field is not persisted, so a loaded
+            run reads all zeros.
+        infeasible_parents: Infeasible-parent count per period (M11b
+            Phase A, #164) — LIVE-only like ``blocked_parents``; populated
+            by the synchronous lattice economy alone, zeros elsewhere.
         final: The closing ``RunFinished`` event, once it has arrived.
     """
 
@@ -123,8 +129,11 @@ class RunTimeseries:
         self.mean_age: dict[str, list[float | None]] = {}
         # Blocked parents per period (M11a Phase C): a LIVE series only —
         # the field is not persisted, so a loaded run shows all zeros and
-        # the app reads this series only while streaming.
+        # the app reads this series only while streaming. Infeasible
+        # parents (M11b Phase A, #164) travel the same way: LIVE only,
+        # populated by the synchronous lattice economy alone.
         self.blocked_parents: list[int] = []
+        self.infeasible_parents: list[int] = []
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -154,6 +163,7 @@ class RunTimeseries:
             # (which never set the field) loadable — the additive-field
             # precedent (#82/#100).
             self.blocked_parents.append(getattr(event, "blocked_parents", 0))
+            self.infeasible_parents.append(getattr(event, "infeasible_parents", 0))
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)
@@ -202,6 +212,7 @@ class RunTimeseries:
             self.gen_equiv_times.append(None)
             self.demographic_events.append(())
             self.blocked_parents.append(0)
+            self.infeasible_parents.append(0)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)

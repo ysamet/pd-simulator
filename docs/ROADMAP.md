@@ -254,6 +254,24 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     (`docs/specs/M11b-movement-and-panel-spec.md`; design rulings
     DECISIONS #164–#170 — the #103 movement-schedule question and #159
     are RESOLVED; phases A–E per the spec).
+
+    ✅ **M11b Phase A landed 2026-08-17** (DECISIONS #171): feasibility-aware
+    admission in the synchronous lattice economy (`feasible_parents`, a
+    zero-draw occupancy read in front of `admit_births`; the contest
+    permutation mechanically untouched); the blocked/infeasible metric
+    split (`infeasible_parents` LIVE-only beside `blocked_parents`, the
+    Economy panel's second metric, both (?) texts clock-aware; async
+    byte-untouched — ruling R1, its vocabulary a named future option;
+    ruling R2's absolute infeasible count); the milestone's re-recording
+    budget UNUSED — the `sync_economy_lattice` golden never admits an
+    infeasible parent (demonstrated and pinned), so nothing was re-recorded
+    and no pinned field list was extended; `the_filling_grid` re-run
+    headlessly and its text rewritten to the observed post-#164
+    trajectory; DESIGN §2.12 amended. Two Rule 7 findings held for the
+    design layer: async admits a whole eligible SET per event (DESIGN's
+    "one birth per event" is not what the engine does), and the golden
+    file has ONE `GenerationFinished` field list for both clocks (no
+    per-clock list to extend). 1073 tests passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
