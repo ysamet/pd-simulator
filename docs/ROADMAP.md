@@ -337,6 +337,18 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
   which the b/c > k threshold is derived. Motivation: #140's
   no-visible-reversal finding (this engine's selection is far from that
   limit); reproduction dynamics reopen at M12 anyway.
+- **Asynchronous per-event birth resolution (the #171(f2) checkpoint;
+  ruling due at M12 scoping) — now carrying #173's performance
+  evidence.** The async `variable_n` engine admits the whole eligible
+  set at every event with no feasibility pre-filter and re-counts every
+  blocked parent at every event; an owner run on a 50×50 lattice
+  economy showed unbounded per-frame wall time and a blocked-parents
+  readout of 272,228 per generation-equivalent window (attempt-events,
+  not parents) — asynchronous lattice-economy mode is IMPRACTICAL on
+  large grids past partial saturation until this ruling. Candidate
+  resolutions (one birth per event; an async feasibility/vocabulary
+  split, #171(c); vectorisation) are all async breaking changes (#80/#99)
+  with their own golden budget — M12 scoping, never an M11b phase.
 - **M13 — Sweep browser.** Member-run drilldown from a sweep's summary,
   multi-sweep interactive browsing, multi-curve overlays, summary-table
   filtering, side-by-side member comparison — the affordances deferred out

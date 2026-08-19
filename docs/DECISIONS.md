@@ -5013,3 +5013,52 @@ panel work. TEST COUNT: 1129 passing (1073 before this phase; 56 new,
 nothing retired: 41 in `test_movement.py`, 7 movement-greying tests in
 `test_ui_helpers.py`, 8 golden tests). ADVISORIES.md untouched. The
 milestone's re-recording budget remains UNSPENT; spec ruling 1 stands.
+
+**#173 — 2026-08-18 — The #171(f2) held finding observed at scale:
+asynchronous per-event eligible-set iteration is quadratic-compounding on
+large grids; evidence attached to the M12 scoping checkpoint (owner run,
+design-layer analysis; no code change).** An owner run on a 50×50 von
+Neumann torus (350 founders, K = 1600, θ = 100, birth radius 3,
+`movement.rate` 0.5, seed 1) compared the two clocks on an otherwise
+identical config. SYNC: normal wall time; at generation ~80, "blocked
+parents" 25 and "infeasible parents" 920 — each stuck parent counted once
+per generation by the Phase A filter. ASYNC: per-frame wall time grew
+without bound (run abandoned before generation-equivalent 40); "blocked
+parents" reached 272,228 per generation-equivalent window and climbing.
+DIAGNOSIS (design layer, from #171(f2)/#133(b)(c) plus arithmetic — no
+probe needed): the async engine iterates the WHOLE θ-eligible,
+refractory-clear set at every event with no feasibility pre-filter (R1
+kept that sync-only); a blocked parent pays nothing, stays eligible, and
+is re-attempted and RE-COUNTED at every one of the N(t) events per
+generation-equivalent, so the readout counts blocked ATTEMPT-EVENTS ≈
+stuck parents × N(t) (272,228 ≈ ~300 stuck × N ≈ 900), not parents; and
+the demographic cost per generation-equivalent is O(N(t) × E(t) ×
+neighbourhood) versus sync's one O(E × neighbourhood) pass — ~1000× here
+and compounding, since E(t) grows monotonically (walled-in parents never
+pay the stake, keep earning, stay eligible forever). CONSEQUENCE,
+upgrading the #171(f2) checkpoint: asynchronous lattice-economy mode is
+IMPRACTICAL on large grids past partial saturation until the M12 scoping
+ruling; candidate resolutions (one-birth-per-event; an async
+feasibility/vocabulary split, the #171(c) future option; vectorisation)
+are all async breaking changes (#80/#99) with their own golden budget —
+scoped at M12, never slipped into an M11b phase, exactly as #171(f2)
+directed. Movement is NOT a contributor (one coin per activation; the
+same blowup occurs at rate 0). [Code-side note added by the logging
+session, reported under Rule 7 as a sharpening rather than a
+contradiction: in BOTH engines the per-parent placement draw first
+builds `Occupancy.empty_sites()` — the full empty set, O(site count) —
+before the reach filter (`neighbourhood_sample` filters the cached reach
+against it), so the per-event term is O(E(t) × (site count +
+neighbourhood)) rather than O(E(t) × neighbourhood); on the 2,500-site
+grid that is a further ~100× per attempt. The N(t)× ratio between the
+clocks, and the compounding, stand as stated; the note names a cheap
+lever for M12 scoping — `Occupancy.empty_sites_within` (the #171
+feasibility read) already yields the same candidate set through the
+reach cache without the full-set construction. Untouched here.] The
+async `ECONOMY_HELP["blocked_parents"]` text gains one sentence stating
+the per-event aggregation (T2 of this session — the readout counts
+blocked ATTEMPTS summed over the recording window, so one stuck parent
+appears roughly N times per generation-equivalent); ROADMAP's M12
+scoping input line points the #171(f2) checkpoint at this evidence.
+Docs-only session: no engine, registry, test, or golden change; test
+count unchanged at 1129.
