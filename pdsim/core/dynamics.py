@@ -72,13 +72,38 @@ by M11a Phase C per #107 — the spec's Design 9 diff):
           only be residual contention, an earlier-iterated parent having
           taken the last reachable site this boundary), then σ payment on
           success, passport id, and the μ-mutation draw (coin only when
-          μ > 0, roster index only when it hits, per ``reproduction.py``).
+          μ > 0, roster index only when it hits, per ``reproduction.py``),
+    4. the MOVEMENT STEP (M11b Phase B, DECISIONS #165/#172 — the second
+       amendment of the #80 frozen sequence after #107) — the boundary's
+       FINAL demographic act, after the death and birth phases in whichever
+       order ``boundary_order`` ran them, and ONLY when movement is active
+       (lattice + ``energy_economy`` + ``movement.rate > 0``, the gate
+       ``movement.movement_active`` decides once per run):
+       a. ONE ``rng.random()`` coin per living agent of the POST-boundary
+          population (survivors AND this boundary's newborns — one uniform
+          rule), in ascending agent-id order, unconditionally — even at
+          rate 1.0 — so the stream depends only on the flag and the
+          population size (the #80 mortality-coin shape);
+       b. ONE ``rng.permutation`` over the coin-successes (the movers),
+          made whenever at least one coin was drawn (numpy fact, #133(a):
+          at sizes 0 and 1 the call advances no generator state, but it is
+          made; the counting pins count CALLS);
+       c. per mover, in PERMUTATION order: the WALK DRAW — one
+          ``neighbourhood_sample`` over the empty sites within the
+          movement kernel of the mover's CURRENT site (the origin is
+          occupied and never a candidate); an empty result means the move
+          is BLOCKED (no RNG consumed — the primitive returns empty before
+          drawing; counted, the mover stays put); on success the origin is
+          vacated AFTER the draw and the destination occupied, so a
+          later-permuted mover can take an earlier mover's vacated site.
 Everything else at the boundary (energy update, insolvency deaths, capacity
 admission) is deterministic and consumes no RNG. With age-mortality off,
-μ = 0, and no lattice, an economy generation consumes exactly the
-match-phase draws — every Phase C draw exists only when its governing flag
-makes it meaningful (the #80/#99 active-flag idiom), which is what keeps
-every well-mixed run byte-identical to its pre-M11a stream.
+μ = 0, no lattice, and movement off, an economy generation consumes exactly
+the match-phase draws — every Phase C and Phase B(M11b) draw exists only
+when its governing flag makes it meaningful (the #80/#99 active-flag idiom),
+which is what keeps every well-mixed run byte-identical to its pre-M11a
+stream and every movement-off lattice run byte-identical to its pre-M11b
+stream (the eight golden masters, zero re-recording).
 
 ``dynamics.boundary_order`` (M11a Phase C, #107) decides which phase runs
 first: ``"death_first"`` is the frozen #80 sequence above; ``"birth_first"``
@@ -115,6 +140,7 @@ from pdsim.core.game import Action, AgentId, PrisonersDilemma
 from pdsim.core.layouts import found_population
 from pdsim.core.match import Match, MatchResult
 from pdsim.core.matcher import Matcher, SpatialKernel, build_matcher
+from pdsim.core.movement import MovementRule, attempt_move, build_movement_rule, movement_active
 from pdsim.core.occupancy import Occupancy
 from pdsim.core.reproduction import StrategySwitchReproduction
 from pdsim.core.selection import build_selection_rule
@@ -232,6 +258,16 @@ class GenerationReport:
             inside the quota — on a full grid every eligible parent is
             infeasible). Synchronous economy + lattice only; always 0
             elsewhere (the asynchronous clock never populates it).
+        blocked_moves: How many move attempts found NO empty site within
+            walk reach this period and failed in place (M11b Phase B,
+            #165(c)/#172) — ONE undivided count covering both a walled-in
+            mover and one whose last reachable site an earlier-permuted
+            mover took (deliberately unlike the birth vocabulary's
+            blocked/infeasible split). Populated by the synchronous economy
+            per generation and by asynchronous ``variable_n`` per recording
+            window, exactly as ``blocked_parents`` travels; always 0 while
+            movement is off or not gated on (rate 0, well-mixed, imitation,
+            ``fixed_n``). LIVE-only: not persisted, not pinned by any golden.
     """
 
     index: int
@@ -244,6 +280,7 @@ class GenerationReport:
     demographic_events: tuple[DemographicEvent, ...] = ()
     blocked_parents: int = 0
     infeasible_parents: int = 0
+    blocked_moves: int = 0
 
 
 def build_initial_population(config: ExperimentConfig) -> list[Agent]:
@@ -604,6 +641,16 @@ class EconomyDynamics:
         # read as a stall.
         self._blocked_parents = 0
         self._infeasible_parents = 0
+        # Movement (M11b Phase B, #165/#172): the rule exists ONLY when the
+        # gate holds — lattice + energy economy + rate > 0 — so a
+        # movement-off or non-gated run has no movement object and makes
+        # no movement draw (the #80/#99 active-flag idiom). Blocked moves
+        # reset every boundary, like the birth counters.
+        self._movement: MovementRule | None = (
+            build_movement_rule(config) if movement_active(config) else None
+        )
+        self._movement_rate = config.movement.rate
+        self._blocked_moves = 0
         # Monotonic passport counter: ids are never reused, so lineage and
         # the id-ordered RNG contract stay exact across deaths.
         self._next_id = len(founders)
@@ -625,7 +672,8 @@ class EconomyDynamics:
 
         Live since Phase C: deaths vacate sites and births occupy them, so
         at any moment this maps exactly the living population — every agent
-        holds a site from birth to death (agents do not move until M11b).
+        holds a site from birth to death, and since M11b Phase B may
+        relocate at the boundary's movement step (the mapping follows).
 
         Returns:
             The occupancy, or ``None`` when the world has no structure.
@@ -651,13 +699,18 @@ class EconomyDynamics:
 
         The nine steps (see the module docstring's economy RNG contract):
         match phase → report-as-played → energy update → the death and
-        birth phases in the ``dynamics.boundary_order`` order → age
-        increment → score-only reset → post-boundary snapshot. Under the
-        default ``death_first`` this is #80's frozen sequence exactly —
-        deaths free room, survivors breed into it; ``birth_first`` restores
+        birth phases in the ``dynamics.boundary_order`` order → the
+        MOVEMENT step (M11b Phase B, only when active) → age increment →
+        score-only reset → post-boundary snapshot. Under the default
+        ``death_first`` this is #80's frozen sequence exactly — deaths free
+        room, survivors breed into it; ``birth_first`` restores
         Hammond–Axelrod's period order (M11a Phase C, #107): fewer births
         are admitted (the ration reads the pre-death population) and
-        newborns face the death phase in their own birth round.
+        newborns face the death phase in their own birth round. Movement
+        is the boundary's FINAL demographic act in either order (#165):
+        movers see the freshest vacancies, this boundary's newborns are
+        movement-eligible too, and the next generation's matches are
+        played from the settled positions (move-then-play).
 
         Args:
             on_match: Optional read-only observer called with each finished
@@ -715,6 +768,7 @@ class EconomyDynamics:
         #    faces the age-mortality coin in the round it was born.
         self._blocked_parents = 0
         self._infeasible_parents = 0
+        self._blocked_moves = 0
         if dynamics.boundary_order == "birth_first":
             living = list(self._population)
             newborns = self._birth_phase(living)
@@ -725,6 +779,18 @@ class EconomyDynamics:
             survivors = self._death_phase(list(self._population))
             newborns = self._birth_phase(survivors)
             next_population = survivors + newborns
+
+        # 6b. MOVEMENT — the boundary's FINAL demographic act (M11b Phase B,
+        #    #165/#172), after deaths and births in whichever order ran
+        #    them, over the whole post-boundary population (newborns
+        #    included — one uniform rule). Placed here, immediately after
+        #    the death/birth block and before the age increment: steps 7-9
+        #    below consume no RNG, so this position and "after step 8" are
+        #    the same stream — "final demographic act" is unambiguous.
+        #    Only when the gate holds (`self._movement` exists): rate 0 or
+        #    a non-gated config makes NO draw here.
+        if self._movement is not None:
+            self._movement_phase(next_population)
 
         # 7. Age increment — everyone who went through the death phase ages.
         #    Under death_first that is the pre-birth survivors only, so a
@@ -771,9 +837,54 @@ class EconomyDynamics:
             agents=agents,
             blocked_parents=self._blocked_parents,
             infeasible_parents=self._infeasible_parents,
+            blocked_moves=self._blocked_moves,
         )
         self._generation += 1
         return report
+
+    def _movement_phase(self, population: list[Agent]) -> None:
+        """Run the boundary's movement step (M11b Phase B; #165/#172).
+
+        The RNG contract, in order: ONE ``rng.random()`` coin per agent of
+        the post-boundary population in ASCENDING ID ORDER, unconditionally
+        (even at rate 1.0 — the #80 mortality-coin shape, so the stream
+        depends only on the flag and the population size); then ONE
+        ``rng.permutation`` over the coin-successes — the movers — made
+        whenever at least one coin was drawn (a no-op on the generator at
+        sizes 0 and 1, #133(a), but the call is made and the counting
+        pins count calls); then, in PERMUTATION order, one walk draw per
+        mover via :func:`~pdsim.core.movement.attempt_move`. The origin is
+        vacated only AFTER the destination is drawn, so an earlier
+        mover's freed site is available to a later one (chains can form);
+        every agent gets at most one attempt per boundary; a mover with no
+        empty site in reach is BLOCKED — no draw consumed, counted, stays
+        put.
+
+        Why a permutation over the movers rather than iterating them in id
+        order: on a lattice id correlates with founding position (#107),
+        so id-order iteration would silently hand a spatial priority to
+        low ids whenever two movers want the same last empty cell. The
+        permutation is drawn even when the movers are 0 or 1 so the call
+        pattern is a function of the flag alone.
+
+        Args:
+            population: The post-boundary population — survivors plus this
+                boundary's newborns (any order; sorted here by id).
+        """
+        assert self._movement is not None and self._occupancy is not None  # gated
+        movers: list[Agent] = []
+        for agent in sorted(population, key=lambda agent: agent.agent_id):
+            if self._rng.random() < self._movement_rate:
+                movers.append(agent)
+        if not population:
+            return  # no coin drawn — no success set exists, no permutation
+        order = self._rng.permutation(len(movers))
+        for index in order:
+            moved = attempt_move(
+                self._movement, movers[int(index)].agent_id, self._occupancy, self._rng
+            )
+            if not moved:
+                self._blocked_moves += 1
 
     def _death_phase(self, candidates: list[Agent]) -> list[Agent]:
         """Apply the mortality coins and the insolvency cull (#80 steps 4-5).

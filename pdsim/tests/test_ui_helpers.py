@@ -754,6 +754,8 @@ class TestStructureGreyingTable:
 
         named = [
             *(spec.key for spec in all_specs() if spec.key.startswith("structure.")),
+            # M11b Phase B (#172): the movement trio joins the table.
+            *(spec.key for spec in all_specs() if spec.key.startswith("movement.")),
             "matching.spatial_interaction",
             "matching.matcher",
             "matching.opponents_per_agent",
@@ -865,7 +867,12 @@ class TestStructureGreyingTable:
                             assert "imitation" in note, cell
 
     def test_placement_contest_async_notes_name_the_specific_cause(self) -> None:
-        """fixed_n gets the freed-site note; variable_n the one-at-a-time note."""
+        """fixed_n gets the freed-site note; variable_n the not-consulted note.
+
+        The variable_n note was reworded clock-honest at M11b Phase B
+        (#171(f2)/#172): several births CAN resolve in one async event, in
+        ascending id order — the old "one birth at a time" clause was false.
+        """
         fixed = {
             **self.ASYNC,
             "structure.kind": "lattice",
@@ -875,7 +882,8 @@ class TestStructureGreyingTable:
         assert "freed site" in note
         variable = {**fixed, "dynamics.async_population": "variable_n"}
         _, note = helpers.greying("structure.placement_contest", variable)
-        assert "one birth at a time" in note
+        assert "ascending agent-id order" in note
+        assert "one birth at a time" not in note
 
     def test_interaction_radii_disjunction_names_the_holding_condition(self) -> None:
         """Three greyed causes, one live cell — in BOTH branches (#137(c))."""
@@ -1038,3 +1046,102 @@ class TestStructureGreyingTable:
             disabled, note = helpers.greying(key, values)
             assert disabled, key
             assert "tournament mode" in note, key
+
+
+class TestMovementGreying:
+    """M11b Phase B (#165/#172): the movement trio greys where the gate cannot hold.
+
+    Grey under well_mixed (both branches), under sync imitation, under async
+    fixed_n, and in tournament mode; live under the sync lattice economy and
+    under async variable_n on a lattice. The rate is a VALUE, not a liveness
+    condition: at rate 0 the widgets stay live (that is how movement is
+    switched on).
+    """
+
+    TRIO: ClassVar[tuple[str, ...]] = ("movement.rate", "movement.radius", "movement.decay")
+    SYNC: ClassVar[dict[str, object]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "synchronous",
+    }
+    ASYNC: ClassVar[dict[str, object]] = {
+        "run.mode": "evolution",
+        "dynamics.time_model": "asynchronous",
+    }
+
+    def test_well_mixed_greys_the_trio_in_both_branches(self) -> None:
+        """No geometry, nowhere to move — the note says so."""
+        for base in (self.SYNC, self.ASYNC):
+            values = {**base, "structure.kind": "well_mixed"}
+            for key in self.TRIO:
+                disabled, note = helpers.greying(key, values)
+                assert disabled, (base, key)
+                assert "nowhere to move" in note
+
+    def test_sync_imitation_greys_the_trio_with_the_no_boundary_note(self) -> None:
+        """Imitation has no demographic boundary to host the movement step."""
+        values = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "dynamics.reproduction_mode": "imitation",
+        }
+        for key in self.TRIO:
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "demographic boundary" in note
+
+    def test_sync_lattice_economy_keeps_the_trio_live_even_at_rate_zero(self) -> None:
+        """Live under the gate; rate 0 is a value (movement off), not a greying cause."""
+        values = {
+            **self.SYNC,
+            "structure.kind": "lattice",
+            "dynamics.reproduction_mode": "energy_economy",
+            "movement.rate": 0.0,
+        }
+        for key in self.TRIO:
+            assert helpers.greying(key, values) == (False, ""), key
+
+    def test_async_fixed_n_greys_the_trio_with_the_full_grid_note(self) -> None:
+        """fixed_n's grid is full by construction — every move would be blocked."""
+        values = {
+            **self.ASYNC,
+            "structure.kind": "lattice",
+            "dynamics.async_population": "fixed_n",
+        }
+        for key in self.TRIO:
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "completely full" in note
+
+    def test_async_variable_n_on_a_lattice_keeps_the_trio_live(self) -> None:
+        """The async half of the gate: variable_n + lattice."""
+        values = {
+            **self.ASYNC,
+            "structure.kind": "lattice",
+            "dynamics.async_population": "variable_n",
+        }
+        for key in self.TRIO:
+            assert helpers.greying(key, values) == (False, ""), key
+
+    def test_tournament_greys_the_trio_wholesale(self) -> None:
+        """Nothing is born, dies, or moves in a tournament."""
+        values = {"run.mode": "tournament", "structure.kind": "lattice"}
+        for key in self.TRIO:
+            disabled, note = helpers.greying(key, values)
+            assert disabled, key
+            assert "tournament" in note
+
+    def test_movement_notes_never_say_infeasible(self) -> None:
+        """The vocabulary rule holds in the greying notes too."""
+        for base in (self.SYNC, self.ASYNC):
+            for kind in ("well_mixed", "lattice"):
+                for mode in ("imitation", "energy_economy"):
+                    for population in ("variable_n", "fixed_n"):
+                        values = {
+                            **base,
+                            "structure.kind": kind,
+                            "dynamics.reproduction_mode": mode,
+                            "dynamics.async_population": population,
+                        }
+                        for key in self.TRIO:
+                            _, note = helpers.greying(key, values)
+                            assert "infeasible" not in note.lower()

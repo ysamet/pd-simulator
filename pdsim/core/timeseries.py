@@ -99,6 +99,10 @@ class RunTimeseries:
         infeasible_parents: Infeasible-parent count per period (M11b
             Phase A, #164) — LIVE-only like ``blocked_parents``; populated
             by the synchronous lattice economy alone, zeros elsewhere.
+        blocked_moves: Blocked-move count per period (M11b Phase B,
+            #165/#172) — LIVE-only, mirroring the blocked-parents series;
+            populated only while movement is active (lattice + energy
+            economy + a positive ``movement.rate``), zeros elsewhere.
         final: The closing ``RunFinished`` event, once it has arrived.
     """
 
@@ -134,6 +138,8 @@ class RunTimeseries:
         # populated by the synchronous lattice economy alone.
         self.blocked_parents: list[int] = []
         self.infeasible_parents: list[int] = []
+        # Blocked moves (M11b Phase B, #165/#172): LIVE only, the same shape.
+        self.blocked_moves: list[int] = []
         self.final: RunFinished | None = None
         # Whole-game accumulators behind the running_* series (evolution).
         self._cumulative_scores: dict[str, float] = {}
@@ -164,6 +170,7 @@ class RunTimeseries:
             # precedent (#82/#100).
             self.blocked_parents.append(getattr(event, "blocked_parents", 0))
             self.infeasible_parents.append(getattr(event, "infeasible_parents", 0))
+            self.blocked_moves.append(getattr(event, "blocked_moves", 0))
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)
@@ -213,6 +220,7 @@ class RunTimeseries:
             self.demographic_events.append(())
             self.blocked_parents.append(0)
             self.infeasible_parents.append(0)
+            self.blocked_moves.append(0)
             self._append(self.composition, event.composition, fill=0)
             self._append(self.mean_scores, event.mean_scores, fill=None)
             self._append(self.rounds_played, event.rounds_played, fill=0)

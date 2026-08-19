@@ -30,7 +30,16 @@ from pdsim.core.timeseries import RunTimeseries
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
 # its parameters live at the top level of the config (DECISIONS #34).
-_SECTIONS = ("game", "matching", "match", "population", "structure", "dynamics", "output")
+_SECTIONS = (
+    "game",
+    "matching",
+    "match",
+    "population",
+    "structure",
+    "movement",
+    "dynamics",
+    "output",
+)
 
 IGNORED_IN_TOURNAMENT = (
     "dynamics.generations",
@@ -83,6 +92,11 @@ IGNORED_IN_TOURNAMENT = (
     "structure.interaction_radius",
     "structure.interaction_decay",
     "dynamics.boundary_order",
+    # M11b Phase B (#172): movement rides on structure and the demographic
+    # boundary/activation, neither of which a tournament has.
+    "movement.rate",
+    "movement.radius",
+    "movement.decay",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
 
@@ -281,16 +295,45 @@ _CONTEST_IMITATION_NOTE = (
 """placement_contest's sync-imitation cause (#107's three-way conjunction)."""
 
 _CONTEST_ASYNC_NOTE = (
-    "NOTE: an asynchronous run resolves one birth at a time, so births "
-    "never contend for ground — there is nothing to contest."
+    "NOTE: not consulted under the asynchronous clock — no shuffle is drawn "
+    "there. Several births CAN resolve in one asynchronous event (the whole "
+    "eligible set is admitted per event and placed in ascending agent-id "
+    "order, so a shared last empty site goes to the lower id — held as an "
+    "open question for M12 scoping, DECISIONS #171); this setting plays no "
+    "part in that."
 )
-"""placement_contest's async cause (the registry description's wording)."""
+"""placement_contest's async cause (the registry description's wording,
+reworded clock-honest at M11b Phase B per #171(f2)/#172)."""
 
 _CONTEST_FIXED_N_NOTE = (
     "NOTE: under the fixed-size ('fixed_n' Moran) population the newborn "
     "takes exactly the freed site — there is no placement to contest."
 )
 """placement_contest's async fixed_n cause (#132: no placement draw exists)."""
+
+_MOVEMENT_WELL_MIXED_NOTE = (
+    "NOTE: only meaningful on a lattice — in a well-mixed world there is "
+    "nowhere to move to (no places, no distance). Switch 'World structure' "
+    "to 'lattice' to use movement."
+)
+"""The movement trio's well-mixed cause (M11b Phase B, #172)."""
+
+_MOVEMENT_IMITATION_NOTE = (
+    "NOTE: only read in the energy economy — under 'imitation' "
+    "reproduction there is no demographic boundary of deaths and births "
+    "for the movement step to follow, so agents never move. Switch "
+    "'Reproduction mode' to 'energy_economy' to use movement."
+)
+"""The movement trio's sync-imitation cause (the #165 gate: energy economy only)."""
+
+_MOVEMENT_FIXED_N_NOTE = (
+    "NOTE: not read under the fixed-size ('fixed_n' Moran) population — "
+    "its grid is completely full by construction (population = site "
+    "count), so there is never an empty site to move to and every move "
+    "would be blocked. Switch 'Async population' to 'variable_n' to use "
+    "movement."
+)
+"""The movement trio's async fixed_n cause (#106/#134: N = site count)."""
 
 _BOUNDARY_ORDER_ASYNC_NOTE = (
     "NOTE: only read at a synchronous generation boundary — the "
@@ -445,13 +488,55 @@ def _contest_async(values: Mapping[str, ParamValue]) -> str | None:
 
     Returns:
         The most specific cause: no cells (well-mixed), no placement
-        (fixed_n), or no contention (one birth at a time).
+        (fixed_n), or the setting is simply not consulted (variable_n —
+        births there resolve in ascending id order, no shuffle drawn).
     """
     if not _on_a_lattice(values):
         return _CONTEST_WELL_MIXED_NOTE
     if values.get("dynamics.async_population") == "fixed_n":
         return _CONTEST_FIXED_N_NOTE
     return _CONTEST_ASYNC_NOTE
+
+
+def _movement_sync(values: Mapping[str, ParamValue]) -> str | None:
+    """The movement trio's sync answer: lattice AND ``energy_economy`` (#165).
+
+    The engine's own gate (``movement.movement_active``) minus the rate —
+    the rate is a value, not a liveness condition: at rate 0 the widgets
+    stay LIVE (that is how the user turns movement on), and the engine
+    simply draws nothing. The branch supplies "synchronous"; this predicate
+    checks the other two conjuncts, naming the failing cause.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The cause-naming note, or ``None`` when movement can actually run.
+    """
+    if not _on_a_lattice(values):
+        return _MOVEMENT_WELL_MIXED_NOTE
+    if values.get("dynamics.reproduction_mode") != "energy_economy":
+        return _MOVEMENT_IMITATION_NOTE
+    return None
+
+
+def _movement_async(values: Mapping[str, ParamValue]) -> str | None:
+    """The movement trio's async answer: lattice AND ``variable_n`` (#165).
+
+    ``fixed_n`` is excluded by construction — its grid is full, so every
+    move would be blocked (#106/#134); the note says so.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The cause-naming note, or ``None`` when movement can actually run.
+    """
+    if not _on_a_lattice(values):
+        return _MOVEMENT_WELL_MIXED_NOTE
+    if values.get("dynamics.async_population") == "fixed_n":
+        return _MOVEMENT_FIXED_N_NOTE
+    return None
 
 
 def _matcher_sync(values: Mapping[str, ParamValue]) -> str | None:
@@ -533,6 +618,13 @@ STRUCTURE_GREYING: dict[str, GreyingRule] = {
     "structure.interaction_decay": GreyingRule(
         sync=_interaction_kernel_rule, asynchronous=_interaction_kernel_rule
     ),
+    # The movement trio (M11b Phase B, #165/#172): live only where the
+    # engine's movement gate can hold — lattice + energy economy (sync
+    # `energy_economy`, async `variable_n`); the rate itself is a value,
+    # not a liveness condition (rate 0 = off, widgets stay live).
+    "movement.rate": GreyingRule(sync=_movement_sync, asynchronous=_movement_async),
+    "movement.radius": GreyingRule(sync=_movement_sync, asynchronous=_movement_async),
+    "movement.decay": GreyingRule(sync=_movement_sync, asynchronous=_movement_async),
     "matching.spatial_interaction": GreyingRule(sync=_needs_lattice, asynchronous=_needs_lattice),
     "matching.matcher": GreyingRule(sync=_matcher_sync, asynchronous=_matcher_async),
     # k stays live ALWAYS (#81/#108: it clamps, and it does the work under
@@ -791,6 +883,7 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
         config.match,
         config.population,
         config.structure,
+        config.movement,
         config.dynamics,
     ]
     values: dict[str, ParamValue] = {}

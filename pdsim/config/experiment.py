@@ -623,6 +623,37 @@ class StructureConfig(_RegistryBackedModel):
         return self
 
 
+class MovementConfig(_RegistryBackedModel):
+    """Agent movement on the grid (M11b Phase B, DESIGN §2.12; DECISIONS #165/#172).
+
+    The third parameterisation of the reach kernel: a per-agent per-period
+    move probability and the walk's radius/decay pair. Consumed only under
+    lattice + energy economy (synchronous ``energy_economy``, asynchronous
+    ``variable_n``) and only while ``rate > 0`` — at the default rate 0 the
+    engines make no movement draw at all, so every pre-M11b config re-runs
+    identically (hard rule 8).
+
+    Attributes:
+        rate: Per-agent per-period probability of attempting one move —
+            at the synchronous boundary's final step, or at the agent's
+            asynchronous activation. 0 = movement off.
+        radius: Support radius R of the walk — how far one move can carry
+            an agent; ``None`` means unlimited reach.
+        decay: Decay β of the walk — how steeply nearer empty sites are
+            preferred. Irrelevant at R = 1.
+    """
+
+    _registry_keys: ClassVar[dict[str, str]] = {
+        "rate": "movement.rate",
+        "radius": "movement.radius",
+        "decay": "movement.decay",
+    }
+
+    rate: float = _registry_field("movement.rate")
+    radius: int | None = _registry_field("movement.radius")
+    decay: float = _registry_field("movement.decay")
+
+
 class DynamicsConfig(_RegistryBackedModel):
     """Evolutionary dynamics: selection, mutation, and the economy (§2.7/§2.10).
 
@@ -947,6 +978,9 @@ class ExperimentConfig(_RegistryBackedModel):
         population: Size, memory constraint, and initial strategy mix.
         structure: The shape of the world — well-mixed or a lattice of
             sites (M11a; consumed by nothing in Phase A).
+        movement: Agent movement on the grid (M11b Phase B) — the move
+            rate and the walk's radius/decay; consumed only under lattice +
+            energy economy while the rate is positive.
         dynamics: Selection and mutation settings.
         output: Recording cadence — what the run records, never what it
             simulates (M10b; consumed by asynchronous runs only, #34).
@@ -980,6 +1014,7 @@ class ExperimentConfig(_RegistryBackedModel):
     match: MatchConfig = Field(default_factory=MatchConfig)
     population: PopulationConfig
     structure: StructureConfig = Field(default_factory=StructureConfig)
+    movement: MovementConfig = Field(default_factory=MovementConfig)
     dynamics: DynamicsConfig = Field(default_factory=DynamicsConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     strategy_params: dict[str, dict[str, registry.ParamValue]] = Field(default_factory=dict)

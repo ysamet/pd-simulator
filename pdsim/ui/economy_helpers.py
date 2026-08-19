@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 from pdsim.config.experiment import ExperimentConfig, effective_neighbour_count
 from pdsim.core.economy import age_mortality_active
+from pdsim.core.movement import movement_active
 
 ECONOMY_HELP: dict[str, str] = {
     "energy": (
@@ -126,6 +127,27 @@ ECONOMY_HELP: dict[str, str] = {
         "in this readout. Under the asynchronous clock this readout does not "
         "apply (there is no feasibility filter there; such parents show up "
         "as blocked instead)."
+    ),
+    "blocked_moves": (
+        "A BLOCKED MOVE is a move attempt that found NO empty site within "
+        "the movement radius of the agent's current position, so the agent "
+        "stayed where it was. Each agent attempts a move with probability "
+        "'Movement rate' — at the end of each generation's demographic "
+        "boundary under the synchronous clock, or when it is activated as "
+        "the focal agent under the asynchronous clock — and a successful "
+        "move relocates it to one empty site within reach (an agent never "
+        "moves onto an occupied site, and never 'moves' to its own). One "
+        "count covers every way an attempt can fail: the agent may be "
+        "walled in by neighbours, or — under the synchronous clock, where "
+        "the period's movers are shuffled once and moved in turn — an "
+        "earlier mover may have taken the last empty site in its reach "
+        "(and freed its own origin for later movers, so chains can form). "
+        "A blocked agent simply tries again whenever its next attempt "
+        "comes; nothing is paid and nothing else changes. Many blocked "
+        "moves on a crowded grid are what crowding LOOKS like in this "
+        "readout, not a stall: on a completely full grid every attempt "
+        "is blocked. Movement is free (no energy cost) and blind to "
+        "strategy."
     ),
 }
 """The single source for the Economy panel's inline (?) explainer texts."""
@@ -609,6 +631,46 @@ def blocked_parents_metric(blocked: list[int]) -> tuple[int, int] | None:
 
     Args:
         blocked: The per-period blocked-parent counts so far (the
+            timeseries' live series).
+
+    Returns:
+        ``(latest period's count, run total)``, or ``None`` before any
+        period has finished.
+    """
+    if not blocked:
+        return None
+    return blocked[-1], sum(blocked)
+
+
+def blocked_moves_visible(config: ExperimentConfig) -> bool:
+    """Whether the blocked-moves readout applies to this run (M11b Phase B).
+
+    Shown exactly where movement is ACTIVE — the engine's own gate
+    (:func:`~pdsim.core.movement.movement_active`): lattice + energy
+    economy (synchronous ``energy_economy`` or asynchronous ``variable_n``)
+    AND ``movement.rate > 0``. At rate 0 movement is off and no attempt
+    ever happens, so the readout is hidden rather than shown as a permanent
+    zero (the ``infeasible_parents_visible`` pattern).
+
+    Args:
+        config: The run's config.
+
+    Returns:
+        True when the readout should be shown.
+    """
+    return movement_active(config)
+
+
+def blocked_moves_metric(blocked: list[int]) -> tuple[int, int] | None:
+    """The numbers behind the live blocked-moves readout (M11b Phase B).
+
+    The same shape as :func:`blocked_parents_metric` — the three metrics sit
+    side by side in the Economy panel and are read the same way. The
+    explanation lives in ``ECONOMY_HELP["blocked_moves"]`` (the §12
+    single-source rule).
+
+    Args:
+        blocked: The per-period blocked-move counts so far (the
             timeseries' live series).
 
     Returns:

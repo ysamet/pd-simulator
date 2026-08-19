@@ -20,7 +20,10 @@ only read — by the grid renderer and by the recorder. Births and deaths do
 not touch it yet: :meth:`Occupancy.vacate` and the rest of the mutation path
 exist and are tested, but no engine event calls them until Phase C adds
 local birth. That is this phase's exit condition — structure exists and is
-visible, and nothing reads it.
+visible, and nothing reads it. (Since M11a Phase C the occupancy is LIVE —
+deaths vacate, births occupy — and since M11b Phase B agents may also
+RELOCATE: a move is ``remove_agent`` then ``occupy``, performed by
+``pdsim.core.movement.attempt_move`` after the destination is drawn.)
 
 A note on the capacity check (forward-guard 2, spec Design 12): the
 exclusivity test is written as ``occupants < capacity`` against the site's
@@ -106,7 +109,8 @@ class Occupancy:
         if agent_id in self._site_by_agent:
             raise ValueError(
                 f"Agent {agent_id} already occupies site {self._site_by_agent[agent_id]}; "
-                "vacate it before occupying another (agents do not move in M11a)."
+                "vacate it before occupying another (a move — M11b Phase B — is "
+                "remove_agent then occupy, in that order; see movement.attempt_move)."
             )
         self._agent_by_site[site_id] = agent_id
         self._site_by_agent[agent_id] = site_id

@@ -1,4 +1,4 @@
-"""The engine's golden masters: four negative pins, four positive pins.
+"""The engine's golden masters: four negative pins, four positive pins, two movement pins.
 
 This file holds ALL of the project's golden masters (spec Design 9),
 captured with the #133(d) technique — the round-grain event-stream digest
@@ -29,6 +29,14 @@ Two families, one mechanism:
   when the #127 full-width band replaced the ball footprint they had
   accidentally pinned (#148); they and the fourth carry the
   reload-and-re-run assertion the #133(d) technique prescribes.
+* **Two MOVEMENT goldens** (M11b Phase B, DECISIONS #172) —
+  ``sync_economy_lattice_movement`` and
+  ``async_variable_n_lattice_movement``: the two lattice-economy positives
+  above with ``movement.rate = 0.5`` and nothing else changed, RECORDED
+  (never re-recorded) 2026-08-18 from the finished Phase B engine with the
+  full #133(d) technique. Because every movement draw is gated on the rate,
+  the eight pins above passed untouched at capture (the phase's zero
+  re-recording budget, observed).
 
 Both grains from the spec are pinned per golden: the EVENT STREAM (at
 ``"round"`` granularity, so every per-round draw's consequence is in scope)
@@ -527,3 +535,101 @@ class TestPositiveGoldens:
         folder = recorder.finalize()
         reloaded = load_config(folder / "config.yaml")
         assert stream_digest(reloaded) == POSITIVE_STREAM_DIGESTS[name]
+
+
+# ---------------------------------------------------------------------------
+# The two MOVEMENT-ON positive configurations (M11b Phase B; DECISIONS #172).
+# RECORDED, never re-recorded: each is one of the pinned lattice
+# configurations above plus `movement.rate = 0.5` (radius 1, decay 0 — the
+# registry defaults), so the stream is byte-identical to its parent golden up
+# to the first movement coin and deviates only through the movement draws.
+# ---------------------------------------------------------------------------
+
+MOVEMENT_RATE = 0.5
+"""The rate both movement goldens use — the value spec V2 asks the owner to set."""
+
+
+def _movement_config(name: str) -> ExperimentConfig:
+    """Build one of the two pinned movement-on lattice configurations.
+
+    Args:
+        name: ``"sync_economy_lattice_movement"`` or
+            ``"async_variable_n_lattice_movement"``.
+
+    Returns:
+        The parent positive golden's config with the ``movement`` section set
+        to ``rate = 0.5, radius = 1, decay = 0.0`` and NOTHING else changed.
+    """
+    parents = {
+        "sync_economy_lattice_movement": "sync_economy_lattice",
+        "async_variable_n_lattice_movement": "async_variable_n_lattice",
+    }
+    if name not in parents:
+        raise ValueError(f"Unknown movement golden {name!r}.")
+    data = _positive_config(parents[name]).model_dump()
+    data["movement"] = {"rate": MOVEMENT_RATE, "radius": 1, "decay": 0.0}
+    return ExperimentConfig.model_validate(data)
+
+
+MOVEMENT_STREAM_DIGESTS = {
+    "sync_economy_lattice_movement": (
+        "fe69d8fdc4e30d2d3ef9a350101d32c9ed1c6735ef24a4852c9a293123b54e09"
+    ),
+    "async_variable_n_lattice_movement": (
+        "a5fa1f35f48d54e68ef8c70c7ce9bc7473732b4972568a4c007729c604c88800"
+    ),
+}
+"""Event-stream digests, captured 2026-08-18 from the finished M11b Phase B
+engine (#172). Verified before capture (an instrumented in-process twin
+counting ``attempt_move`` outcomes): the sync golden makes 18 successful
+moves and 0 blocked moves over its 6 generations — a blocked move is
+IMPOSSIBLE on that configuration (population never exceeds 7 of 12 sites
+on a 3 × 4 Moore torus, where a radius-1 neighbourhood spans 8 sites; see
+#172's Rule 7 finding); the async golden makes 19 successful moves and 2
+blocked moves over its 4 generation-equivalents (blocked per period
+[0, 0, 1, 1])."""
+
+MOVEMENT_FOLDER_DIGESTS = {
+    "sync_economy_lattice_movement": (
+        "a778c4d4099fc5233bec65b3201f4880fe5fea882821d53ee19d58a8bbf6b140"
+    ),
+    "async_variable_n_lattice_movement": (
+        "a10a626146527a7bcfa4e799cac63ed11df3855c875bf37adead6464afb8b65a"
+    ),
+}
+"""Run-folder digests, captured as the stream digests above."""
+
+
+class TestMovementGoldens:
+    """M11b Phase B's movement-on behaviour, sealed for later phases to build on."""
+
+    @pytest.mark.parametrize("name", sorted(MOVEMENT_STREAM_DIGESTS))
+    def test_event_stream_matches_the_capture(self, name: str) -> None:
+        """The full round-grain stream digest equals the pinned constant."""
+        assert stream_digest(_movement_config(name)) == MOVEMENT_STREAM_DIGESTS[name]
+
+    @pytest.mark.parametrize("name", sorted(MOVEMENT_FOLDER_DIGESTS))
+    def test_run_folder_matches_the_capture(self, name: str, tmp_path: Path) -> None:
+        """The persisted folder's content digest equals the pinned constant."""
+        assert folder_digest(_movement_config(name), tmp_path) == MOVEMENT_FOLDER_DIGESTS[name]
+
+    @pytest.mark.parametrize("name", sorted(MOVEMENT_STREAM_DIGESTS))
+    def test_the_recorded_config_reruns_to_the_pinned_stream(
+        self, name: str, tmp_path: Path
+    ) -> None:
+        """config.yaml coverage — the full #133(d) technique from the capture on."""
+        config = _movement_config(name)
+        recorder = RunRecorder(config, out_dir=tmp_path)
+        for event in engine.run(config):
+            recorder.add(event)
+        folder = recorder.finalize()
+        reloaded = load_config(folder / "config.yaml")
+        assert reloaded.movement.rate == MOVEMENT_RATE
+        assert stream_digest(reloaded) == MOVEMENT_STREAM_DIGESTS[name]
+
+    @pytest.mark.parametrize("name", sorted(MOVEMENT_STREAM_DIGESTS))
+    def test_the_movement_golden_differs_from_its_parent(self, name: str) -> None:
+        """Movement on genuinely changes the stream (the pin is not vacuous)."""
+        parent = name.removesuffix("_movement")
+        assert MOVEMENT_STREAM_DIGESTS[name] != POSITIVE_STREAM_DIGESTS[parent]
+        assert MOVEMENT_FOLDER_DIGESTS[name] != POSITIVE_FOLDER_DIGESTS[parent]

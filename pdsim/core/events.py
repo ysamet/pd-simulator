@@ -246,6 +246,18 @@ class GenerationFinished:
             lattice, and under imitation. LIVE-only, exactly like
             ``blocked_parents`` — not persisted, not shown by the results
             browser.
+        blocked_moves: How many move attempts failed in place this period
+            because NO empty site lay within walk reach (M11b Phase B,
+            #165(c)/#172) — one undivided count (a walled-in mover and one
+            whose last reachable site an earlier-permuted mover took are
+            the same fact here). Populated by the synchronous economy per
+            generation and by asynchronous ``variable_n`` per recording
+            window, exactly as ``blocked_parents`` travels; always 0 while
+            movement is off (``movement.rate = 0``) or not gated on
+            (well-mixed, imitation, ``fixed_n``). LIVE-only: not persisted
+            (recorded folders are byte-identical), not shown by the results
+            browser, and NOT in any golden's pinned field list (#171(f1):
+            extending a list moves a digest).
     """
 
     index: int
@@ -257,6 +269,7 @@ class GenerationFinished:
     gen_equiv_time: float | None = None
     blocked_parents: int = 0
     infeasible_parents: int = 0
+    blocked_moves: int = 0
 
 
 @dataclass(frozen=True, slots=True)

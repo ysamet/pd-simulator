@@ -951,9 +951,14 @@ register(
             "cells, which acquires more good territory — a substantive "
             "modelling claim to switch on deliberately, not to inherit "
             "silently. Only matters under a synchronous energy-economy run "
-            "on a lattice; everywhere else births never contend (an "
-            "asynchronous run resolves one birth at a time, and a "
-            "well-mixed world has no cells to contest)."
+            "on a lattice; nowhere else is this shuffle drawn (a well-mixed "
+            "world has no cells to contest). Under the asynchronous clock "
+            "several births CAN resolve in one event — the whole eligible "
+            "set is admitted per event and placed in ascending agent-id "
+            "order, so a shared last empty site goes to the lower id; "
+            "whether that should instead be one birth per event is held as "
+            "an open question for M12 scoping — but this setting is not "
+            "consulted there."
         ),
     )
 )
@@ -1008,6 +1013,116 @@ register(
             "gives the same behaviour. Only consulted while 'Spatial "
             "interaction' (in the Matching section) is on; ignored "
             "otherwise, and ignored under the 'well_mixed' structure."
+        ),
+    )
+)
+
+# ---------------------------------------------------------------------------
+# Movement — agents relocating on the grid (docs/DESIGN.md §2.12; M11b
+# Phase B, DECISIONS #165/#172). The third parameterisation of the reach
+# kernel: after "where a child lands" and "who you play", "where you may
+# walk to". Registered after Structure so the panel and the docs render it
+# there. Every movement draw is gated on `movement.rate > 0` AND lattice +
+# energy economy (sync `energy_economy`, async `variable_n`): at the default
+# rate 0 — movement off — a run consumes zero additional draws and every
+# pre-M11b config re-runs identically (hard rule 8).
+# ---------------------------------------------------------------------------
+
+register(
+    ParameterSpec(
+        key="movement.rate",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        maximum=1.0,
+        label="Movement rate",
+        section="Movement",
+        description=(
+            "How likely each agent is to attempt ONE move per period — a "
+            "probability from 0 to 1. At 0 — the default — nobody ever "
+            "moves: agents stay on the site they were born (or dealt) onto, "
+            "exactly as before movement existed, so an older configuration "
+            "re-runs identically. At 1 every agent attempts a move every "
+            "period. Under the synchronous (generational) clock the "
+            "attempts happen at the END of each generation's demographic "
+            "boundary — after that generation's deaths and births, so "
+            "movers see the freshest vacancies and every generation's "
+            "matches are played from the positions the previous boundary "
+            "settled (generation 0 plays from the founding layout as dealt "
+            "or painted); a child born in that boundary may move in it too. "
+            "Under the asynchronous (event-time) clock the attempt happens "
+            "when an agent is activated as the focal of an event, "
+            "immediately before it plays its matches — so the same number "
+            "means the same expected moves per agent per generation(-"
+            "equivalent) under both clocks. A move goes to an EMPTY site "
+            "within the movement radius below (weighted by the movement "
+            "decay); an agent with no empty site in reach simply stays put "
+            "— the Economy panel counts such BLOCKED moves so a crowded "
+            "grid reads as what it is. Movement is free (no energy cost) "
+            "and blind to strategy: it is population dynamics, not a "
+            "decision the strategies make. Only consulted in the ENERGY "
+            "ECONOMY on a LATTICE — under 'energy_economy' reproduction on "
+            "the synchronous clock, or 'variable_n' on the asynchronous "
+            "clock. Ignored under 'well_mixed' (nowhere to go), under "
+            "'imitation' reproduction (no demographic boundary to host the "
+            "step), and under the fixed-size ('fixed_n' Moran) population "
+            "(its grid is completely full by construction — every move "
+            "would be blocked)."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="movement.radius",
+        kind="int",
+        default=1,
+        minimum=1,
+        nullable=True,
+        label="Movement radius (R)",
+        section="Movement",
+        description=(
+            "How far a single move can carry an agent, in grid distance (the "
+            "neighbourhood shape in the Structure section decides what "
+            "distance means). At a move, the EMPTY sites within this radius "
+            "of the agent's current site are the candidate destinations — "
+            "the agent's own site is occupied and never a candidate, so a "
+            "move is always a genuine relocation. If every site in reach is "
+            "occupied the move is BLOCKED: the agent stays put and tries "
+            "again whenever its next attempt comes (the Economy panel "
+            "counts blocked moves). At 1 — the default — an agent hops to "
+            "an adjacent empty cell: the smallest, most local step, and the "
+            "one that lets clusters erode gradually rather than scatter. "
+            "Leave empty for unlimited reach: a mover can then land on any "
+            "empty site on the grid, with only the decay below expressing "
+            "locality. Only consulted while the movement rate above is "
+            "positive and movement applies (energy economy on a lattice); "
+            "ignored otherwise."
+        ),
+    )
+)
+
+register(
+    ParameterSpec(
+        key="movement.decay",
+        kind="float",
+        default=0.0,
+        minimum=0.0,
+        maximum=20.0,
+        label="Movement decay (β)",
+        section="Movement",
+        description=(
+            "How steeply a move prefers empty sites CLOSER to the agent's "
+            "current position, within the movement radius. This is the "
+            "decay β of the reach kernel: a candidate site at distance d is "
+            "weighted exp(−β·d). At 0 — the default — every empty site "
+            "within the radius is equally likely; higher values keep moves "
+            "short even where the radius technically allows a longer jump. "
+            "IRRELEVANT at a movement radius of 1: all candidates then sit "
+            "at the same distance, so every β gives the same behaviour. "
+            "Only consulted while the movement rate above is positive and "
+            "movement applies (energy economy on a lattice); ignored "
+            "otherwise."
         ),
     )
 )

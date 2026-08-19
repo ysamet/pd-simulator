@@ -4820,3 +4820,196 @@ permutation; the golden evidence), and `TestSplitCountersOnTheStream`
 (gate-off both zero; async never populates infeasible; the VN fixture's
 [6, 8, 8] infeasible / [0, 0, 0] blocked stream). ADVISORIES.md:
 untouched, as expected. Test count: 1073 passing (1059 before this phase; the two retired Phase C pins replaced by sixteen).
+
+**#172 — 2026-08-18 — M11b Phase B BUILT: agent movement lands — the
+`MovementRule` ABC with the `KernelWalk`, the movement registry section,
+the synchronous boundary's final movement step and the asynchronous
+in-activation step, the blocked-moves channel, two movement-on goldens
+RECORDED with zero re-recording; the `placement_contest` reword; the §6.3
+rewrite; six Rule 7 findings with in-session rulings (M11b Phase B; spec
+rulings 2 and 3 as designed in #165).** (a) THE MODULE AND THE
+INTERFACE. `pdsim/core/movement.py` (in the ENGINE package, hard rule 4 —
+beside `structure.py` and `occupancy.py`; the prompt's `pdsim/movement.py`
+was a suggestion and the core package is where every other headless
+mechanism lives): `MovementRule` (ABC, #46) with the single abstract method
+`destination(origin, occupancy, rng) -> SiteId | None`; `KernelWalk(radius,
+decay)` — one `neighbourhood_sample` call over `occupancy.empty_sites()`
+within R of the mover's current site, weighted exp(−β·d), through the #156
+cached reach; `attempt_move(rule, agent_id, occupancy, rng) -> bool` — the
+ONE function both engines call, holding the vacate-AFTER-draw contract;
+`movement_active(config)` — the gate as ONE predicate read by both engines
+at construction AND by the app's readout visibility; `build_movement_rule`
+(no `movement.rule` choice yet — one rule ships; the builder becomes the
+dispatch when a second lands). Success-driven and walk-away rules are
+named in the docstring as future implementations that will need the
+mover's state as an extra input (an interface extension for the phase
+that builds them). The rule decides only the DESTINATION: the coin, the
+permutation, and the occupancy update are the engines' business, so a
+future rule cannot change the RNG contract by drawing its own coins.
+(b) THE REGISTRY: new section `Movement`, registered after Structure and
+before Dynamics (panel/docs order inherited): `movement.rate` (float, 0–1,
+default 0), `movement.radius` (int ≥ 1, nullable = unlimited, default 1),
+`movement.decay` (float, 0–20, default 0, "irrelevant at radius 1");
+`MovementConfig` on `ExperimentConfig.movement` with a default factory, so
+a pre-M11b YAML without a `movement:` key loads and re-runs identically
+(hard rule 8; pinned). Greying (the #141 table): the trio greys under
+well_mixed in both branches, under sync `imitation` (no demographic
+boundary to host the step), under async `fixed_n` (full grid by
+construction — every move blocked, #106/#134), and in tournament mode
+(`IGNORED_IN_TOURNAMENT`); each note names its cause; the rate is a VALUE
+not a liveness condition — at rate 0 the widgets stay live (that is how
+movement is switched on). `helpers._SECTIONS` and
+`widget_values_from_config` learned the section so scenario loads and the
+config round trip carry it. (c) THE SCHEDULE AS IMPLEMENTED. SYNC: the
+movement step is placed in `EconomyDynamics.step` immediately after the
+death/birth block (whichever `boundary_order`), BEFORE the age increment
+— steps 7–9 of #80 (age, score reset, snapshot) consume no RNG, so this
+position and "after step 8" are the same stream and "final demographic
+act" is unambiguous; the step iterates the WHOLE post-boundary population
+(survivors + this boundary's newborns under `death_first`; the merged
+survivors under `birth_first`) — newborns eligible, one uniform rule; the
+next generation's matches play from the settled positions (move-then-play;
+generation 0 from the founding layout). ASYNC: inside `_step_event`,
+immediately after the focal draw and before the partner draw, so the
+partner draw reads the focal's POST-move site; no new event type, Δt
+untouched; at N = 1 the activation bundle is skipped along with the focal
+draw, so no coin is drawn either (the strict reading of "inside the focal
+activation" — the lone survivor plays nothing and moves nothing; reported
+as finding f4). The async demographic step, `admit_births`, and everything
+#171(f2) covers are byte-untouched. (d) THE GATE: `movement_active` =
+evolution mode AND lattice AND `movement.rate > 0` AND (sync:
+`reproduction_mode = energy_economy`; async: `async_population =
+variable_n`). Off the gate no movement object exists and no movement code
+runs. (e) THE RNG CONTRACT — the second amendment of the #80 frozen
+boundary sequence (after #107) and the amendment of the #99 pinned
+within-event order, BOTH legal by the #80/#99 active-flag idiom: every
+movement draw sits behind the gate, so a movement-off or non-gated run
+consumes ZERO additional draws — verified: all 23 pre-existing golden
+pins and every counting-wrapper pin passed untouched with the movement
+code in place, and the new no-draw pins assert it call-for-call (the whole
+call log at rate 0.5 equals the log at rate 0 on the well-mixed economy,
+the async `fixed_n` lattice, and the sync imitation lattice). SYNC, when
+active: ONE `rng.random()` coin per agent of the post-boundary population
+in ascending id order, unconditionally, even at rate 1.0 (the #80
+mortality-coin shape); then ONE `rng.permutation` over the movers, made
+whenever at least one coin was drawn (see finding f2 for the reading);
+then, in PERMUTATION order, one walk draw per mover — the primitive
+returns empty BEFORE drawing when nothing in reach is empty, so a blocked
+mover consumes its coin but no destination draw (pinned: a full 3 × 3
+grid at rate 1.0 makes 9 coins and 0 `choice` calls per boundary, 9
+blocked moves per generation). ASYNC, when active: one coin for the focal
+after the focal draw; on success the walk draw; no permutation (pinned:
+12 coins over 12 events, 0 permutations). Both module docstrings carry the
+amended pinned orders. (f) OCCUPANCY SEMANTICS: candidates are the sites
+empty at draw time — the mover's occupied origin is never a candidate (a
+relocation, never a null move; pinned: all-other-sites-full at unlimited
+radius is blocked); vacate-after-draw (`attempt_move`); under the sync
+permutation an earlier-permuted mover's freed origin IS available to a
+later mover — the manufactured chain on a bounded 1 × 3 line at seed 0
+(permutation [B, A]: B to 2, A to B's origin) with its counterfactual
+sibling seed 1 ([A, B]: A blocked, B moves); one attempt per agent per
+period (every id attempted exactly once at rate 1.0). ORDER PINS: coins in
+ascending id (a scripted coin sequence [miss, hit, miss, hit] moves {1, 3}
+and nobody else); iteration follows the MOVER permutation alone — at seed
+9 with movers {0, 1, 2} of {0, 1, 2, 3}, id order [0, 1, 2], the contract
+[2, 0, 1], and the #107-style trap (a permutation over the whole
+population filtered to the movers) [0, 2, 1] are pairwise different and
+the engine's observed iteration is the contract's. Why a permutation
+rather than id order: on a lattice id correlates with founding position
+(#107), so id order would hand a spatial priority to low ids at every
+contested last cell. NEWBORN eligibility pinned: at rate 1.0 with
+unlimited radius, both children of a two-founder boundary are attempted
+and relocate. (g) THE BLOCKED-MOVES CHANNEL: `GenerationReport` /
+`GenerationFinished.blocked_moves: int = 0` (additive, default-valued),
+threaded by the engine in both clock branches, populated per generation
+by the sync economy and per recording window by async `variable_n`
+(pinned: window totals equal the blocked attempts observed on a 3 × 3 von
+Neumann torus with one hole), `RunTimeseries.blocked_moves` aligned with
+periods, `economy_helpers.blocked_moves_visible` (= `movement_active`,
+verbatim — hidden at rate 0 rather than a permanent zero, the
+`infeasible_parents_visible` pattern), `blocked_moves_metric`
+(latest/total), `ECONOMY_HELP["blocked_moves"]` as the single source, and
+the app's third live metric "Blocked moves this generation" in a third
+column beside the blocked/infeasible readouts. ONE undivided count
+(#165(c)) — a walled-in mover and one whose last reachable site an
+earlier-permuted mover took are the same fact — deliberately unlike the
+birth vocabulary's split; the word "infeasible" appears in NO movement
+text (registry, help, greying notes; pinned by tests). Deliberately NOT
+persisted, not shown by the results browser, NOT added to any golden's
+pinned field list (#171(f1)). (h) THE TWO GOLDENS — RECORDED 2026-08-18,
+nothing re-recorded, no pinned field list touched, the same
+`_PINNED_FIELDS` per event type as the eight existing pins (round-grain
+stream digest, content-grain folder digest excluding `config.yaml`,
+reload-and-re-run to the pinned stream — the full #133(d) technique).
+`sync_economy_lattice_movement` = the `sync_economy_lattice` config (seed
+31, 3 × 4 Moore torus, 6 founders, K = 12, 6 generations) plus `movement:
+rate 0.5, radius 1, decay 0.0`: OBSERVED before capture by an
+instrumented in-process twin — 18 successful moves, 0 blocked moves
+(finding f1). `async_variable_n_lattice_movement` = the
+`async_variable_n_lattice` config (seed 41, 4 × 5 Moore torus, 10
+founders, K = 20, 4 generation-equivalents) plus the same movement
+section: 19 successful moves, 2 blocked moves, per recording period
+[0, 0, 1, 1]. Rate 0.5 chosen (over 1.0) because the movers are then a
+strict subset — a bug that ignored the coin outcome would move the
+digest, which rate 1.0 could not detect — and because it is the value spec
+V2 asks the owner to set. Each movement golden's digests are asserted
+different from its parent's (the pin is not vacuous). Whole suite after
+recording: 31/31 golden tests (23 pre-existing + 8 new). (i) THE
+`placement_contest` REWORD (registry description; the false "an
+asynchronous run resolves one birth at a time" clause replaced by the
+#171(f2) fact — several births can resolve in one async event, the whole
+eligible set admitted per event and placed in ascending id order, a shared
+last site to the lower id, held for M12 scoping — the rest verbatim);
+EXTENDED in-session (finding f5) to `helpers._CONTEST_ASYNC_NOTE`, the
+greying note that carried the same clause (§12 single-source discipline:
+the note derives from the description), and to the test pinning that
+phrase, replaced per #120(f). `python -m pdsim.gendocs` rerun; drift test
+green. (j) DOCS: DESIGN §2.12 gains the movement passage (schedule under
+both clocks, gate, RNG contract, mover permutation, occupancy semantics,
+blocked-move count, the #80/#107 and #99 amendments); §2.12's closing
+scope line and §4's event-field note updated; §6.3 rewritten to the
+RESOLVED state (in-activation won; event-type and cadence-schedule
+alternatives rejected per #165; orthogonal-to-strategies sentence and the
+layout-painter mention kept). (k) RULE 7 FINDINGS AND IN-SESSION RULINGS.
+(f1) The prompt required the sync golden to be "the existing sync lattice
+golden configuration plus `movement.rate` at a value that provably moves
+at least one agent AND produces at least one blocked move within the
+pinned horizon" — UNSATISFIABLE as written: on that configuration a
+blocked move is impossible at ANY rate, because a radius-1 Moore
+neighbourhood on the 3 × 4 torus spans 8 of the 11 other sites, so
+walling a mover in needs ≥ 9 agents, and the population never exceeds 7
+of 12 (#171(d); re-observed here at rate 1.0: 7, 6, 7, 7, 7, 6). Probed
+alternatives: rate 0.25/0.5/0.75/1.0 → 10/18/27/40 moves, 0 blocked every
+time; the nearest one-knob departure (`neighbourhood_shape = von_neumann`)
+gives 1 blocked move only at rate 1.0 (0 at 0.5). RULING: the base
+configuration is kept VERBATIM plus the rate — a strict extension of its
+parent pin, byte-identical up to the first movement coin, so a future
+re-record can be reasoned about relative to the parent — recorded
+honestly with 0 blocked; the sync blocked path's only engine effect is the
+counter (no draw), pinned by the full-grid counting test and the stream
+test, and the async golden exercises the blocked path in the stream. A
+second sync golden on a tighter grid is the design layer's to request.
+(f2) The prompt's permutation sentence ("drawn whenever the movement step
+is active and at least one coin was drawn a success set exists") is
+garbled between two readings — the call made whenever the step is active,
+or only when ≥ 1 coin was drawn (population non-empty). Stream-identical
+under both (at population 0 the size-0 call moves no generator state);
+READING CHOSEN: the call is made iff at least one coin was drawn, so a
+post-extinction boundary makes no movement call at all (pinned: an empty
+population draws nothing). (f3) Module location: `pdsim/core/movement.py`
+rather than the suggested `pdsim/movement.py` (above, (a)). (f4) N = 1
+async: no activation, hence no movement coin (above, (c)) — the
+alternative (activate the lone agent for movement only) was not built; a
+design-layer call if a lone survivor's wandering ever matters. (f5)
+`_CONTEST_ASYNC_NOTE` carried the same false clause as the registry
+description; reworded and its test replaced (above, (i)). (f6) OBSERVED,
+NOT TOUCHED (pre-existing, out of scope; logged as an open item):
+`helpers.widget_values_from_config` flattens every section EXCEPT
+`config.output`, so loading a scenario whose recording cadence is not the
+default (e.g. `per_event`) leaves the Output widgets at their defaults;
+`_load_state` falls back to registry defaults for the missing keys. Not
+a Phase B concern (movement was added to the list); flagged for Phase E1's
+panel work. TEST COUNT: 1129 passing (1073 before this phase; 56 new,
+nothing retired: 41 in `test_movement.py`, 7 movement-greying tests in
+`test_ui_helpers.py`, 8 golden tests). ADVISORIES.md untouched. The
+milestone's re-recording budget remains UNSPENT; spec ruling 1 stands.

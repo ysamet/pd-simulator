@@ -162,6 +162,7 @@ def _run_evolution(
             agents=report.agents,
             blocked_parents=report.blocked_parents,
             infeasible_parents=report.infeasible_parents,
+            blocked_moves=report.blocked_moves,
         )
         if not dynamics.population:
             break  # extinction: the run ends here (economy mode only)
@@ -226,6 +227,7 @@ def _run_async(
             gen_equiv_time=report.gen_equiv_time,
             blocked_parents=report.blocked_parents,
             infeasible_parents=report.infeasible_parents,
+            blocked_moves=report.blocked_moves,
         )
     # At least one period always emits (generations >= 1 guarantees the
     # clock crosses 1.0 or the run went extinct with a final partial

@@ -1108,11 +1108,16 @@ def _run_live(
         # Beside it, the infeasible-parents readout (M11b Phase A, #164):
         # live only under the three-way gate, where the feasibility filter
         # runs (the async clock never populates it, so it stays hidden).
-        blocked_col, infeasible_col = st.columns(2)
+        # Third, the blocked-moves readout (M11b Phase B, #165/#172): live
+        # only while movement is ACTIVE (lattice + energy economy + a
+        # positive movement rate) — hidden, not a permanent zero, otherwise.
+        blocked_col, infeasible_col, moves_col = st.columns(3)
         blocked_note = blocked_col.empty()
         infeasible_note = infeasible_col.empty()
+        moves_note = moves_col.empty()
         show_blocked = economy_helpers.blocked_parents_visible(config)
         show_infeasible = economy_helpers.infeasible_parents_visible(config)
+        show_moves = economy_helpers.blocked_moves_visible(config)
         # The LIVE grid (Phase C): the latest snapshot IS the render state
         # (Design 10), so a lattice run with per-agent data redraws its
         # occupancy as periods finish — this is what lets V5's drifting
@@ -1122,7 +1127,7 @@ def _run_live(
         grid_live = st.empty()
 
         def _draw_blocked() -> None:
-            """Refresh the blocked- and infeasible-parents metrics from the live series."""
+            """Refresh the blocked/infeasible-parents and blocked-moves metrics."""
             numbers = economy_helpers.blocked_parents_metric(timeseries.blocked_parents)
             if show_blocked and numbers is not None:
                 latest, total = numbers
@@ -1142,6 +1147,16 @@ def _run_live(
                     delta=f"run total {total}",
                     delta_color="off",
                     help=ECONOMY_HELP["infeasible_parents"],
+                )
+            moves = economy_helpers.blocked_moves_metric(timeseries.blocked_moves)
+            if show_moves and moves is not None:
+                latest, total = moves
+                moves_note.metric(
+                    "Blocked moves this generation",
+                    latest,
+                    delta=f"run total {total}",
+                    delta_color="off",
+                    help=ECONOMY_HELP["blocked_moves"],
                 )
 
         def _draw_live_grid(draw_id: int) -> None:

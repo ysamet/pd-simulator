@@ -34,6 +34,24 @@ any change is a breaking change requiring a DECISIONS entry):
     1. the focal draw — one ``rng.integers(N)`` (skipped entirely at
        N = 1: no partner exists, no pair draws are consumed — the #81
        lone-survivor thermodynamics in event-time),
+    1b. the MOVEMENT STEP (M11b Phase B, DECISIONS #165/#172 — the
+       amendment of this pinned order, INSIDE the focal activation, never
+       a new event type; Δt = 1/N(t) untouched) — ONLY when movement is
+       active (lattice + ``variable_n`` + ``movement.rate > 0``; the gate
+       ``movement.movement_active`` decides once per run; ``fixed_n`` is
+       excluded, its grid full by construction): one ``rng.random()``
+       coin for the FOCAL agent, immediately after the focal draw; on
+       success, the WALK DRAW — one ``neighbourhood_sample`` over the
+       empty sites within the movement kernel of the focal's current
+       site (no draw when nothing in reach is empty — the move is
+       BLOCKED, counted per recording window, the focal stays put; on
+       success the origin is vacated after the draw and the destination
+       occupied). No permutation exists here — one mover at most per
+       activation. Move-then-play: the partner draw below reads the
+       focal's POST-move site. Skipped with the focal draw at N = 1
+       (no activation, no coin). Movement off or non-gated: NO draw
+       here — every pre-M11b golden passes untouched (the active-flag
+       idiom),
     2. the partner draw — well-mixed (or lattice with
        ``matching.spatial_interaction`` off): one ``rng.choice(N-1,
        size=min(k, N-1), replace=False)`` over the focal's others (the
@@ -155,6 +173,7 @@ from pdsim.core.events import (
 from pdsim.core.game import PrisonersDilemma
 from pdsim.core.layouts import found_population
 from pdsim.core.match import Match, MatchResult
+from pdsim.core.movement import MovementRule, attempt_move, build_movement_rule, movement_active
 from pdsim.core.reproduction import StrategySwitchReproduction
 
 # Intra-package reuse again (as with _CooperationTally above): the imitation
@@ -250,6 +269,16 @@ class AsyncDynamics:
         # global gate, found no site in reach. variable_n only — fixed_n
         # never blocks (the freed site always exists).
         self._window_blocked = 0
+        # Movement (M11b Phase B, #165/#172): the rule exists ONLY when the
+        # gate holds — lattice + variable_n + rate > 0 — so a movement-off
+        # or non-gated run (fixed_n included: its grid is full) makes no
+        # movement draw at all. Blocked moves are counted per recording
+        # window, exactly as blocked parents travel.
+        self._movement: MovementRule | None = (
+            build_movement_rule(config) if movement_active(config) else None
+        )
+        self._movement_rate = config.movement.rate
+        self._window_blocked_moves = 0
         # Monotonic passport counter (M10a): ids are never reused.
         self._next_id = len(founders)
         # The generation-equivalent clock (spec Design 5) and event counter.
@@ -361,6 +390,16 @@ class AsyncDynamics:
         if n >= 2:
             focal_index = int(self._rng.integers(n))
             focal = self._population[focal_index]
+            # 1b. Movement INSIDE the activation (M11b Phase B, #165/#172):
+            # one coin for the focal immediately after the focal draw; on
+            # success the walk draw, origin vacated after it. Move-then-
+            # play — the partner draw below reads the post-move site. Only
+            # when the gate holds (`self._movement` exists); otherwise no
+            # draw here, so the pre-M11b event order is untouched.
+            if self._movement is not None and self._rng.random() < self._movement_rate:
+                assert self._occupancy is not None  # gated on a lattice
+                if not attempt_move(self._movement, focal.agent_id, self._occupancy, self._rng):
+                    self._window_blocked_moves += 1
             if self._spatial_interaction:
                 partners = self._spatial_partners(focal)
             else:
@@ -1051,6 +1090,7 @@ class AsyncDynamics:
             gen_equiv_time=self._time,
             demographic_events=tuple(self._pending),
             blocked_parents=self._window_blocked,
+            blocked_moves=self._window_blocked_moves,
         )
         self._period += 1
         self._window_payoff = {}
@@ -1058,5 +1098,6 @@ class AsyncDynamics:
         self._window_cooperation = _CooperationTally()
         self._window_events = 0
         self._window_blocked = 0
+        self._window_blocked_moves = 0
         self._pending = []
         return report

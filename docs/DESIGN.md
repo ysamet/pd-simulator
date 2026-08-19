@@ -491,6 +491,93 @@ exist (the #81 clamp idiom) — edge cells under `bounded`, and irregular
 site sets at M19. Validator: spatial interaction requires
 `structure.kind = lattice`.
 
+**Agent movement** (M11b Phase B; DECISIONS #165 designed, #172 as
+built). The third parameterisation of the reach kernel: `movement.rate`
+(per-agent per-period move probability, default 0 = off), and the walk
+pair `movement.radius` / `movement.decay` (same shape and defaults as the
+birth pair: R = 1, β = 0, blank R = unlimited). The `MovementRule`
+abstract base class (`core/movement.py`, the #46 seam) ships ONE
+implementation, `KernelWalk`: one `neighbourhood_sample` call over the
+EMPTY sites within R of the mover's CURRENT site, weighted exp(−β·d),
+through the same primitive and the same #156 cached reach as every other
+locality draw; success-driven and walk-away rules are future
+implementations of the same interface (they will need the mover's state
+as an extra input — an interface extension for the phase that builds
+them). Movement is a population-dynamics concern, orthogonal to
+strategies (#46). *The schedule* (#165, the #103 open item RESOLVED):
+under the SYNCHRONOUS clock movement is the FINAL step of the demographic
+boundary — after the death and birth phases in whichever order
+`dynamics.boundary_order` ran them, immediately before the age increment
+(steps 7–9 of #80 consume no RNG, so the position is draw-neutral and
+"final demographic act" is unambiguous); the whole post-boundary
+population is eligible, this boundary's NEWBORNS included (one uniform
+rule); the next generation's matches are played from the settled
+positions, and generation 0 from the founding layout as dealt or painted
+(move-then-play). Under the ASYNCHRONOUS clock movement is a step INSIDE
+the focal activation — focal draw, then the movement coin, then the match
+bundle (partners drawn from the focal's POST-move site), then the
+demographic step — never a new event type: the one-event-one-activation
+correspondence and Δt = 1/N(t) are untouched, and at N = 1 the activation
+is skipped along with the focal draw, so no coin is drawn either. *The
+gate*: movement is live only under lattice + energy economy — sync
+`energy_economy` (the `EconomyDynamics` lattice half), async `variable_n`
+— and only while `movement.rate > 0`; `fixed_n` is EXCLUDED (its grid is
+full by construction, N = site count, so every move would be blocked) and
+sync imitation has no demographic boundary to host the step; the movement
+trio greys in each excluded case with a cause-naming note
+(`STRUCTURE_GREYING`), grey-never-hide. The one predicate
+(`movement.movement_active`) is read by both engines at construction and
+by the app's readout visibility, so the engine and the panel cannot
+drift. *The RNG contract* (the #80/#99/#133 idioms applied; the second
+amendment of the #80 frozen boundary sequence after #107, and the
+amendment of the #99 pinned within-event order — both legal by the
+active-flag idiom): every movement draw sits behind the gate, so a
+movement-off or non-gated run consumes ZERO additional draws and all
+eight pre-existing goldens passed untouched (observed at #172). Sync,
+when active: ONE `rng.random()` coin per living agent of the
+post-boundary population in ascending id order, unconditionally — even at
+rate 1.0 — so the stream depends only on the flag and the population size
+(#80's mortality-coin shape); then ONE `rng.permutation` over the
+coin-successes (the movers), made whenever at least one coin was drawn
+(a generator no-op at sizes 0 and 1, #133(a); the counting pins count
+calls); then, iterating in PERMUTATION order, one walk draw per mover.
+Async, when active: one coin for the focal immediately after the focal
+draw; on success the walk draw; no permutation (one mover at most per
+activation). *Occupancy semantics*: candidates are the sites empty AT
+DRAW TIME, so the mover's own occupied origin is never a candidate — a
+move is a relocation, never a possible null move; the origin is vacated
+only AFTER the destination is drawn (`movement.attempt_move`, the one
+function both engines call), so under the sync permutation an
+earlier-permuted mover's freed origin IS available to a later mover
+(chains can form) while every agent gets at most one attempt per period.
+*Why a permutation over the movers* rather than id-order iteration: on a
+lattice id correlates with founding position (#107), so id order would
+silently hand a spatial priority to low ids whenever two movers want the
+same last empty cell. *Blocked moves* (#165(c)): an attempt that finds no
+empty site within walk reach fails in place — the primitive returns empty
+BEFORE drawing, so a blocked mover consumes no destination RNG (the
+#133(b) data-conditional shape) — and is counted as ONE undivided number,
+`blocked_moves`, covering both a walled-in mover and one whose last
+reachable site an earlier-permuted mover took: deliberately unlike the
+birth vocabulary's blocked/infeasible split (#171), and the word
+"infeasible" is kept out of every movement text so the two vocabularies
+do not cross-contaminate. The count travels exactly as `blocked_parents`
+does — `GenerationReport`/`GenerationFinished.blocked_moves` (additive,
+default 0), populated per generation by the sync economy and per
+recording window by async `variable_n`, `RunTimeseries.blocked_moves`,
+a "Blocked moves this generation" live metric visible only while
+movement is active (with its (?) from `ECONOMY_HELP["blocked_moves"]`) —
+LIVE-only: not persisted (recorded folders byte-identical), not shown by
+the results browser, and NOT in any golden's pinned field list (#171(f1):
+extending a list moves a digest). Movement is FREE — a movement energy
+cost is a named future option (#165) — and blind to strategy. Two
+movement-on goldens (`sync_economy_lattice_movement`,
+`async_variable_n_lattice_movement`: the two lattice-economy positives
+plus `movement.rate = 0.5`, nothing else changed) were RECORDED, not
+re-recorded, at #172; the flat sync-golden fact that a blocked move is
+impossible on its 3 × 4 Moore torus (population ≤ 7 of 12, radius-1
+neighbourhood of 8) is recorded there as a Rule 7 finding.
+
 **Initial layout** (#109). `structure.initial_layout` ∈ {`random`
 (default), `checkerboard`, `stripes`, `blocks`, `patches`,
 `central_block`} decides ARRANGEMENT only; composition is already set by
@@ -532,11 +619,13 @@ distinguishable. Past a few thousand cells the grid renders as a pixel
 ARRAY, not as thousands of individual shapes, or redraw crawls — this is
 where #94's wall-clock throttling starts to matter.
 
-Structure is IGNORED in tournament mode (no births, no deaths — nothing
-for space to do). Persistence gains a site id per agent under the
-honest-presence rule (#83). Still out of scope: agent movement (M11b),
-per-site capacity above 1, irregular/geographic site sets, and
-co-residency semantics (all M19).
+Structure is IGNORED in tournament mode (no births, no deaths, no
+movement — nothing for space to do). Persistence gains a site id per agent
+under the honest-presence rule (#83); an agent's recorded site is its
+post-boundary (sync) or recording-point (async) position, so a moved agent
+appears at its new site in the next snapshot. Still out of scope: per-site
+capacity above 1, irregular/geographic site sets, and co-residency
+semantics (all M19); the layout painter (M11b Phase E4).
 
 **M11a spec obligation** (design-freeze §12, restated because ~15
 parameters arrive at once): every new CONCEPT, every ENUM VALUE
@@ -728,6 +817,11 @@ event-time types M10b added (async runs only — see below):
   full grid counts every eligible parent) — populated by the synchronous
   lattice economy ONLY, always 0 under the asynchronous clock and
   off-lattice; LIVE-only and unpersisted exactly like `blocked_parents`.
+  Since M11b Phase B (#172), `blocked_moves: int` — how many move attempts
+  found no empty site within walk reach this period (one undivided count;
+  §2.12) — populated by the synchronous economy per generation and by
+  asynchronous `variable_n` per recording window while movement is active,
+  always 0 otherwise; the same LIVE-only, unpersisted, unpinned shape.
 - **`BirthEvent` / `DeathEvent` / `ImitationEvent`** (M10b, async only —
   #82/#95): explicit event-time records with `event_index`,
   `gen_equiv_time`, agent identity, and cause (`threshold`/`moran` for
@@ -914,14 +1008,26 @@ the soft reach kernel, local birth, and local interaction. The
 — a thin sync-side `Matcher` adapter over the structure module's
 `neighbourhood_sample` primitive (#108).
 
-**M11b — agent movement**: the `MovementRule` ABC (#46) with its own walk
-radius and decay pair over the same kernel family, on a configurable
-schedule (the schedule is M11b's genuinely open design item — under async
-it either becomes a new event type or a step inside the focal activation,
-#103); plus the mouse layout painter that writes the layout files M11a's
-config references (#109). Movement remains a **population-dynamics
+**M11b — agent movement (SHIPPED in Phase B, 2026-08-18; #165 designed,
+#172 built; the full mechanism is in §2.12)**: the `MovementRule` ABC
+(#46) with its own walk radius and decay pair over the same kernel family
+(`movement.rate` / `movement.radius` / `movement.decay`), one shipped
+implementation (`KernelWalk`), success-driven and walk-away rules as
+future implementations of the same interface. The schedule is NO LONGER
+OPEN — the #103 item is resolved by #165: under the asynchronous clock
+movement is a step INSIDE the focal activation (in-activation WON), and
+under the synchronous clock it is the final step of the demographic
+boundary; both clocks move-then-play. The two alternatives were REJECTED
+in #165 and are recorded there so they are not re-proposed by accident: a
+separate movement EVENT TYPE (it would break the one-event-one-activation
+correspondence that Δt = 1/N(t) rests on, putting a rate-dependent
+correction into every axis and calibration figure), and a CADENCE
+SCHEDULE (synchronized global reshuffling pulses are a modelling artifact
+with no asynchronous meaning). Movement remains a **population-dynamics
 concern, orthogonal to strategies** — strategies do not decide movement in
-the base design (unchanged from #46).
+the base design (unchanged from #46). Named future option, out of M11b: a
+movement energy cost (#165). Still M11b: the mouse layout painter that
+writes the layout files M11a's config references (#109; Phase E4).
 
 **M19 — geographic structures**: irregular site sets from GeoJSON polygons
 (shared-border adjacency) or raster masks (cells absent outside a

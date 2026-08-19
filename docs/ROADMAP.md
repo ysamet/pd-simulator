@@ -272,6 +272,31 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     "one birth per event" is not what the engine does), and the golden
     file has ONE `GenerationFinished` field list for both clocks (no
     per-clock list to extend). 1073 tests passing.
+
+    ✅ **M11b Phase B landed 2026-08-18** (DECISIONS #172): agent movement —
+    `pdsim/core/movement.py` (the `MovementRule` ABC, the `KernelWalk`
+    over the third reach-kernel pair `movement.radius`/`movement.decay`,
+    `attempt_move` with vacate-after-draw, the one `movement_active`
+    gate); the `Movement` registry section (`movement.rate` default 0 =
+    off; old configs re-run identically) with its greying-table rows;
+    the sync boundary's FINAL movement step (coins in ascending id →
+    ONE mover permutation → walk draws, newborns eligible) and the async
+    in-activation step (coin after the focal draw, move-then-play, no
+    new event type); the gate lattice + energy economy (sync
+    `energy_economy`, async `variable_n`; `fixed_n` excluded — full
+    grid); the LIVE-only `blocked_moves` channel with the app's third
+    metric; TWO movement-on goldens RECORDED (`sync_economy_lattice_movement`,
+    `async_variable_n_lattice_movement`, rate 0.5) with all eight
+    pre-existing pins and every counting pin untouched — zero
+    re-recording; the `placement_contest` reword to the #171(f2) fact
+    (registry + greying note); DESIGN §2.12 movement passage and §6.3
+    rewritten to the resolved schedule. Six Rule 7 findings ruled
+    in-session (the sync golden cannot produce a blocked move at any
+    rate — recorded honestly with 0; the garbled permutation sentence
+    read as "call iff ≥ 1 coin drawn"; module in `core/`; N = 1 async
+    draws no coin; the greying note reworded; a pre-existing
+    `widget_values_from_config` gap over `config.output` logged for
+    E1). 1129 tests passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

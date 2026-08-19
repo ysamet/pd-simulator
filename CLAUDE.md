@@ -297,10 +297,13 @@ design rulings DECISIONS #164–#170: feasibility-aware admission resolves
 #159, the in-activation / end-of-boundary movement schedule resolves the
 #103 open item, `encounter_mode`, the `advanced` disclosure flag,
 live-run display continuity, the measurement-gated async calibration,
-and the A2 trigger amendment). Phases A–E, one per fresh session. **The
-next implementation effort is Phase A — feasibility-aware admission
-(#164)**, which carries the milestone's ONLY golden re-recording; then
-B (movement), C (`encounter_mode`), D (calibration + advisories A1-A3),
-E (tabs, disclosure, live-run continuity, layout painter, close-out).
+and the A2 trigger amendment). Phases A–E, one per fresh session. **Phase A —
+feasibility-aware admission (#164) — landed 2026-08-17 (DECISIONS #171;
+the re-recording budget went UNUSED). Phase B — movement — landed
+2026-08-18 (DECISIONS #172; `pdsim/core/movement.py`, the `movement.*`
+registry section, two movement-on goldens RECORDED, zero re-recording;
+1129 tests). The next implementation effort is Phase C
+(`encounter_mode`)**; then D (calibration + advisories A1-A3), E (tabs,
+disclosure, live-run continuity, layout painter, close-out).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.
