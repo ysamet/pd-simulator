@@ -5062,3 +5062,161 @@ appears roughly N times per generation-equivalent); ROADMAP's M12
 scoping input line points the #171(f2) checkpoint at this evidence.
 Docs-only session: no engine, registry, test, or golden change; test
 count unchanged at 1129.
+
+**#174 — 2026-08-19 — Phase C pre-drafting rulings (design layer):
+(a) the `spatial_income_arithmetic` DISPLAY branch (2× vs 1× the effective
+neighbour count, and the Economy calibration fine print it feeds) moves
+INTO Phase C, superseding #166's ripple placement for the display side
+only — A3's mode-conditional message and all advisory work stay Phase D.
+Rationale: spec V3 as frozen expects the calibration figure at Phase C's
+landing while #166 assigned the branch to Phase D; between the two phases
+the panel would show 8 expected matches while the engine plays 4 under
+`per_pair` — an actively false readout, the #34/#141(c) violation. The
+narrow pure-function branch lands in C so the panel is never false at any
+commit boundary. (b) The halved-match-count pin runs in the #139
+forced-draw regime (fully occupied von Neumann torus, k ≥ degree), where
+halving is exact. (c) Deduplication's survivor is the FIRST OCCURRENCE in
+pair-list order; since pairings are drawn in ascending initiator-id order
+(#57), in the forced regime every surviving match's initiator is the lower
+id of the pair — pinned. (d) The greying entry carries BOTH columns: sync
+greys on the engine's ACTUAL spatial gate (evolution AND lattice AND
+toggle, #137(b)/#141(c)), never the toggle alone; async always greyed with
+the #166(c) note; IGNORED_IN_TOURNAMENT, matching movement's #172(b)
+treatment. (e) The bench gains TWO per_pair columns — lattice_vn_r1 and
+lattice_moore_r1 under `per_pair` — vn added because at k ≥ 4 EVERY
+adjacent pair re-meets, making it the sharpest single test of the #156
+held hypothesis; per-match cost must be reported (matches counted), since
+`per_pair` halves match counts mechanically and seconds-per-generation
+alone proves nothing; verdict criterion fixed ex ante (below). (f) The
+cross-mode RNG pin is scoped to the PARTNER DRAWS: downstream stream
+divergence in `per_pair` mode (removed matches remove their continuation
+coins under `match.length_mode = continuation`) is the knob working, not
+a #166(b) violation. (g) DESIGN §2.12 gains an encounter-mode passage —
+pre-authorized here because the spec's docs-obligations list named only
+Phases A and B.**
+
+**#175 — 2026-08-20 — M11b Phase C BUILT: `matching.encounter_mode` lands
+— dedup-after-draws inside `SpatialKernel.pairings`, the registry entry
+and greying row, the #174(a) calibration display branch; zero
+re-recordings and zero new goldens (all 31 golden tests and every
+counting pin untouched); the bench's two `per_pair` columns with counted
+matches, and the #156 held hypothesis SUPPORTED (M11b Phase C; spec
+ruling 4 as designed in #166, amended by #174).** (a) THE CHOKE POINT.
+Deduplication lives at the END of `SpatialKernel.pairings` — the one
+place the synchronous pair list exists, after the eager #57 draw loop and
+before the iterator is handed to either sync engine — so both consuming
+loops (`PopulationDynamics.step`, `EconomyDynamics.step`) are served by
+one implementation and neither is touched. The gate needs no second
+check: the SpatialKernel is constructed ONLY where the engine's spatial
+gate holds (`_build_generation_matcher`: evolution + occupancy + toggle;
+the tournament loop calls `build_matcher` directly and never builds
+one), so `encounter_mode == "per_pair"` inside the kernel completes the
+prompt's AND exactly. Mechanics: a seen-set of frozenset id pairs, first
+occurrence appended, later duplicates dropped — the survivor keeps its
+initiator seat, and since focals walk ascending (#57) the forced-regime
+survivor's initiator is the lower id (#174(c), pinned at kernel and
+engine). Under `per_initiator` the drawn list is returned by the
+pre-existing `return iter(pairs)` — not rebuilt, not reordered — and the
+async loop is byte-untouched. (b) REGISTRY AND CONFIG.
+`matching.encounter_mode` (choice, `per_initiator` | `per_pair`, default
+`per_initiator`), description VERBATIM from the prompt's single source;
+registered LAST in the Matching section — the prompt's "positioned after
+the spatial-interaction widgets" read as after ALL the widgets spatial
+interaction governs (the toggle, the matcher it greys, the k that does
+the work), so the knob renders below k; recorded as the reading taken
+(finding f1). `MatchingConfig.encounter_mode` with the registry default,
+so a pre-M11b YAML loads at `per_initiator` and re-runs identically
+(hard rule 8; pinned by a stripped-YAML reload and a bare
+`model_validate`); `widget_values_from_config` carries the key through
+the generic `_registry_keys` walk (round-trip pinned). (c) GREYING
+(#174(d)). The `STRUCTURE_GREYING` row: sync cell live iff
+`_spatial_sampling_active` — the engine's ACTUAL gate (evolution AND
+lattice AND toggle, #137(b)/#141(c)); reproduction mode is deliberately
+NOT a conjunct (both sync loops substitute the kernel; pinned live under
+imitation AND economy); async cell always greyed;
+`IGNORED_IN_TOURNAMENT` extended. Both notes carry the table's house
+"NOTE: " prefix with the ruled sentences riding whole after it —
+containment-pinned (finding f2): the sync scope note derives from the
+description's closing sentence; the async note is #166(c)'s text
+verbatim. (d) THE CALIBRATION DISPLAY BRANCH (#174(a)).
+`spatial_income_arithmetic` gains `encounter_mode` (default
+`per_initiator`, so every existing caller and pin is untouched):
+matches per agent = 2 × `effective_neighbour_count` under the default,
+1 × under `per_pair`; `calibration_report` passes the config's mode; the
+spatial regime note became a mode-conditional function whose
+per-initiator text is the pre-Phase-C sentence byte-for-byte, and whose
+per_pair text names the 1× multiplier and the mode; `ECONOMY_HELP
+["expected_matches"]` gains the per_pair sentence (the (?) cannot
+contradict the number, #154's rule). FINDING f3, resolved in-session:
+the memory-depth note's spatial branch ALSO embedded the doubling
+("meets twice every generation", worst case 2 × rounds × generations) —
+under `per_pair` both claims would be false, the very #34 falsehood
+#174(a)'s rationale names — so the note became mode-aware in the same
+display module (meets once, worst case halves; pinned both ways). No
+advisory work, no A3, no async calibration (Phase D). App code untouched
+— the widget renders from the registry, the greying from the table, the
+fine print from `calibration_report`. (e) TESTS. 1157 passing (1129 +
+28: 26 in the new `test_encounter_mode.py` — the T-B halved-match pin at
+k = 4 and k = 6 (every adjacent pair EXACTLY once, every agent EXACTLY
+4, 18 matches, while #139's ×2 test pins the default unchanged), the
+T-C survivor pins, the T-D cross-mode partner-draw pins (kernel call log
+identical call-for-call at forced k = 4 AND stochastic k = 2; the
+engine-level 9-call partner-draw prefix identical, nothing past it
+asserted per #174(f)), T-E greying, T-F calibration, T-G round trip —
+plus 2 new bench tests). Nothing retired. FINDING f4: Task 6's
+counted-matches reporting forced amendments to three existing bench
+SHAPE tests (never golden pins): `time_cell` now returns a `CellTiming`
+named tuple (seconds + counted matches medians), so two positive-seconds
+assertions read `.seconds_per_generation`; the CSV column pin gained the
+two new fields; the five-column-grid test became the seven-column test.
+Amended in place with the reason in each docstring. (f) THE BENCH
+(#174(e)). `lattice_vn_r1_per_pair` / `lattice_moore_r1_per_pair` —
+identical tunings to their #156 parents plus the mode (pinned equal
+outside `matching`); labels parse in `--matchers`; `--structure` runs
+the seven-column grid. Matches per generation are COUNTED via the
+engines' read-only `on_match` observer during the timed run (one
+integer increment per match, identical across every column) — and the
+counted medians equal the arithmetic expectations exactly, a built-in
+self-check: round_robin N(N−1)/2, random_k 5N, vn 4N (k = 5 clamps),
+moore 5N, vn_per_pair 2N (the exact forced halving), moore_per_pair
+≈ 3.44N ≈ (5 − 4 × 25/64)N (the stochastic dedup's expectation).
+MEASURED (2026-08-20, this machine, defaults k = 5 / 50 rounds, 5
+generations per cell, median s/generation | counted matches/gen |
+µs/match): N = 50: round_robin 0.458|1225|373, random_k 0.106|250|423,
+vn_r1 0.103|200|515, moore_r1 0.120|250|480, moore_r5 0.174|250|696,
+vn_pp 0.117|100|1170, moore_pp 0.147|173|848; N = 100:
+2.282|4950|461, 0.211|500|422, 0.201|400|502, 0.228|500|456,
+0.220|500|440, 0.089|200|447, 0.147|344|427; N = 200: 8.585|19900|431,
+0.419|1000|419, 0.422|800|528, 0.483|1000|483, 0.516|1000|516,
+0.186|400|465, 0.308|686|449; N = 400: 39.158|79800|491,
+0.876|2000|438, 0.875|1600|547, 0.959|2000|480, 0.918|2000|459,
+0.374|800|467, 0.593|1373|432. Two corroborating 9-generation runs and
+a tie-breaker were run besides. MEASUREMENT CAVEATS, honestly: (i) the
+machine was NOT reliably idle — intermittent background load (OneDrive
+sync of this session's writes suspected) contaminated isolated cells
+(a first 3-generation full grid's N = 100 block ran ≈ 2× slow; one
+N = 200 run and two moore_pp-at-400 samples spiked to ≈ 730 µs/match
+where three other runs of the same cell gave 432/467/506) — within-run
+column comparisons are the usable evidence, #156's own precedent, and
+the medians above come from the cleanest full grid; (ii) µs/match =
+cell seconds ÷ counted matches INCLUDES the generation's non-match
+overhead, which per_pair columns amortise over half the matches — an
+upward bias on their figure of ≈ 3–4% at N = 400 and dominant at
+N = 50 (vn_pp's 1170 is overhead arithmetic, not match cost; the
+N = 50 row is excluded from the verdict). VERDICT, against the #174(e)
+ex-ante criterion: **SUPPORTED**. Within-run per-match excess over
+random_k at N ∈ {100, 200, 400}: vn_r1 (the sharpest test — every
+adjacent pair re-meets) +19% / +26% / +25% as the parent, +6% / +11% /
++7% as per_pair (≈ +3–8% after the bias) — roughly three quarters of
+the excess vanishes with the within-generation re-meets, and the
+remainder sits inside the grid's own run-to-run noise band (random_k
+itself spanned 398–486 across runs); moore_r1 +8% / +15% / +10% as the
+parent, +1% / +7% / −1% as per_pair (clean samples). Nothing tuned.
+The residual is reported, not rounded away; nowhere does the 16–21%
+excess persist at similar magnitude, so REFUTED and "partial" are both
+off the table. (g) DOCS: DESIGN §2.12 gains the encounter-mode passage
+(#174(g)); ROADMAP the Phase C status line; `PARAMETERS.md`
+regenerated; the spec status line updated; CLAUDE.md's current-phase
+paragraph advanced to Phase D. Findings f1–f4 above were the session's
+only Rule 7-adjacent items — no contradiction between the prompt, the
+spec, DECISIONS, and the code was found.

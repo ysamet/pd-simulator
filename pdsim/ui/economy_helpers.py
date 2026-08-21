@@ -57,7 +57,10 @@ ECONOMY_HELP: dict[str, str] = {
         "(each agent starts k matches and is drawn into ≈ k more), and "
         "2 × the effective neighbour count while spatial interaction is on "
         "(each agent starts a match with every reachable neighbour and is "
-        "drawn into as many in return)."
+        "drawn into as many in return). With encounter mode 'per_pair' the "
+        "duplicate pairs are collapsed after the draws, so the spatial "
+        "figure is 1 × the effective neighbour count instead — each "
+        "neighbouring pair plays at most once per generation."
     ),
     "income": (
         "The two income extremes per generation: what an agent earns if every "
@@ -170,12 +173,36 @@ must carry: the 2 × effective-neighbour-count figure describes an interior
 agent on a full grid, and every other agent earns less than it says.
 """
 
-_SPATIAL_REGIME_NOTE = (
-    "Under spatial interaction the interaction budget is set by the grid's "
-    "geometry — 2 × the effective neighbour count — no matter how large the "
-    "population grows, so this window stays put for the whole run. " + SPATIAL_FINE_PRINT
-)
-"""The spatial branch's regime caption: bounded budget, plus the fine print."""
+
+def _spatial_regime_note(encounter_mode: str) -> str:
+    """The spatial branch's regime caption: bounded budget, plus the fine print.
+
+    Mode-conditional since M11b Phase C (#174(a)): the caption states the
+    multiplier the arithmetic actually used — 2 × the effective neighbour
+    count under ``"per_initiator"``, 1 × under ``"per_pair"`` — so the
+    Economy panel's fine print can never contradict the figure beside it
+    (#34). The per-initiator sentence is the pre-Phase-C text, verbatim.
+
+    Args:
+        encounter_mode: ``matching.encounter_mode`` — ``"per_initiator"``
+            or ``"per_pair"``.
+
+    Returns:
+        The caption for :attr:`CalibrationReport.regime_note`, ending with
+        :data:`SPATIAL_FINE_PRINT`.
+    """
+    if encounter_mode == "per_pair":
+        budget = (
+            "1 × the effective neighbour count (encounter mode 'per_pair' "
+            "collapses duplicate pairs after the draws)"
+        )
+    else:
+        budget = "2 × the effective neighbour count"
+    return (
+        "Under spatial interaction the interaction budget is set by the grid's "
+        f"geometry — {budget} — no matter how large the "
+        "population grows, so this window stays put for the whole run. " + SPATIAL_FINE_PRINT
+    )
 
 
 def _expected_rounds(
@@ -202,10 +229,13 @@ class SpatialIncome(NamedTuple):
     """The spatial branch's worked income arithmetic (DECISIONS #154).
 
     Attributes:
-        matches_per_agent: 2 × the effective neighbour count — each agent
-            starts a match with every reachable neighbour and is drawn into
-            as many in return (the calibration guide §4.2's third regime,
-            measured exactly in #139).
+        matches_per_agent: 2 × the effective neighbour count under
+            ``encounter_mode = "per_initiator"`` — each agent starts a
+            match with every reachable neighbour and is drawn into as many
+            in return (the calibration guide §4.2's third regime, measured
+            exactly in #139) — or 1 × it under ``"per_pair"``, where the
+            duplicate pairs are collapsed after the draws (M11b Phase C,
+            #166/#174(a)).
         rounds_per_agent: Matches × expected rounds per match.
         all_c_income: Per-generation income if every round is mutual
             cooperation (rounds per agent × R).
@@ -234,6 +264,7 @@ def spatial_income_arithmetic(
     continuation_probability: float,
     payoff_reward: float,
     payoff_punishment: float,
+    encounter_mode: str = "per_initiator",
 ) -> SpatialIncome:
     """The spatial survival-window arithmetic, as a pure paint-time function.
 
@@ -241,11 +272,14 @@ def spatial_income_arithmetic(
     effective_neighbour_count` (reused, not re-derived — DECISIONS #141(e)):
     an interior agent initiates a match against each of its min(k, degree)
     reachable neighbours and is drawn into as many in return (§4.2 of the
-    calibration guide; measured exactly in #139). Everything downstream —
-    rounds per agent, the two income extremes, the window bounds — follows
-    the same shape as the aspatial calibration branches. The figure is the
-    fully-occupied, uniform-degree case (:data:`SPATIAL_FINE_PRINT` states
-    it; any readout showing these numbers must carry that sentence).
+    calibration guide; measured exactly in #139) — or 1 × it under
+    ``encounter_mode = "per_pair"``, where the duplicate pairs are
+    collapsed after the draws (M11b Phase C, the #174(a) display branch).
+    Everything downstream — rounds per agent, the two income extremes, the
+    window bounds — follows the same shape as the aspatial calibration
+    branches. The figure is the fully-occupied, uniform-degree case
+    (:data:`SPATIAL_FINE_PRINT` states it; any readout showing these
+    numbers must carry that sentence).
 
     Registry-value inputs only, deliberately (DECISIONS #154): the M11b
     advisories A1 and A2 trigger on exactly these quantities, so this
@@ -267,11 +301,16 @@ def spatial_income_arithmetic(
             under ``"continuation"``; expected length 1 / (1 − w)).
         payoff_reward: R — ``game.payoff_reward``.
         payoff_punishment: P — ``game.payoff_punishment``.
+        encounter_mode: ``matching.encounter_mode`` —
+            ``"per_initiator"`` (the 2× default) or ``"per_pair"`` (1×).
 
     Returns:
         The full :class:`SpatialIncome` arithmetic.
     """
-    matches = 2.0 * effective_neighbour_count(neighbourhood_shape, boundary, opponents_per_agent)
+    multiplier = 1.0 if encounter_mode == "per_pair" else 2.0
+    matches = multiplier * effective_neighbour_count(
+        neighbourhood_shape, boundary, opponents_per_agent
+    )
     rounds_per_agent = matches * _expected_rounds(
         length_mode, rounds_per_match, continuation_probability
     )
@@ -425,9 +464,10 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             continuation_probability=config.match.continuation_probability,
             payoff_reward=config.game.payoff_reward,
             payoff_punishment=config.game.payoff_punishment,
+            encounter_mode=config.matching.encounter_mode,
         )
         matches = arithmetic.matches_per_agent
-        regime_note = _SPATIAL_REGIME_NOTE
+        regime_note = _spatial_regime_note(config.matching.encounter_mode)
     elif config.matching.matcher == "round_robin":
         matches = float(n - 1)
         regime_note = (
@@ -512,11 +552,16 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             # occasionally") is the opposite of the lattice truth, where
             # neighbours are fixed and an adjacent pair meets twice per
             # generation (#139), doubling round_robin's per-pair growth rate.
-            worst = 2 * rounds * dynamics.generations
+            # Mode-aware since M11b Phase C (#174(a)'s never-false rule):
+            # under 'per_pair' the pair meets once and the worst case halves.
+            per_pair = config.matching.encounter_mode == "per_pair"
+            meetings = 1 if per_pair else 2
+            worst = meetings * rounds * dynamics.generations
+            frequency = "once" if per_pair else "twice"
             memory_note = (
                 "Histories persist for an agent's whole life and memory depth "
                 "is unlimited: under spatial interaction an agent's "
-                "neighbours are FIXED, so a neighbouring pair meets twice "
+                f"neighbours are FIXED, so a neighbouring pair meets {frequency} "
                 f"every generation and one relationship can reach ≈ {worst:,.0f} "
                 f"recorded moves by generation {dynamics.generations}, with "
                 "the per-round history copy growing alongside (cost quadratic "

@@ -33,6 +33,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -47,12 +48,14 @@ DEFAULT_SIZES = (50, 100, 200, 400)
 DEFAULT_MATCHERS = ("round_robin", "random_k")
 """Matchers benchmarked by default."""
 
-STRUCTURE_CELLS: dict[str, tuple[str, int]] = {
-    "lattice_vn_r1": ("von_neumann", 1),
-    "lattice_moore_r1": ("moore", 1),
-    "lattice_moore_r5": ("moore", 5),
+STRUCTURE_CELLS: dict[str, tuple[str, int, str]] = {
+    "lattice_vn_r1": ("von_neumann", 1, "per_initiator"),
+    "lattice_moore_r1": ("moore", 1, "per_initiator"),
+    "lattice_moore_r5": ("moore", 5, "per_initiator"),
+    "lattice_vn_r1_per_pair": ("von_neumann", 1, "per_pair"),
+    "lattice_moore_r1_per_pair": ("moore", 1, "per_pair"),
 }
-"""The M11a structure columns: label -> (neighbourhood shape, interaction radius).
+"""The structure columns: label -> (neighbourhood shape, radius, encounter mode).
 
 Each times a synchronous imitation run on a fully occupied lattice (blank
 dimensions resolve to a most-square grid of exactly N sites, torus boundary)
@@ -60,10 +63,16 @@ with ``matching.spatial_interaction`` on, so the match phase routes through
 ``SpatialKernel`` and the reach kernel instead of the configured matcher.
 Imitation keeps N constant with no demography — the same isolation
 discipline as the economy/async tunings (#91/#102) — so the columns time the
-kernel-draw + match-phase cost and nothing else. The three cells test the two
-falsifiable claims the spec states for Phase E: cost flat in R once the reach
-cache is warm (moore_r1 vs moore_r5), and the lattice at or below random_k
-at equal k (kernel draws no dearer than the matches they replace).
+kernel-draw + match-phase cost and nothing else. The three M11a cells test
+the two falsifiable claims the spec states for Phase E: cost flat in R once
+the reach cache is warm (moore_r1 vs moore_r5), and the lattice at or below
+random_k at equal k (kernel draws no dearer than the matches they replace).
+The two ``per_pair`` cells (M11b Phase C, #174(e)) are identical tunings to
+their r1 parents plus ``matching.encounter_mode = "per_pair"`` — the first
+real test of #156's held hypothesis that re-met pairs' within-generation
+history copies explain the lattice per-match excess over random_k. Because
+``per_pair`` halves the match count mechanically, the grid reports per-match
+cost (matches counted), not seconds per generation alone.
 """
 
 STRUCTURE_MATCHERS = tuple(STRUCTURE_CELLS)
@@ -105,10 +114,13 @@ def _cell_config(
         size: Population size N.
         matcher: Matching scheme machine name, or one of the
             :data:`STRUCTURE_CELLS` labels (``lattice_vn_r1``,
-            ``lattice_moore_r1``, ``lattice_moore_r5``) — a structure label
-            builds a synchronous imitation run on a fully occupied N-site
-            lattice with ``matching.spatial_interaction`` on, timing the
-            reach-kernel match phase at the same k as the random_k cell.
+            ``lattice_moore_r1``, ``lattice_moore_r5``,
+            ``lattice_vn_r1_per_pair``, ``lattice_moore_r1_per_pair``) — a
+            structure label builds a synchronous imitation run on a fully
+            occupied N-site lattice with ``matching.spatial_interaction``
+            on, timing the reach-kernel match phase at the same k as the
+            random_k cell; the ``_per_pair`` labels add
+            ``matching.encounter_mode = "per_pair"`` (M11b Phase C).
         k: Opponents per agent (used under random_k and by the spatial
             kernel — the lattice cells draw k partners per focal, clamped
             to the neighbourhood by the primitive, #81).
@@ -145,12 +157,17 @@ def _cell_config(
                 "match phase at constant N; drop --reproduction-mode/--time-model "
                 "to run it (one tuning per measurement, #91)."
             )
-        shape, radius = STRUCTURE_CELLS[matcher]
+        shape, radius, encounter_mode = STRUCTURE_CELLS[matcher]
         # The matcher choice is unconsulted while the spatial toggle is on
         # (#137(b)); random_k is set so the config states the honest aspatial
         # counterpart. Blank rows/cols auto-size to a most-square grid of
         # exactly N sites (full occupancy, torus default — uniform degree).
-        matching = {"matcher": "random_k", "opponents_per_agent": k, "spatial_interaction": True}
+        matching = {
+            "matcher": "random_k",
+            "opponents_per_agent": k,
+            "spatial_interaction": True,
+            "encounter_mode": encounter_mode,
+        }
         structure = {
             "kind": "lattice",
             "neighbourhood_shape": shape,
@@ -181,8 +198,29 @@ def _cell_config(
     return ExperimentConfig.model_validate(payload)
 
 
-def time_cell(config: ExperimentConfig, generations: int) -> float:
-    """Run one grid cell and return its median seconds per generation.
+class CellTiming(NamedTuple):
+    """One benchmark cell's measurement (M11b Phase C, #174(e)).
+
+    Attributes:
+        seconds_per_generation: Median wall-clock seconds per post-warmup
+            generation (or generation-equivalent, under the async clock).
+        matches_per_generation: Median matches played per post-warmup
+            generation, COUNTED through the engines' read-only ``on_match``
+            observer during the timed run — never derived from the config.
+            Counted because ``per_pair`` halves match counts mechanically,
+            so the structure grid's verdict must read per-match cost, and
+            because the Moore ``per_pair`` count is stochastic (k = 5 of 8
+            neighbours — how many pairs collapse varies by draw). The
+            observer is one attribute increment per match, identical across
+            every column, so cross-column comparisons are undisturbed.
+    """
+
+    seconds_per_generation: float
+    matches_per_generation: float
+
+
+def time_cell(config: ExperimentConfig, generations: int) -> CellTiming:
+    """Run one grid cell; report median seconds and matches per generation.
 
     The first generation is discarded as warmup (imports, allocator, CPU
     caches all settle during it); the median of the rest is robust against
@@ -195,29 +233,41 @@ def time_cell(config: ExperimentConfig, generations: int) -> float:
             post-warmup timing exists; enforced by the CLI).
 
     Returns:
-        Median wall-clock seconds per post-warmup generation (or
-        generation-equivalent, under the async time model).
+        The cell's :class:`CellTiming`, both figures medians over the
+        post-warmup generations.
     """
     timings: list[float] = []
+    counts: list[int] = []
+    played = 0
+
+    def observe(_result: object) -> None:
+        """Count one finished match (read-only — never touches the run)."""
+        nonlocal played
+        played += 1
+
     if config.dynamics.time_model == "asynchronous":
         # One pull on the period iterator = one generation-equivalent at
         # the default recording cadence with a constant-N population.
-        periods = AsyncDynamics(config, np.random.default_rng(config.seed)).run()
+        periods = AsyncDynamics(config, np.random.default_rng(config.seed)).run(on_match=observe)
         for _ in range(generations):
+            played = 0
             start = time.perf_counter()  # monotonic, high-resolution clock
             next(periods)
             timings.append(time.perf_counter() - start)
-        return statistics.median(timings[1:])
+            counts.append(played)
+        return CellTiming(statistics.median(timings[1:]), statistics.median(counts[1:]))
     dynamics: PopulationDynamics | EconomyDynamics
     if config.dynamics.reproduction_mode == "energy_economy":
         dynamics = EconomyDynamics(config, np.random.default_rng(config.seed))
     else:
         dynamics = PopulationDynamics(config, np.random.default_rng(config.seed))
     for _ in range(generations):
+        played = 0
         start = time.perf_counter()
-        dynamics.step()
+        dynamics.step(on_match=observe)
         timings.append(time.perf_counter() - start)
-    return statistics.median(timings[1:])
+        counts.append(played)
+    return CellTiming(statistics.median(timings[1:]), statistics.median(counts[1:]))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -282,12 +332,15 @@ def _parser() -> argparse.ArgumentParser:
         "--structure",
         action="store_true",
         help=(
-            "Run the M11a structure grid: N x {round_robin, random_k, "
-            "lattice_vn_r1, lattice_moore_r1, lattice_moore_r5} under synchronous "
-            "imitation at constant N. The lattice columns route the match phase "
-            "through the reach kernel on a fully occupied most-square grid; the "
-            "two aspatial columns stay as the baseline. Individual lattice labels "
-            "are also accepted directly in --matchers."
+            "Run the structure grid: N x {round_robin, random_k, "
+            "lattice_vn_r1, lattice_moore_r1, lattice_moore_r5, "
+            "lattice_vn_r1_per_pair, lattice_moore_r1_per_pair} under "
+            "synchronous imitation at constant N. The lattice columns route "
+            "the match phase through the reach kernel on a fully occupied "
+            "most-square grid; the two aspatial columns stay as the baseline; "
+            "the two per_pair columns (M11b Phase C) add encounter-mode "
+            "deduplication. Individual lattice labels are also accepted "
+            "directly in --matchers."
         ),
     )
     parser.add_argument(
@@ -328,8 +381,9 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        # The full five-column structure grid (spec M11a Phase E): the two
-        # aspatial baselines plus the three lattice cells.
+        # The full seven-column structure grid (spec M11a Phase E, plus the
+        # M11b Phase C per_pair pair): the two aspatial baselines plus the
+        # five lattice cells.
         matchers = list(DEFAULT_MATCHERS) + list(STRUCTURE_MATCHERS)
 
     asynchronous = args.time_model == "asynchronous"
@@ -340,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         matchers = ["event_time"]
 
     rows: list[dict[str, object]] = []
-    print(f"{'N':>6}  {'matcher':<16}  {'s/generation':>12}")
+    print(f"{'N':>6}  {'matcher':<26}  {'s/generation':>12}  {'matches/gen':>11}  {'us/match':>9}")
     for size in sizes:
         for matcher in matchers:
             try:
@@ -357,15 +411,43 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError as error:
                 print(f"error: N={size}, {matcher}: {error}", file=sys.stderr)
                 return 1
-            seconds = time_cell(config, args.generations)
-            rows.append({"n": size, "matcher": matcher, "seconds_per_generation": seconds})
-            print(f"{size:>6}  {matcher:<16}  {seconds:>12.4f}")
+            timing = time_cell(config, args.generations)
+            # Per-match cost from the two medians (#174(e)); a cell that
+            # played nothing (possible only in degenerate hand-rolled
+            # grids) reports 0 rather than dividing by zero.
+            per_match_us = (
+                timing.seconds_per_generation / timing.matches_per_generation * 1e6
+                if timing.matches_per_generation
+                else 0.0
+            )
+            rows.append(
+                {
+                    "n": size,
+                    "matcher": matcher,
+                    "seconds_per_generation": timing.seconds_per_generation,
+                    "matches_per_generation": timing.matches_per_generation,
+                    "us_per_match": per_match_us,
+                }
+            )
+            print(
+                f"{size:>6}  {matcher:<26}  {timing.seconds_per_generation:>12.4f}  "
+                f"{timing.matches_per_generation:>11.0f}  {per_match_us:>9.1f}"
+            )
 
     if args.out is not None:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["n", "matcher", "seconds_per_generation"])
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "n",
+                    "matcher",
+                    "seconds_per_generation",
+                    "matches_per_generation",
+                    "us_per_match",
+                ],
+            )
             writer.writeheader()
             writer.writerows(rows)
         print(f"\nWrote {out}")

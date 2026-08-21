@@ -27,6 +27,7 @@ import numpy as np
 
 from pdsim.config.experiment import MatchingConfig
 from pdsim.core.agent import Agent
+from pdsim.core.game import AgentId
 from pdsim.core.occupancy import Occupancy
 from pdsim.core.structure import Structure, neighbourhood_sample
 
@@ -168,10 +169,15 @@ class SpatialKernel(Matcher):
     Two behaviours are inherited from :class:`RandomK` DELIBERATELY — both
     look like defects on first reading and neither is:
 
-    1. **No deduplication** (#57): agent A can draw B while B draws A, so a
-       pair can meet twice in one generation. Kept so income statistics stay
-       comparable to the well-mixed baseline (and with it the existing
-       ``len(agent._histories)`` sharp edge, unchanged).
+    1. **No deduplication under the default** (#57): agent A can draw B
+       while B draws A, so a pair can meet twice in one generation. Kept so
+       income statistics stay comparable to the well-mixed baseline (and
+       with it the existing ``len(agent._histories)`` sharp edge,
+       unchanged). Since M11b Phase C the doubling has a switch:
+       ``matching.encounter_mode = "per_pair"`` collapses duplicate
+       UNORDERED pairs AFTER all draws complete (#166/#174 — see
+       :meth:`pairings`); the default ``"per_initiator"`` leaves the pair
+       list untouched.
     2. **Clamp, don't raise** (#81): when k exceeds the number of reachable
        occupied neighbours, the agent simply plays the neighbours that
        exist — a corner cell with 3 neighbours under bounded Moore plays 3
@@ -196,6 +202,7 @@ class SpatialKernel(Matcher):
         radius: int | None,
         decay: float,
         k: int,
+        encounter_mode: str = "per_initiator",
     ) -> None:
         """Create the kernel adapter over a run's structure and occupancy.
 
@@ -212,12 +219,18 @@ class SpatialKernel(Matcher):
             k: ``matching.opponents_per_agent`` — how many partners each
                 focal agent draws (clamped to the reachable occupied
                 neighbours by the primitive).
+            encounter_mode: ``matching.encounter_mode`` (M11b Phase C,
+                #166) — ``"per_initiator"`` (the default: every drawn
+                match plays, the historical behaviour) or ``"per_pair"``
+                (duplicate unordered pairs collapse after the draws, so
+                each pair plays at most once per generation).
         """
         self._structure = structure
         self._occupancy = occupancy
         self._radius = radius
         self._decay = decay
         self._k = k
+        self._encounter_mode = encounter_mode
 
     def pairings(
         self, agents: Sequence[Agent], rng: np.random.Generator
@@ -233,13 +246,28 @@ class SpatialKernel(Matcher):
         focal's own; the drawn sites map back to agents through the
         occupancy. Nothing else.
 
+        **Encounter-mode contract** (M11b Phase C, #166(b)/#174): the
+        partner draws above are made EXACTLY the same in both modes — same
+        calls, same order, same random-number consumption — and under
+        ``"per_pair"`` deduplication applies to the RESULTING pair list,
+        after ALL draws complete and before ANY match is played: duplicate
+        UNORDERED pairs collapse, the first occurrence in pair-list order
+        survives (keeping its initiator seat — since focals walk in
+        ascending id order, in a forced-draw regime every survivor's
+        initiator is the lower id of its pair, #174(c)), and later
+        duplicates are dropped. The knob changes WHICH matches run, never
+        how randomness is consumed; under the default ``"per_initiator"``
+        the drawn list is returned untouched — not rebuilt, not reordered.
+
         Args:
             agents: The current population (any order; walked ascending).
             rng: The run's seeded generator; consumes exactly one kernel
-                draw per focal agent whose eligible set is non-empty.
+                draw per focal agent whose eligible set is non-empty (in
+                BOTH encounter modes — deduplication draws nothing).
 
         Returns:
-            An iterator over the (initiator, partner) pairs, in draw order.
+            An iterator over the (initiator, partner) pairs, in draw order
+            (under ``"per_pair"``, minus the dropped later duplicates).
         """
         by_id = {agent.agent_id: agent for agent in agents}
         pairs: list[tuple[Agent, Agent]] = []
@@ -259,6 +287,17 @@ class SpatialKernel(Matcher):
                 partner_id = self._occupancy.agent_at(site_id)
                 assert partner_id is not None  # eligible sites are occupied
                 pairs.append((focal, by_id[partner_id]))
+        if self._encounter_mode == "per_pair":
+            # Dedup AFTER all draws (#166(b)): consumes no RNG, first
+            # occurrence survives with its initiator seat.
+            seen: set[frozenset[AgentId]] = set()
+            survivors: list[tuple[Agent, Agent]] = []
+            for initiator, partner in pairs:
+                key = frozenset((initiator.agent_id, partner.agent_id))
+                if key not in seen:
+                    seen.add(key)
+                    survivors.append((initiator, partner))
+            return iter(survivors)
         return iter(pairs)
 
 

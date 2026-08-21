@@ -493,6 +493,34 @@ register(
     )
 )
 
+# `encounter_mode` renders LAST in the Matching section (M11b Phase C,
+# #166/#174) — after the spatial-interaction widgets it refines: the knob
+# is live only while the toggle above is on, and its greying-table row
+# reads the toggle backwards (no lookahead needed).
+
+register(
+    ParameterSpec(
+        key="matching.encounter_mode",
+        kind="choice",
+        default="per_initiator",
+        choices=("per_initiator", "per_pair"),
+        label="Encounter mode",
+        section="Matching",
+        description=(
+            "Under spatial interaction each agent initiates its own partner "
+            "draws, so two neighbours that draw each other play twice per "
+            "generation — once in each initiator seat. 'per_initiator' keeps "
+            "every drawn match (the default and the historical behaviour; the "
+            "doubling was measured in the engine's validation). 'per_pair' "
+            "collapses duplicate pairs after the draws, so each pair plays at "
+            "most once per generation. Only WHICH matches run changes — the "
+            "random draws themselves are identical in both modes. Live only "
+            "while spatial interaction is on; the well-mixed matchers are "
+            "untouched."
+        ),
+    )
+)
+
 # ---------------------------------------------------------------------------
 # Match — how long a match lasts, and noise (docs/DESIGN.md §2.5-2.6)
 # ---------------------------------------------------------------------------

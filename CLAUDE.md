@@ -29,6 +29,19 @@ features (e.g. `python -m pdsim.bench`, the headless runner itself).
 Automated tests complement — never substitute for — the owner seeing the
 feature work in the app.
 
+**Validation-instruction precision (owner request 2026-07-28, sharpened
+2026-08-20).** Every widget named in validation steps gets its FULL,
+VERIFIED path: the tab, the expander and whether it starts collapsed
+(only Population and Dynamics start expanded), and the widget's registry
+label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
+session that writes the instructions — never from assumptions about
+typical Streamlit apps. Known traps, learned the hard way: this app has
+NO sidebar (the Scenario dropdown sits at the top of the main area), and
+that dropdown lists scenarios by their `display_name` — so name the
+display title the owner will actually see (e.g. "Cooperation Survives in
+Clusters"), with the machine name (`spatial_reciprocity`) at most in
+parentheses.
+
 ## Hard rules
 
 1. **Documentation is mandatory, always.** Every module, class, function, and method
@@ -302,8 +315,14 @@ feasibility-aware admission (#164) — landed 2026-08-17 (DECISIONS #171;
 the re-recording budget went UNUSED). Phase B — movement — landed
 2026-08-18 (DECISIONS #172; `pdsim/core/movement.py`, the `movement.*`
 registry section, two movement-on goldens RECORDED, zero re-recording;
-1129 tests). The next implementation effort is Phase C
-(`encounter_mode`)**; then D (calibration + advisories A1-A3), E (tabs,
-disclosure, live-run continuity, layout painter, close-out).
+1129 tests). Phase C — `matching.encounter_mode` — landed 2026-08-20
+(DECISIONS #174 pre-drafting rulings + #175 build record;
+dedup-after-draws in `SpatialKernel.pairings`, the greying row, the
+#174(a) calibration display branch (2× vs 1×), the bench's two
+`per_pair` columns with counted matches — the #156 held hypothesis
+SUPPORTED; zero re-recordings, zero new goldens; 1157 tests). The next
+implementation effort is Phase D (calibration + advisories A1-A3)**;
+then E (tabs, disclosure, live-run continuity, layout painter,
+close-out).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

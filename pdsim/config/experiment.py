@@ -411,17 +411,28 @@ class MatchingConfig(_RegistryBackedModel):
             DECISIONS #34 ignored-parameter pattern). Must be at most
             N - 1; checked at the experiment level, where the population
             size is known.
+        encounter_mode: ``"per_initiator"`` (the default: every drawn
+            match plays — the historical behaviour, where two neighbours
+            drawing each other play twice per generation) or ``"per_pair"``
+            (duplicate pairs collapse after the draws, so each pair plays
+            at most once per generation; M11b Phase C, DECISIONS #166).
+            Live only while ``spatial_interaction`` is on; ignored — valid
+            but without effect, consuming no RNG draws — everywhere else
+            (the #34 pattern), so a pre-M11b config loads at the default
+            and re-runs identically (hard rule 8).
     """
 
     _registry_keys: ClassVar[dict[str, str]] = {
         "spatial_interaction": "matching.spatial_interaction",
         "matcher": "matching.matcher",
         "opponents_per_agent": "matching.opponents_per_agent",
+        "encounter_mode": "matching.encounter_mode",
     }
 
     spatial_interaction: bool = _registry_field("matching.spatial_interaction")
     matcher: str = _registry_field("matching.matcher")
     opponents_per_agent: int = _registry_field("matching.opponents_per_agent")
+    encounter_mode: str = _registry_field("matching.encounter_mode")
 
 
 class MatchConfig(_RegistryBackedModel):

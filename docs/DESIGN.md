@@ -491,6 +491,41 @@ exist (the #81 clamp idiom) — edge cells under `bounded`, and irregular
 site sets at M19. Validator: spatial interaction requires
 `structure.kind = lattice`.
 
+**Encounter mode** (M11b Phase C; DECISIONS #166 designed, #174/#175 as
+built). Under spatial interaction each agent initiates its own partner
+draws, so two neighbours that draw each other play twice per generation —
+once in each initiator seat; at k ≥ neighbourhood size the doubling is
+systematic (every adjacent pair, every generation — measured EXACTLY 8 =
+2 × 4 matches per agent on a full von Neumann torus, #139).
+`matching.encounter_mode` ∈ {`per_initiator` (default), `per_pair`} gives
+the artifact a switch: `per_initiator` keeps every drawn match (the
+historical behaviour); `per_pair` collapses duplicate UNORDERED pairs
+AFTER the draws, so each pair plays at most once per generation. The
+draw-identity contract (#166(b)): partner draws are made exactly the same
+in both modes — same calls, same order, same random-number consumption —
+and deduplication applies to the resulting pair list after ALL draws
+complete and before ANY match plays, inside `SpatialKernel.pairings` (the
+one place the sync pair list is built); the knob changes WHICH matches
+run, never how randomness is consumed, so the default is byte-identical
+trivially and downstream stream divergence under `per_pair` (dropped
+matches drop their in-match draws) is the knob working (#174(f)). The
+survivor is the FIRST occurrence in pair-list order, keeping its
+initiator seat — focals walk in ascending id order (#57), so in the
+forced-draw regime every survivor's initiator is the lower id of its pair
+(#174(c), pinned). SPATIAL-ONLY: live only while
+`matching.spatial_interaction` is on; the well-mixed matchers are
+untouched (the `random_k` coincidental doubling is a recorded future
+extension, #166(a)). GREYED under the asynchronous clock, table entry
+plus help text: each async event's focal draws one partner —
+per-initiator by construction — and deduplicating across events would
+require remembering encounters through time, distorting the activation
+clock #165 protects (#166(c)); the async loop is not touched in any way.
+The Economy calibration's spatial branch reads the mode (#174(a)):
+expected matches per agent = 2 × min(k, effective degree) under
+`per_initiator`, 1 × under `per_pair`, with the fine print stating the
+multiplier actually used — landed with the engine knob so the panel is
+never false at any commit boundary.
+
 **Agent movement** (M11b Phase B; DECISIONS #165 designed, #172 as
 built). The third parameterisation of the reach kernel: `movement.rate`
 (per-agent per-period move probability, default 0 = off), and the walk

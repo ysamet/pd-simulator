@@ -297,6 +297,25 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     draws no coin; the greying note reworded; a pre-existing
     `widget_values_from_config` gap over `config.output` logged for
     E1). 1129 tests passing.
+
+    ✅ **M11b Phase C landed 2026-08-20** (DECISIONS #174 pre-drafting
+    rulings, #175 build record): `matching.encounter_mode` ∈
+    {`per_initiator` (default), `per_pair`} — dedup-after-draws inside
+    `SpatialKernel.pairings` (first occurrence survives with its
+    initiator seat; partner draws identical in both modes, pinned
+    call-for-call), the registry entry with `MatchingConfig` round trip,
+    the greying-table row (sync on the engine's actual spatial gate;
+    async always greyed, verbatim note; tournament ignored), and the
+    #174(a) calibration display branch (2× vs 1× the effective
+    neighbour count, mode-aware fine print and memory note). Zero
+    re-recordings, zero new goldens — all 31 golden tests and every
+    counting pin untouched. The bench gained the two `per_pair`
+    columns plus counted matches-per-generation and per-match cost in
+    every column; the #156 held hypothesis (re-met pairs' history
+    copies as the lattice per-match excess) came out SUPPORTED — the
+    von Neumann per-match excess over random_k collapses from ≈ +26%
+    to ≈ +4–12% under `per_pair` (numbers in #175). 1157 tests
+    passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

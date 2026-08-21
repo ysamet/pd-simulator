@@ -98,6 +98,14 @@ How many randomly drawn opponents each agent starts matches against per generati
 
 *Learn more:* Fewer matches per period is what makes large populations affordable: N x k matches instead of round-robin's ~N²/2.
 
+#### `matching.encounter_mode` — Encounter mode
+
+- **Type:** choice
+- **Allowed values:** one of: `per_initiator`, `per_pair`
+- **Default:** `per_initiator`
+
+Under spatial interaction each agent initiates its own partner draws, so two neighbours that draw each other play twice per generation — once in each initiator seat. 'per_initiator' keeps every drawn match (the default and the historical behaviour; the doubling was measured in the engine's validation). 'per_pair' collapses duplicate pairs after the draws, so each pair plays at most once per generation. Only WHICH matches run changes — the random draws themselves are identical in both modes. Live only while spatial interaction is on; the well-mixed matchers are untouched.
+
 ### Match
 
 #### `match.length_mode` — Match length mode

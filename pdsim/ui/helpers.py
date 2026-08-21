@@ -97,6 +97,10 @@ IGNORED_IN_TOURNAMENT = (
     "movement.rate",
     "movement.radius",
     "movement.decay",
+    # M11b Phase C (#174(d)): the encounter mode refines spatial partner
+    # sampling, which only the evolution engines substitute in (#137(b)) —
+    # matching movement's #172(b) treatment.
+    "matching.encounter_mode",
 )
 """Parameters that exist but have no effect in tournament mode (DECISIONS #34)."""
 
@@ -342,6 +346,22 @@ _BOUNDARY_ORDER_ASYNC_NOTE = (
 )
 """boundary_order's async cell (#131: the parameter is never read there)."""
 
+_ENCOUNTER_SYNC_NOTE = (
+    "NOTE: Live only while spatial interaction is on; the well-mixed "
+    "matchers are untouched by this setting."
+)
+"""encounter_mode's sync cell (M11b Phase C, #174(d)) — the scope sentence,
+derived from the registry description (§12 single-source discipline)."""
+
+_ENCOUNTER_ASYNC_NOTE = (
+    "NOTE: Greyed under the asynchronous clock: each async event's focal "
+    "draws one partner — per-initiator by construction — and deduplicating "
+    "across events would require remembering encounters through time, "
+    "distorting the activation clock."
+)
+"""encounter_mode's async cell — the #166(c) note, verbatim from the Phase C
+design ruling (#174(d))."""
+
 _COMPOSITION_FROM_FILE_NOTE = (
     "NOTE: set by the layout file — under 'from_file' the file decides "
     "both the arrangement and the mixture (spec Design 8: the file wins). "
@@ -578,6 +598,38 @@ def _boundary_order_async(values: Mapping[str, ParamValue]) -> str | None:
     return _BOUNDARY_ORDER_ASYNC_NOTE
 
 
+def _encounter_sync(values: Mapping[str, ParamValue]) -> str | None:
+    """encounter_mode's sync answer: live only on the engine's spatial gate.
+
+    The gate is :func:`_spatial_sampling_active` — evolution AND lattice AND
+    the toggle (#137(b)/#141(c)), never the toggle alone (#174(d)): the
+    dedup path exists only inside the SpatialKernel substitution, so
+    wherever the substitution is not running the knob is inert.
+
+    Args:
+        values: Widget values (with the app's lookahead).
+
+    Returns:
+        The scope note when spatial sampling is inactive, else ``None``.
+    """
+    return None if _spatial_sampling_active(values) else _ENCOUNTER_SYNC_NOTE
+
+
+def _encounter_async(values: Mapping[str, ParamValue]) -> str | None:
+    """encounter_mode's async answer: always greyed (#166(c)).
+
+    Each async event's focal draws one partner — per-initiator by
+    construction — so there is no within-generation pair list to collapse.
+
+    Args:
+        values: Widget values (unused; the signature is the table's).
+
+    Returns:
+        Always the async encounter note.
+    """
+    return _ENCOUNTER_ASYNC_NOTE
+
+
 def _composition_rule(values: Mapping[str, ParamValue]) -> str | None:
     """The composition widgets' rule: greyed while a layout file decides them.
 
@@ -632,6 +684,10 @@ STRUCTURE_GREYING: dict[str, GreyingRule] = {
     # answered explicitly, not by omission. The pre-table round-robin rule
     # in `greying` still applies while spatial sampling is inactive.
     "matching.opponents_per_agent": GreyingRule(sync=_always_live, asynchronous=_always_live),
+    # The encounter mode (M11b Phase C, #166/#174(d)): sync live only on
+    # the engine's actual spatial gate; async always greyed (per-initiator
+    # by construction); tournament via IGNORED_IN_TOURNAMENT.
+    "matching.encounter_mode": GreyingRule(sync=_encounter_sync, asynchronous=_encounter_async),
     "dynamics.boundary_order": GreyingRule(sync=_always_live, asynchronous=_boundary_order_async),
     # Not a registry key: the bespoke Population mix widgets consult the
     # table through this pseudo-key (spec Design 8 consequence 1 / #124's

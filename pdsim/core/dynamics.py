@@ -35,6 +35,10 @@ kernel draw per focal agent in ascending id order, made unconditionally
 even when k covers the whole neighbourhood, with the primitive's
 empty-eligible corner (an isolated focal) consuming no RNG. Toggle off,
 the configured matcher path is byte-for-byte the pre-Phase-D one.
+Under ``matching.encounter_mode = "per_pair"`` (M11b Phase C, #166/#174)
+the kernel deduplicates its drawn pair list AFTER all partner draws and
+before any match plays — the draws themselves are identical in both
+modes, so the default ``"per_initiator"`` is byte-identical trivially.
 
 RNG draw order per generation, imitation (DECISIONS #32, extending #23's
 match order):
@@ -342,6 +346,7 @@ def _build_generation_matcher(config: ExperimentConfig, occupancy: Occupancy | N
             radius=config.structure.interaction_radius,
             decay=config.structure.interaction_decay,
             k=config.matching.opponents_per_agent,
+            encounter_mode=config.matching.encounter_mode,
         )
     return build_matcher(config.matching)
 
