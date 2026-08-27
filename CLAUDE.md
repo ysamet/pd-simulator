@@ -320,9 +320,19 @@ registry section, two movement-on goldens RECORDED, zero re-recording;
 dedup-after-draws in `SpatialKernel.pairings`, the greying row, the
 #174(a) calibration display branch (2× vs 1×), the bench's two
 `per_pair` columns with counted matches — the #156 held hypothesis
-SUPPORTED; zero re-recordings, zero new goldens; 1157 tests). The next
-implementation effort is Phase D (calibration + advisories A1-A3)**;
-then E (tabs, disclosure, live-run continuity, layout painter,
-close-out).
+SUPPORTED; zero re-recordings, zero new goldens; 1157 tests). Phase D —
+async calibration + advisories — landed 2026-08-24 (DECISIONS #176
+pre-drafting rulings + #177 build record; the #169 measurement gate
+PASSED with exact window means, so the spatial calibration branch now
+serves BOTH clocks — the #154 pin retired-with-replacement, stranded
+`per_pair` forced to per_initiator under async, the async figure
+marked "expected"; the strict survival-window lower bound everywhere;
+radius-aware `effective_neighbour_count` cross-pinned to the engine's
+reach cache; `pdsim/ui/advisories.py` shipping A1–A3 on the #141
+predicate-table pattern with the R5 loaded-values baseline; zero
+re-recordings, zero new goldens; 1190 tests). The next implementation
+effort is Phase E** (sub-prompts E1–E5: tabs, disclosure, live-run
+continuity, layout painter, close-out; the #172(f6) `config.output`
+widget-loading gap is E1's).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

@@ -966,6 +966,30 @@ Config assembly and scenario↔widget mapping live in the Streamlit-free
 via `st.error`. The seed is an ordinary, visible widget: same seed + same
 settings = same charts.
 
+**The advisory mechanism** (M11b Phase D; ADVISORIES.md, DECISIONS
+#170/#176/#177). An advisory is a derived readout whose output is a
+WARNING rather than a number, built on the same predicate-table pattern as
+the greying map: `ui/advisories.py` (Streamlit-free, beside
+`economy_helpers.py`) holds `ADVISORY_RULES` — key, severity (`info` |
+`caution`), surface, predicate — where every predicate is a pure function
+of (current widget values, LOADED widget values). The loaded baseline is
+what the last scenario/config load wrote into the widgets (retained by the
+app at load time, #176 R5), which makes change-detection advisories pure
+functions rather than render-history hacks; loading clears them by
+construction. One evaluator; the app renders whatever fires at each
+surface — a widget's registry key inline below the widget, or the Economy
+panel's pseudo-surface beside the calibration readout. The M11b batch:
+**A1** (living cost at/below all-D income or at/above all-C income —
+inclusive bounds, #176 R1, which is also why the printed survival window's
+lower bound is STRICT), **A2** (any of nine income-multiplying trigger
+keys changed since load, #170's amended list), both gated on the shared
+economy-active predicate (`economy_helpers.economy_active`, #176 R4:
+evolution AND (sync `energy_economy` OR async `variable_n`)); and **A3**
+(k at or above the radius-aware reach size, gated on the engine's actual
+spatial gate #176 R7, message encounter-mode- and clock-conditional). A1
+consumes `calibration_report` — the advisory and the readout beside it
+share one arithmetic and cannot disagree.
+
 ## 5. Parameter Registry (novice-first explanations)
 
 Every tunable parameter and every strategy is declared exactly once in

@@ -316,6 +316,21 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     von Neumann per-match excess over random_k collapses from ≈ +26%
     to ≈ +4–12% under `per_pair` (numbers in #175). 1157 tests
     passing.
+    ✅ **M11b Phase D landed 2026-08-24** (DECISIONS #176 pre-drafting
+    rulings, #177 build record): the #169 gate MEASURED AND PASSED —
+    asynchronous fixed_n spatial runs play EXACTLY 2 × min(k, degree)
+    matches per agent per generation-equivalent as the population mean,
+    every window (the "expected" lives in the per-agent spread, now
+    permanently pinned) — so the Economy calibration's spatial branch
+    extends to the asynchronous clock (the #154 pin retired WITH its
+    replacement, #120(f); stranded `per_pair` forced to per_initiator
+    under async, #176 R3; the async figure marked "expected" in the
+    fine print). The survival window's printed lower bound became
+    STRICT everywhere (#176 R1); `effective_neighbour_count` became
+    radius-aware with the engine cross-pin (#176 R6); and the advisory
+    mechanism shipped as the `ui/advisories.py` predicate table with
+    A1–A3 live in the panel (#170's amended triggers; gates #176
+    R4/R7). Zero re-recordings, zero new goldens; 1190 tests passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

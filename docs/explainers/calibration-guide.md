@@ -424,7 +424,7 @@ Two reference points matter, and both are computable from your settings before y
 
 The regime where behaviour decides survival is:
 
-> **all-D income ≤ L < all-C income**
+> **all-D income < L < all-C income**
 
 - **L** — the basic living cost
 
@@ -435,7 +435,7 @@ Below the window, even defectors pay their bills and the filter is switched off.
 - Matches per agent = 2 × 5 = 10.
 - Rounds per agent per generation = 10 × 10 = **100**.
 - all-C income = 100 × 3 = **300**. all-D income = 100 × 1 = **100**.
-- Window: 100 ≤ L < 300. Midpoint: **L = 200**.
+- Window: 100 < L < 300. Midpoint: **L = 200**.
 - A cooperator nets 300 − 200 = **+100** per generation. A defector nets 100 − 200 = **−100**. Symmetric, and exactly what the app's calibration readout will tell you.
 
 The M10 explainer derives all of this in more detail, including an important caution: this arithmetic tells you when the *average* agent dies, not when the *population* does. Under `random_k` real incomes are spread around the average, so a collapse smears across two or three generations rather than happening at once.
@@ -444,13 +444,13 @@ The M10 explainer derives all of this in more detail, including an important cau
 
 Start from that baseline — window 100 to 300, living cost 200, comfortably inside. Now change exactly one thing at a time.
 
-**Rounds per match, 10 → 50.** Rounds per agent = 10 × 50 = 500. Window becomes 500 ≤ L < 1500. Your living cost of 200 is now *below* the window: the filter is off and everyone grows, defectors included.
+**Rounds per match, 10 → 50.** Rounds per agent = 10 × 50 = 500. Window becomes 500 < L < 1500. Your living cost of 200 is now *below* the window: the filter is off and everyone grows, defectors included.
 
-**Opponents per agent, 5 → 2.** Matches = 2 × 2 = 4, rounds = 40. Window becomes 40 ≤ L < 120. Your 200 is now *above* the window: nobody can pay, and the entire population dies.
+**Opponents per agent, 5 → 2.** Matches = 2 × 2 = 4, rounds = 40. Window becomes 40 < L < 120. Your 200 is now *above* the window: nobody can pay, and the entire population dies.
 
-**Matcher, `random_k` → `round_robin`, at 40 agents.** Matches = 39, rounds = 390. Window becomes 390 ≤ L < 1170 — and it keeps moving as the population grows.
+**Matcher, `random_k` → `round_robin`, at 40 agents.** Matches = 39, rounds = 390. Window becomes 390 < L < 1170 — and it keeps moving as the population grows.
 
-**Neighbourhood shape, Moore → von Neumann**, with spatial interaction on, one round per match, and the flagship's punishment of 0. Under Moore: 16 rounds, all-C income 16 × 3 = 48, window 0 ≤ L < 48. Under von Neumann: 8 rounds, all-C income 24, window 0 ≤ L < 24. A living cost of 30 sits inside the window under Moore and *above* it under von Neumann. Same payoffs, same cost, one dropdown — and in one case cooperators thrive while in the other everybody dies.
+**Neighbourhood shape, Moore → von Neumann**, with spatial interaction on, one round per match, and the flagship's punishment of 0. Under Moore: 16 rounds, all-C income 16 × 3 = 48, window 0 < L < 48. Under von Neumann: 8 rounds, all-C income 24, window 0 < L < 24. A living cost of 30 sits inside the window under Moore and *above* it under von Neumann. Same payoffs, same cost, one dropdown — and in one case cooperators thrive while in the other everybody dies.
 
 **The rule: never move the matcher, the opponents-per-agent count, the rounds per match, the continuation probability, the neighbourhood shape, or the world structure without recomputing the window.**
 
@@ -607,7 +607,7 @@ The `spatial_reciprocity` scenario asks the oldest question in spatial game theo
 
 Three of those numbers override the registry defaults, and each override is load-bearing.
 
-**Punishment set to 0.** The scenario's whole mechanism is that a defector surrounded by other defectors earns *nothing* and starves. At the default punishment of 1, with eight Moore neighbours, such a defector earns 8 neighbours × 2 matches × P = 1 = **16** per generation (every neighbouring pair meets twice, once at each side's initiative — §4.2, measured exactly in DECISIONS #139 — and this scenario plays one round per match). That is above the scenario's living cost of 12, so nobody starves, cooperator clusters gain no advantage, and the scenario silently demonstrates nothing while still producing a plausible-looking run. Worked as a window (§4.5): under Moore at P = 1 the all-D interior earns 16 and the all-C interior 8 × 2 × 3 = 48, so the window is 16 ≤ L < 48, and L = 12 sits *below* it — the metabolic filter is not loosened but switched off outright. Under the shape the scenario actually ships, von Neumann, the default punishment alone would *not* have switched it off: 4 neighbours × 2 matches × P = 1 = 8, below L = 12, so interior defectors would still starve — more slowly, at −4 rather than −12 per generation — with the window at 8 ≤ L < 24 and L inside it. So the P = 0 override is belt-and-braces under the shipped shape, and load-bearing for the Moore switch the scenario's things-to-try invites: flip the shape without zeroing the punishment and the mechanism is gone.
+**Punishment set to 0.** The scenario's whole mechanism is that a defector surrounded by other defectors earns *nothing* and starves. At the default punishment of 1, with eight Moore neighbours, such a defector earns 8 neighbours × 2 matches × P = 1 = **16** per generation (every neighbouring pair meets twice, once at each side's initiative — §4.2, measured exactly in DECISIONS #139 — and this scenario plays one round per match). That is above the scenario's living cost of 12, so nobody starves, cooperator clusters gain no advantage, and the scenario silently demonstrates nothing while still producing a plausible-looking run. Worked as a window (§4.5): under Moore at P = 1 the all-D interior earns 16 and the all-C interior 8 × 2 × 3 = 48, so the window is 16 < L < 48, and L = 12 sits *below* it — the metabolic filter is not loosened but switched off outright. Under the shape the scenario actually ships, von Neumann, the default punishment alone would *not* have switched it off: 4 neighbours × 2 matches × P = 1 = 8, below L = 12, so interior defectors would still starve — more slowly, at −4 rather than −12 per generation — with the window at 8 < L < 24 and L inside it. So the P = 0 override is belt-and-braces under the shipped shape, and load-bearing for the Moore switch the scenario's things-to-try invites: flip the shape without zeroing the punishment and the mechanism is gone.
 
 **Von Neumann rather than Moore.** Fewer neighbours means stronger clustering and an easier time for cooperation, which is what you want from a scenario designed to show the effect exists.
 

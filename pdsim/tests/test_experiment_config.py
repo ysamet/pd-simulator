@@ -15,10 +15,12 @@ from pdsim.config.experiment import (
     PopulationConfig,
     StructureConfig,
     effective_neighbour_count,
+    interior_reach_size,
     payoff_additivity,
     resolve_carrying_capacity,
     resolve_lattice_dimensions,
 )
+from pdsim.core.structure import LatticeStructure
 
 # Machine names from the strategy registry (pdsim/core/strategies/) —
 # composition names are validated against the registered roster.
@@ -673,6 +675,50 @@ class TestPhaseEPaintTimeFunctions:
         for shape in ("moore", "von_neumann"):
             assert effective_neighbour_count(shape, "torus", 99) == effective_neighbour_count(
                 shape, "bounded", 99
+            )
+
+    def test_radius_aware_reach_sizes(self) -> None:
+        """#176 R6: 2r(r+1) on von Neumann, (2r+1)² − 1 on Moore; None = grid − 1.
+
+        The radius-1 figures are the classic degrees 4 and 8 — unchanged
+        by the R6 extension, which is what keeps every shipped scenario
+        figure where it was.
+        """
+        assert interior_reach_size("von_neumann", 1) == 4
+        assert interior_reach_size("von_neumann", 2) == 12
+        assert interior_reach_size("von_neumann", 3) == 24
+        assert interior_reach_size("moore", 1) == 8
+        assert interior_reach_size("moore", 2) == 24
+        assert interior_reach_size("moore", 3) == 48
+        assert interior_reach_size("moore", None, site_count=100) == 99
+        # k clamps against the radius-aware size, not the radius-1 degree.
+        assert effective_neighbour_count("von_neumann", "torus", 8, 2) == 8
+        assert effective_neighbour_count("von_neumann", "torus", 20, 2) == 12
+        assert effective_neighbour_count("moore", "torus", 20, None, 10) == 9
+        # A large radius on a small grid caps at the grid minus the origin.
+        assert interior_reach_size("moore", 5, site_count=9) == 8
+        with pytest.raises(ValueError, match="site_count"):
+            interior_reach_size("moore", None)
+
+    def test_reach_size_cross_pinned_against_the_engine(self) -> None:
+        """#176 R6's cross-pin: the closed forms equal the #156 reach cache.
+
+        On a 10×10 torus every cell is interior, so the engine's own
+        cached enumeration (``Structure.reach``) must agree with the
+        paint-time formulas at radii 1–3, both shapes, and at unlimited
+        radius — the readout and the engine cannot drift.
+        """
+        for shape in ("moore", "von_neumann"):
+            lattice = LatticeStructure(10, 10, shape, "torus")
+            for radius in (1, 2, 3):
+                engine_size = len(lattice.reach(0, radius).candidates)
+                assert interior_reach_size(shape, radius, lattice.site_count) == engine_size
+                assert (
+                    effective_neighbour_count(shape, "torus", 999, radius, lattice.site_count)
+                    == engine_size
+                )
+            assert interior_reach_size(shape, None, lattice.site_count) == len(
+                lattice.reach(0, None).candidates
             )
 
     @pytest.mark.parametrize(

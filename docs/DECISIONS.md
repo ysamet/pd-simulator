@@ -5220,3 +5220,274 @@ regenerated; the spec status line updated; CLAUDE.md's current-phase
 paragraph advanced to Phase D. Findings f1–f4 above were the session's
 only Rule 7-adjacent items — no contradiction between the prompt, the
 spec, DECISIONS, and the code was found.
+
+**#176 — 2026-08-24 — Phase D pre-drafting rulings (design layer): A1's
+inclusive trigger bounds and the strict window lower bound (R1); the
+gating measurement runs on `fixed_n` with a non-gating `variable_n`
+companion (R2); the async calibration FORCES per-initiator arithmetic
+(R3); one shared economy-active gate for A1/A2 (R4); A2's baseline is
+the LOADED config (R5); `effective_neighbour_count` becomes
+radius-aware (R6); A3 gates on the engine's actual spatial gate (R7);
+and a failed gate stops the whole batch (R8) (M11b Phase D; spec ruling
+7 / #169 and the #170 advisory batch).**
+R1 (A1's bounds; the window's lower bound). Advisory A1 fires when
+`basic_living_cost` ≤ the all-defector income (INCLUSIVE) or ≥ the
+all-cooperator income (inclusive, as ADVISORIES.md already had it).
+Rationale for the inclusive lower bound: at L exactly equal to the
+all-D income an interior defector nets exactly zero — it never
+starves — so the metabolic filter is off for defectors; the old
+inclusive-lower-bound window ("0 ≤ L < 24") printed a window whose own
+boundary point defeats the filter. The calibration window's PRINTED
+lower bound becomes STRICT in the same change — all-D income < L <
+all-C income (the upper bound was already strict) — so the (?) text,
+the window, and the advisory cannot contradict each other (#154's
+rule). A1's message's first clause reads "at or below the all-defector
+income, defectors never starve."
+R2 (measurement configuration — the #173 question). The GATING
+measurement runs on `donation_game_threshold` unmodified: asynchronous
+`fixed_n`, which has no θ-eligible-set iteration (#132 — one random
+death, one localised birth per event), so the #173 variable_n blowup
+cannot occur. A secondary, NON-GATING measurement runs the flagship
+configuration with `dynamics.time_model` switched to asynchronous
+(`async_population` at its `variable_n` default), 5
+generation-equivalents, hard 2-minute wall-clock cap, report-only —
+one honest measured number from the regime the calibration is actually
+consulted in, where empty sites pull the figure below the full-grid
+ideal exactly as `SPATIAL_FINE_PRINT` states. Alternative rejected:
+gating on `variable_n` — impractical per #173 at scale, and the
+full-grid prediction is only exact under `fixed_n`.
+R3 (stranded `per_pair` under async). Once the spatial calibration
+branch extends to the asynchronous clock, `calibration_report` FORCES
+`per_initiator` into `spatial_income_arithmetic` and the
+mode-conditional fine print whenever the clock is asynchronous,
+regardless of the stranded `encounter_mode` widget value — the async
+loop never deduplicates (#175(a)), so honouring a stranded `per_pair`
+would print 4 where the engine plays 8, the #34 falsehood #174(a)
+exists to prevent. The #175(f3) memory-depth note obeys the same rule.
+Both pinned both ways (a stranded-per_pair async config shows 2×; a
+synchronous per_pair control shows 1×).
+R4 (the economy-active gate for A1 and A2). One shared predicate:
+evolution mode AND ((synchronous AND `reproduction_mode =
+energy_economy`) OR (asynchronous AND `async_population =
+variable_n`)). Rationale: under async the reproduction_mode widget is
+inert (#154); under `fixed_n` the living cost is not charged (no
+insolvency deaths — PARAMETERS), so a "metabolic filter" warning would
+describe a filter that does not exist; under tournament the economy is
+ignored wholesale. The Task 0 inspection found no existing named
+predicate of this shape (the visibility predicates all carry a lattice
+conjunct), so it is extracted as a named function beside
+`spatial_calibration_active`.
+R5 (A2's baseline). A2 is a change detector; its baseline is the
+LOADED scenario's config values. A2 fires at a trigger widget while
+its current value differs from its loaded value AND the economy is
+active (R4); loading a scenario clears it. This keeps every advisory a
+pure function — of (current values, loaded values). Alternative
+rejected: previous-render comparison — a one-repaint flash, not a
+warning.
+R6 (radius-aware `effective_neighbour_count` — option (a) of the
+design report). `effective_neighbour_count` becomes radius-aware: the
+interior reach size at (shape, radius) — von Neumann 2r(r+1), Moore
+(2r+1)² − 1, radius None (blank = unlimited, #137(a)) → site count −
+1 — with min(k, that size). Cross-pinned for equality against the
+engine's #156 reach size on a torus interior at radii 1–3, both
+shapes. All radius-1 figures are unchanged (2·1·2 = 4; 3² − 1 = 8), so
+no shipped scenario figure moves (none uses radius > 1). Callers
+(`spatial_income_arithmetic`, `calibration_report`, the §12 "Effective
+neighbours (k)" readout) pass the radius. Fixes the pre-existing
+radius > 1 understatement #170 implies and gives A3 a truthful degree.
+R7 (A3's gate). A3 gates on the engine's ACTUAL spatial gate —
+evolution AND lattice AND toggle (#137(b)/#141(c)) — never the toggle
+alone, which is false under `well_mixed` (stranded on) and under
+tournament.
+R8 (scope of the hold on disagreement). If the gating measurement
+fails its exactness gate, the session STOPS after the measurement: log
+the numbers, hand back, implement nothing further — the calibration
+extension and the advisory batch wait for a design ruling, because
+A1's async behaviour depends on the gate and shipping A1 sync-only
+would re-enter exactly the alternative #169 rejected (a warning system
+dark in one of the two regimes).
+
+**#177 — 2026-08-24 — M11b Phase D BUILT: the #169 gate MEASURED AND
+PASSED (async spatial matches per agent per generation-equivalent =
+EXACTLY 2 × min(k, degree) as the population mean, every window); the
+spatial calibration branch extends to the asynchronous clock with the
+#154 pin retired-with-replacement; the strict window lower bound lands
+everywhere; `effective_neighbour_count` becomes radius-aware; the
+advisory mechanism ships with A1–A3; zero golden re-recordings, zero
+new goldens (M11b Phase D; spec ruling 7 / #169, the #170 batch, and
+the #176 rulings as executed).**
+(a) THE GATING MEASUREMENT (#176 R2; the #117/#130 temporary-probe
+precedent — never shipped). `donation_game_threshold` unmodified
+(asynchronous `fixed_n`, 10×10 von Neumann torus, N = 100, seed 4),
+`on_match`-observed, 20 generation-equivalents per run, windows = 100
+CONSECUTIVE EVENTS (not the float clock crossing). Per-window
+POPULATION MEAN (2 × total ÷ 100): vn k = 4 → 8.00 in EVERY one of the
+20 windows (total 400/window, per-event focal count constant 4); k = 2
+→ 4.00 every window (200; constant 2); k = 6 → 8.00 every window,
+byte-identical window-for-window to the k = 4 run including per-agent
+spreads (the clamp — the #139 parity pair holds in event time); Moore
+k = 8 → 16.00 every window (800; constant 8). THE GATE PASSED with
+equality, not approximation, in all 80 windows. The exactness
+arithmetic, so the number is understood rather than trusted: every
+event's focal plays exactly min(k, degree) on the full grid (the
+kernel clamps, nobody is isolated, `fixed_n`'s death fires after the
+bundle), and `fixed_n` pins N, so a 100-event window totals
+100 × min(k, degree) matches and the mean is exact BY CONSTRUCTION —
+the #169 "expected" lives entirely in the PER-AGENT spread, measured
+as the fine print's evidence: at k = 4, per-window per-agent min 0–2,
+max 16–26, population σ 3.6–5.1 (at Moore k = 8: min 2–6, max 26–47,
+σ 6.1–10.3) over the agents alive the entire window — 30–43 of 100
+(mean ≈ 36–37, matching the predicted (99/100)^100 ≈ 0.366 survival
+under one-random-death-per-event). The engine's own
+per-generation-equivalent emission points landed exactly at events
+100, 200, …, 2000 in all four runs: the float stamps AGREE with
+event-count binning throughout. Permanently pinned (a test, not a
+golden — the #139 precedent): `test_spatial_interaction.py
+::TestAsyncSpatialMatchBudget` asserts per-event focal count =
+min(k, degree) for every event and the per-window totals, at k = 4 and
+k = 2, matches grouped by the engine's own clock stamp.
+(b) THE SECONDARY MEASUREMENT (#176 R2, non-gating, report-only).
+Flagship configuration, `time_model = asynchronous` (`async_population`
+resolves to its `variable_n` default), 5 generation-equivalents,
+2-minute wall cap: completed in 0.7 s, cap untripped. Mean matches per
+agent per generation-equivalent window: 7.32, 7.32, 7.27, 6.99, 6.69
+against the full-grid ideal 2 × min(5, 4) = 8.00 — a 8.5–16.4%
+shortfall tracking mean occupancy (50.0% → 39.4% as insolvency deaths
+outpace births at this horizon) — empty neighbour sites at cluster
+rims, exactly the direction `SPATIAL_FINE_PRINT` states; the patches
+founding keeps most interiors full, which is why the shortfall is far
+smaller than raw occupancy would suggest.
+(c) THE EXTENSION (part 2). `spatial_calibration_active` lost its
+synchronous-clock conjunct and NOTHING else (evolution AND lattice AND
+toggle remain); the #154 pin (`test_async_context_keeps_its_current_
+behaviour`, N − 1 = 99 on `donation_game_threshold`) RETIRED WITH ITS
+REPLACEMENT `test_async_context_uses_the_spatial_branch` (spatial
+branch active, 8 matches, `CalibrationReport.spatial` True — the
+#120(f) rule, both named in the docstring). R3 executed: under the
+asynchronous clock `calibration_report` FORCES `per_initiator` into
+the arithmetic, the regime note, AND the #175(f3) memory-depth note —
+pinned both ways (stranded-per_pair async config shows 8 = 2×; the
+synchronous per_pair control shows 4 = 1× with the halved memory
+note). The fine print is clock-aware: the async caption marks the
+figure "an EXPECTED figure per generation-equivalent … (activation
+order is random, so individual agents scatter around it)" where the
+synchronous caption is byte-unchanged, and
+`ECONOMY_HELP["expected_matches"]` gained the matching async sentence
+(#154's the-(?)-cannot-contradict-the-number rule).
+(d) THE STRICT LOWER BOUND (R1) — every amendment, per the #152
+discipline: the app's Survival-window metric now prints
+`all-D < cost < all-C`; `ECONOMY_HELP["window"]` rewords "at or above
+the all-D income" to the strict statement with the
+boundary-point-defeats-the-filter reason; the `window_verdict`
+boundary moved with it (cost exactly = all-D now reads "below" —
+pinned; leaving it "inside" would have contradicted A1 at the exact
+point R1 names); `SpatialIncome`/`CalibrationReport` docstrings;
+scenario texts — `spatial_reciprocity` description "0 ≤ L < 24" →
+"0 < L < 24" and things-to-try "0 ≤ L < 48" → strict;
+`the_drifting_frontier` description "100 ≤ L < 300" → strict and
+things-to-try "80 ≤ L < 240" → strict; calibration-guide.md — the §4.5
+definition line "all-D income ≤ L" → strict, the §4.5 worked window,
+the four §4.6 drill windows (500/40/390 and the shape drill's pair),
+and §7.1's two flagship windows (16/8) — inequality characters only,
+nine occurrences across seven guide lines and four scenario lines. NO
+surrounding prose was made false (checked each: L = 12 remains the
+0–24 midpoint, 200 the 100–300 midpoint, "near its top"/"lower
+quarter"/below-inside-above verdicts all survive).
+(e) RADIUS-AWARE `effective_neighbour_count` (R6). Now
+`(shape, boundary, k, interaction_radius = 1, site_count = None)` =
+min(k, interior reach size): von Neumann 2r(r+1) (4, 12, 24 at r =
+1–3), Moore (2r+1)² − 1 (8, 24, 48), radius None → site_count − 1;
+radius-1 figures unchanged, so no shipped scenario figure moved.
+Implementation shape, reported as a sharpening: the closed forms live
+in a NAMED sibling `interior_reach_size(shape, radius, site_count)` —
+advisory A3 compares k against the reach size ITSELF (k ≥ degree),
+which min(k, size) cannot answer — and when `site_count` is given the
+finite-radius size is additionally capped at site_count − 1 (a large
+radius on a small torus wraps onto itself; no shipped figure is
+affected). Cross-pinned against the engine: on a 10×10 torus, both
+shapes, radii 1–3 AND unlimited, the closed forms equal
+`len(Structure.reach(...).candidates)` — the #156 cache and the
+paint-time formula cannot drift. Callers updated: `spatial_income_
+arithmetic` (gains `interaction_radius`/`site_count` pass-throughs),
+`calibration_report` (passes the config's radius and resolved site
+count), the §12 "Effective neighbours (k)" readout (passes the radius
+through the nullable-pair lookahead and the resolved dimensions;
+`STRUCTURE_HELP["effective_neighbours"]` reworded radius-aware so the
+(?) cannot contradict the number at radius > 1).
+(f) THE ADVISORY MECHANISM (part 3). `pdsim/ui/advisories.py`
+(Streamlit-free, beside `economy_helpers` — #38/#48): `ADVISORY_RULES`
+on the #141 predicate-table pattern — key, severity, surface,
+predicate(values, loaded_values) → message or None — one evaluator,
+rendered by `app.py` through two seams: an inline caption right below
+each widget in the generated panel loop, and the Economy panel's
+pseudo-surface beside the calibration readout (the
+`population.composition` pseudo-key idiom). The R5 baseline:
+`_load_state` now retains what each load wrote
+(`st.session_state["_loaded_values"]`) — every load path (scenario,
+Custom, recorded-config) passes through it, so loading clears A2 by
+construction; display-side state only. A1 (caution, economy panel):
+gate `economy_helpers.economy_active(values)` — the R4 predicate,
+extracted as ruled since Task 0(b) found no existing named equivalent
+(the visibility predicates all carry a lattice conjunct); calls
+`calibration_report` through a values→config assembler that
+substitutes ONLY what the arithmetic never reads (a one-strategy
+stand-in mix and the `random` layout, so the from-file
+composition-equality validator cannot block a warning the file has
+nothing to do with); silent while the panel's configuration is
+invalid, exactly as the readout itself waits. A2 (caution, inline):
+nine rules from one closure factory over the #170 trigger list, firing
+on current ≠ loaded under the R4 gate. A3 (info, beside the toggle):
+gate `_spatial_sampling_active` REUSED (the engine's gate, R7), fires
+at k ≥ `interior_reach_size`; three message variants — per-initiator
+("twice the degree"), per_pair ("each pair meets once … roughly equals
+the degree"), and under the async clock ALWAYS the per-initiator
+wording phrased as expected regardless of the stranded knob (R3).
+Streamlit-free tests: every rule on both sides of its boundary, the R4
+gate across all four clock/mode combinations plus tournament, A2's
+baseline-clearing and missing-baseline contracts, A3's three variants
+and radius-aware degree (k = 5 silent at vn radius 2's degree 12).
+(g) FINDINGS, all reported here (Rule 7): (f1) THE V4 RENDER-GATE
+REALITY (Task 0(a), gate deliberately unchanged): the Economy panel
+renders only on the RAW `dynamics.reproduction_mode` widget value —
+`donation_game_threshold` does not override it, so the scenario loads
+at `imitation` and shows NO calibration readout; under the async clock
+the widget is greyed and cannot be flipped directly, so the V4
+walkthrough needs the three-step route (Time model → synchronous,
+Reproduction mode → energy_economy, Time model → asynchronous) — the
+spec's V4 sentence assumed the readout renders as loaded. Same corner,
+other direction: async `variable_n` with a stranded `imitation` runs a
+REAL economy the panel never calibrates and A1 never sees — held for
+the design layer (the render gate is #154's, not this phase's). (f2)
+KEY-NAME CORRECTION: #170/ADVISORIES.md list A2's radius trigger as
+`matching.interaction_radius`; the parameter is REGISTERED as
+`structure.interaction_radius` — implemented on the registry key (hard
+rule 3's single identifier), ADVISORIES.md corrected in the Task 8
+amendment. (f3) A1'S ENGAGEMENT-COST EDGE, implemented exactly as R1
+rules: A1 triggers on `basic_living_cost` alone while the verdict uses
+total cost = L + engagement × matches, so at engagement > 0 and
+L ≤ all-D income the clause "defectors never starve" can overstate
+(the engagement bill can still starve them) — held for the design
+layer, not reconciled silently. (f4) A2 AT AN INERT KNOB: R5 has no
+per-key liveness conjunct, so a value changed under one clock then
+stranded by a clock flip (e.g. `encounter_mode` changed under sync,
+then async selected, `variable_n` keeping R4 true) fires A2 beside a
+greyed widget whose change multiplies nothing there — implemented as
+ruled, held as an edge. (f5) `PARAMETERS.md` REGENERATED with no
+registry-entry change: gendocs embeds the scenario texts, so the Task
+5 inequality amendments moved the generated file (the drift test
+caught it, as designed). (f6) GUIDE STALENESS ADJACENT, not touched
+(outside Task 5's inequality-only scope): calibration-guide §4.4
+still says a configurable encounter mode "is on the roadmap for a
+later milestone" — false since Phase C; held for the guide's owner.
+(h) TESTS AND BUDGET. 1190 passing (1157 + 33: 25 in
+`test_advisories.py`, 4 net in `test_economy_helpers.py` beside the
+retire-with-replacement, 2 in `test_experiment_config.py`, 2 in
+`test_spatial_interaction.py`); ruff check and format clean; ZERO
+golden re-recordings and ZERO new goldens — all 31 golden tests and
+every counting pin passed untouched, and the async `on_match` observer
+needed no addition (Task 0(f): `AsyncDynamics.run` has carried it
+since M10b; the Phase C bench already counted through it). DOCS:
+DESIGN §4.1 gains the advisory-mechanism passage (pre-authorized, the
+#174(g) precedent); ADVISORIES.md A1/A2/A3 amended citing #176;
+ROADMAP Phase D status line; spec status line; `PARAMETERS.md`
+regenerated; CLAUDE.md current-phase paragraph advanced to Phase E.

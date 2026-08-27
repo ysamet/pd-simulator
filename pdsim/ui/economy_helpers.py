@@ -15,10 +15,12 @@ the app's wording and the docs cannot drift apart (the spec's §12 rule).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import NamedTuple
 
 from pdsim.config.experiment import ExperimentConfig, effective_neighbour_count
+from pdsim.config.registry import ParamValue
 from pdsim.core.economy import age_mortality_active
 from pdsim.core.movement import movement_active
 
@@ -60,7 +62,11 @@ ECONOMY_HELP: dict[str, str] = {
         "drawn into as many in return). With encounter mode 'per_pair' the "
         "duplicate pairs are collapsed after the draws, so the spatial "
         "figure is 1 × the effective neighbour count instead — each "
-        "neighbouring pair plays at most once per generation."
+        "neighbouring pair plays at most once per generation. Under the "
+        "asynchronous clock the spatial figure is an EXPECTED value per "
+        "generation-equivalent — each agent is activated once on average "
+        "and drawn in by each activated neighbour — where the synchronous "
+        "count is exact."
     ),
     "income": (
         "The two income extremes per generation: what an agent earns if every "
@@ -69,10 +75,13 @@ ECONOMY_HELP: dict[str, str] = {
         "Real agents earn somewhere in between."
     ),
     "window": (
-        "The survival window: with the total per-generation cost at or above "
-        "the all-D income but below the all-C income, cooperators can pay "
+        "The survival window: with the total per-generation cost above the "
+        "all-D income but below the all-C income, cooperators can pay "
         "their bills and defectors cannot — the metabolic filter is switched "
-        "on. Below the window even defectors grow; above it everyone starves."
+        "on. At or below the all-D income even defectors pay their bills "
+        "(at the bound exactly, a defector nets zero and never starves — "
+        "which is why the window's lower bound is strict); at or above the "
+        "all-C income everyone starves."
     ),
     "escape_velocity": (
         "With a capital return rate above zero, an agent whose energy stock "
@@ -174,7 +183,7 @@ agent on a full grid, and every other agent earns less than it says.
 """
 
 
-def _spatial_regime_note(encounter_mode: str) -> str:
+def _spatial_regime_note(encounter_mode: str, asynchronous: bool = False) -> str:
     """The spatial branch's regime caption: bounded budget, plus the fine print.
 
     Mode-conditional since M11b Phase C (#174(a)): the caption states the
@@ -182,10 +191,18 @@ def _spatial_regime_note(encounter_mode: str) -> str:
     count under ``"per_initiator"``, 1 × under ``"per_pair"`` — so the
     Economy panel's fine print can never contradict the figure beside it
     (#34). The per-initiator sentence is the pre-Phase-C text, verbatim.
+    Clock-aware since M11b Phase D (#169/#176): under the asynchronous
+    clock the figure is marked EXPECTED where the synchronous figure was
+    exact — activation order is random, so the per-window count varies
+    agent to agent around it (the Phase D measurement's per-agent spread
+    is exactly this variation; the population mean was exact).
 
     Args:
-        encounter_mode: ``matching.encounter_mode`` — ``"per_initiator"``
-            or ``"per_pair"``.
+        encounter_mode: The encounter mode the ARITHMETIC used —
+            ``"per_initiator"`` or ``"per_pair"`` (under the asynchronous
+            clock the caller forces ``"per_initiator"``, ruling R3 of
+            #176, so a stranded widget value never reaches this note).
+        asynchronous: Whether the configured clock is asynchronous.
 
     Returns:
         The caption for :attr:`CalibrationReport.regime_note`, ending with
@@ -198,6 +215,12 @@ def _spatial_regime_note(encounter_mode: str) -> str:
         )
     else:
         budget = "2 × the effective neighbour count"
+    if asynchronous:
+        budget += (
+            ", as an EXPECTED figure per generation-equivalent under the "
+            "asynchronous clock (activation order is random, so individual "
+            "agents scatter around it)"
+        )
     return (
         "Under spatial interaction the interaction budget is set by the grid's "
         f"geometry — {budget} — no matter how large the "
@@ -243,7 +266,10 @@ class SpatialIncome(NamedTuple):
             defection (rounds per agent × P).
         window_low: The survival window's lower bound (= all-D income).
         window_high: The survival window's upper bound (= all-C income);
-            the window is ``window_low ≤ cost < window_high``.
+            the window is ``window_low < cost < window_high`` — BOTH
+            bounds strict since M11b Phase D (#176 R1): at cost exactly
+            equal to the all-D income a defector nets zero and never
+            starves, so the boundary point defeats the filter.
     """
 
     matches_per_agent: float
@@ -265,6 +291,8 @@ def spatial_income_arithmetic(
     payoff_reward: float,
     payoff_punishment: float,
     encounter_mode: str = "per_initiator",
+    interaction_radius: int | None = 1,
+    site_count: int | None = None,
 ) -> SpatialIncome:
     """The spatial survival-window arithmetic, as a pure paint-time function.
 
@@ -303,13 +331,24 @@ def spatial_income_arithmetic(
         payoff_punishment: P — ``game.payoff_punishment``.
         encounter_mode: ``matching.encounter_mode`` —
             ``"per_initiator"`` (the 2× default) or ``"per_pair"`` (1×).
+        interaction_radius: ``structure.interaction_radius`` — the
+            interaction kernel's support radius (``None`` = unlimited),
+            passed through to the radius-aware
+            :func:`effective_neighbour_count` (#176 R6). Defaults to 1,
+            the registry default.
+        site_count: The grid's site count (rows × cols), required for the
+            unlimited-radius case and a truthful ceiling otherwise.
 
     Returns:
         The full :class:`SpatialIncome` arithmetic.
     """
     multiplier = 1.0 if encounter_mode == "per_pair" else 2.0
     matches = multiplier * effective_neighbour_count(
-        neighbourhood_shape, boundary, opponents_per_agent
+        neighbourhood_shape,
+        boundary,
+        opponents_per_agent,
+        interaction_radius,
+        site_count,
     )
     rounds_per_agent = matches * _expected_rounds(
         length_mode, rounds_per_match, continuation_probability
@@ -334,13 +373,14 @@ def spatial_calibration_active(config: ExperimentConfig) -> bool:
     toggle alone: with the toggle stranded on under ``well_mixed`` (a
     greyed checkbox keeps its value) or under tournament, the configured
     matcher genuinely IS consulted, and the aspatial arithmetic remains the
-    correct report there. The synchronous-clock conjunct is the
-    config-level equivalent of #141(c)'s table position (that cell lives in
-    the greying table's SYNC column): the 2 × effective-neighbour-count
-    figure was measured on the synchronous engine (#139), and the
-    asynchronous clock's per-generation-equivalent match count has not been
-    measured — so the async context keeps its pre-#154 report rather than
-    getting a guessed formula (#154's scope clause).
+    correct report there. The synchronous-clock conjunct #154 held this
+    predicate to was RETIRED in M11b Phase D (#169's gate, discharged by
+    the #177 measurement): asynchronous spatial runs measured EXACTLY
+    2 × min(k, degree) matches per agent per generation-equivalent as the
+    population mean, every window, on the fixed_n configuration where the
+    prediction is exact — so both clocks now share the spatial branch,
+    with the async figure marked "expected" in the fine print (activation
+    order is random; individuals scatter around the exact mean).
 
     Args:
         config: The experiment being calibrated.
@@ -350,10 +390,41 @@ def spatial_calibration_active(config: ExperimentConfig) -> bool:
     """
     return (
         config.mode == "evolution"
-        and config.dynamics.time_model == "synchronous"
         and config.structure.kind == "lattice"
         and config.matching.spatial_interaction
     )
+
+
+def economy_active(values: Mapping[str, ParamValue]) -> bool:
+    """Whether the energy ledger actually filters anyone (#176 R4).
+
+    The ONE shared gate for advisories A1 and A2: evolution mode AND
+    ((synchronous AND ``reproduction_mode = energy_economy``) OR
+    (asynchronous AND ``async_population = variable_n``)). Each excluded
+    corner would make a "metabolic filter" warning describe a filter that
+    does not exist: under the asynchronous clock the reproduction-mode
+    widget is inert (#154) and ``async_population`` chooses the paradigm
+    instead; under ``fixed_n`` the living cost is never charged (no
+    insolvency deaths — the Moran replacement is the only demography);
+    under tournament the economy is ignored wholesale.
+
+    Takes the WIDGET-VALUE mapping (with the app's lookahead), not a
+    config, because A2 must fire at paint time while the panel may not
+    even assemble into a valid config yet — the same signature shape as
+    the greying predicates (#141).
+
+    Args:
+        values: Widget values keyed by registry key (plus ``run.mode``).
+
+    Returns:
+        True when the configured run charges the living cost and kills the
+        insolvent — the regime the survival-window advisories describe.
+    """
+    if values.get("run.mode") != "evolution":
+        return False
+    if values.get("dynamics.time_model") == "asynchronous":
+        return values.get("dynamics.async_population") == "variable_n"
+    return values.get("dynamics.reproduction_mode") == "energy_economy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,8 +451,10 @@ class CalibrationReport:
         cooperator_net: all-C income − total cost (the verdict line's +X).
         defector_net: all-D income − total cost (the verdict line's −Y).
         window_verdict: Where the total cost sits relative to the survival
-            window ``all-D ≤ cost < all-C`` — ``"inside"``, ``"below"``
-            (even defectors grow), or ``"above"`` (everyone starves).
+            window ``all-D < cost < all-C`` (both bounds strict, #176 R1)
+            — ``"inside"``, ``"below"`` (even defectors grow; the lower
+            bound itself counts as below), or ``"above"`` (everyone
+            starves).
         regime_note: Whether this window stays put as N changes: it does
             under random_k (bounded interaction budget) and does NOT under
             round-robin (income scales with N, so the window moves).
@@ -407,9 +480,11 @@ class CalibrationReport:
             is imitation.
         spatial: Whether the spatial branch produced the matches figure —
             True exactly on the engine's own gate as #154 mirrors it
-            (synchronous evolution on a lattice with spatial interaction
-            on); the ``regime_note`` then carries
-            :data:`SPATIAL_FINE_PRINT`.
+            (evolution on a lattice with spatial interaction on; BOTH
+            clocks since M11b Phase D, #169's gate discharged by the #177
+            measurement); the ``regime_note`` then carries
+            :data:`SPATIAL_FINE_PRINT`, marked "expected" under the
+            asynchronous clock.
     """
 
     matcher: str
@@ -451,10 +526,25 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
     dynamics = config.dynamics
     n = config.population.size
     spatial = spatial_calibration_active(config)
+    asynchronous = dynamics.time_model == "asynchronous"
     if spatial:
         # The spatial branch (#154): while partners genuinely come from the
         # grid, the greyed matcher's arithmetic would describe a mechanism
         # that is not running — the figures come from the geometry instead.
+        # Under the asynchronous clock the encounter mode is FORCED to
+        # per_initiator (#176 R3): the async loop never deduplicates
+        # (#175(a)), so honouring a stranded per_pair widget value would
+        # print 4 where the engine plays 8 — the #34 falsehood #174(a)
+        # exists to prevent.
+        encounter_mode = "per_initiator" if asynchronous else config.matching.encounter_mode
+        # A validated lattice config stores resolved dimensions (the
+        # before-validator, hard rule 8); the guard mirrors the model's own
+        # defensive checks rather than assuming.
+        site_count = (
+            config.structure.rows * config.structure.cols
+            if config.structure.rows is not None and config.structure.cols is not None
+            else None
+        )
         arithmetic = spatial_income_arithmetic(
             neighbourhood_shape=config.structure.neighbourhood_shape,
             boundary=config.structure.boundary,
@@ -464,10 +554,12 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             continuation_probability=config.match.continuation_probability,
             payoff_reward=config.game.payoff_reward,
             payoff_punishment=config.game.payoff_punishment,
-            encounter_mode=config.matching.encounter_mode,
+            encounter_mode=encounter_mode,
+            interaction_radius=config.structure.interaction_radius,
+            site_count=site_count,
         )
         matches = arithmetic.matches_per_agent
-        regime_note = _spatial_regime_note(config.matching.encounter_mode)
+        regime_note = _spatial_regime_note(encounter_mode, asynchronous)
     elif config.matching.matcher == "round_robin":
         matches = float(n - 1)
         regime_note = (
@@ -494,7 +586,10 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
     total_cost = dynamics.basic_living_cost + dynamics.engagement_cost * matches
     if total_cost >= all_c:
         verdict = "above"
-    elif total_cost < all_d:
+    elif total_cost <= all_d:
+        # The lower bound is STRICT (#176 R1): at cost exactly equal to the
+        # all-D income a defector nets zero and never starves, so the
+        # boundary point itself sits below the window, filter off.
         verdict = "below"
     else:
         verdict = "inside"
@@ -554,7 +649,10 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             # generation (#139), doubling round_robin's per-pair growth rate.
             # Mode-aware since M11b Phase C (#174(a)'s never-false rule):
             # under 'per_pair' the pair meets once and the worst case halves.
-            per_pair = config.matching.encounter_mode == "per_pair"
+            # Under the asynchronous clock the stranded widget value is
+            # FORCED to per_initiator (#176 R3), same as the arithmetic —
+            # the async loop never deduplicates (#175(a)).
+            per_pair = not asynchronous and config.matching.encounter_mode == "per_pair"
             meetings = 1 if per_pair else 2
             worst = meetings * rounds * dynamics.generations
             frequency = "once" if per_pair else "twice"

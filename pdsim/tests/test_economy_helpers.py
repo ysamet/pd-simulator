@@ -155,7 +155,7 @@ class TestSpatialCalibration:
     """The #154 spatial branch: the gate, the worked numbers, the fine print."""
 
     def test_pure_function_flagship_numbers(self) -> None:
-        """spatial_reciprocity: k = 5 clamps to 4, so 8 matches, window 0 ≤ L < 24."""
+        """spatial_reciprocity: k = 5 clamps to 4, so 8 matches, window 0 < L < 24."""
         arithmetic = _spatial_arithmetic_for("spatial_reciprocity")
         assert arithmetic.matches_per_agent == 8.0
         assert arithmetic.rounds_per_agent == 8.0  # one round per match
@@ -219,18 +219,93 @@ class TestSpatialCalibration:
         assert report.spatial is False
         assert report.expected_matches == 199.0  # round_robin's N − 1 at N = 200
 
-    def test_async_context_keeps_its_current_behaviour(self) -> None:
-        """The #154 scope clause: no spatial branch under the async clock.
+    def test_async_context_uses_the_spatial_branch(self) -> None:
+        """The #154 pin RETIRED WITH THIS REPLACEMENT (#120(f); M11b Phase D).
 
-        The asynchronous per-generation-equivalent match count has not been
-        measured (#139 measured the synchronous engine), so the async
-        context keeps the pre-#154 report — the configured (greyed)
-        matcher's arithmetic — until the design layer rules on a formula.
-        This pin guards that the spatial branch does not silently extend.
+        Retired: ``test_async_context_keeps_its_current_behaviour`` pinned
+        the async context to the pre-#154 aspatial report (round_robin's
+        N − 1 = 99 on donation_game_threshold) so the spatial branch could
+        not silently extend without a design ruling. The ruling came
+        (#169) and its measurement gate PASSED (#176/#177: asynchronous
+        fixed_n spatial runs play EXACTLY 2 × min(k, degree) matches per
+        agent per generation-equivalent as the population mean, every
+        window), so the branch now extends to the asynchronous clock and
+        this replacement pins the NEW behaviour: the spatial branch
+        active, 8 matches (2 × min(4, 4)), ``CalibrationReport.spatial``
+        True.
         """
         report = calibration_report(get_scenario_info("donation_game_threshold").config)
-        assert report.spatial is False
-        assert report.expected_matches == 99.0  # round_robin's N − 1 at N = 100
+        assert report.spatial is True
+        assert report.expected_matches == 8.0  # 2 × min(k = 4, degree 4)
+        assert SPATIAL_FINE_PRINT in report.regime_note
+
+    def test_async_regime_note_marked_expected_where_sync_is_exact(self) -> None:
+        """#169's fine-print clause: the async figure is EXPECTED, sync exact.
+
+        The (?) and the caption may never contradict the number (#154's
+        rule): the async caption carries the expected qualifier; the
+        synchronous caption stays the pre-Phase-D text without it.
+        """
+        async_report = calibration_report(get_scenario_info("donation_game_threshold").config)
+        assert "EXPECTED figure per generation-equivalent" in async_report.regime_note
+        sync_report = calibration_report(get_scenario_info("spatial_reciprocity").config)
+        assert "EXPECTED figure" not in sync_report.regime_note
+        # The help text behind the (?) carries the same clause (#154's rule).
+        assert "asynchronous clock" in ECONOMY_HELP["expected_matches"]
+
+    def test_async_forces_per_initiator_for_a_stranded_per_pair(self) -> None:
+        """#176 R3, pinned both ways: async 2× regardless of the stranded knob.
+
+        The async loop never deduplicates (#175(a)), so a stranded
+        ``per_pair`` widget value must not reach the arithmetic — the
+        report shows 2 × min(k, degree) = 8, not 4 — while the synchronous
+        control genuinely halves to 1× under the same knob.
+        """
+        data = get_scenario_info("donation_game_threshold").config.model_dump(mode="json")
+        data["matching"]["encounter_mode"] = "per_pair"
+        stranded = calibration_report(ExperimentConfig.model_validate(data))
+        assert stranded.spatial is True
+        assert stranded.expected_matches == 8.0  # forced per_initiator: 2×
+        assert "per_pair" not in stranded.regime_note
+        # The synchronous control: the same knob genuinely halves (#174(a)).
+        sync_data = get_scenario_info("spatial_reciprocity").config.model_dump(mode="json")
+        sync_data["matching"]["encounter_mode"] = "per_pair"
+        control = calibration_report(ExperimentConfig.model_validate(sync_data))
+        assert control.expected_matches == 4.0  # 1 × min(k = 5, degree 4)
+        assert "per_pair" in control.regime_note
+
+    def test_async_memory_note_forces_per_initiator_too(self) -> None:
+        """#176 R3's second clause: the #175(f3) memory note obeys the forcing.
+
+        With a stranded ``per_pair`` under the asynchronous clock the note
+        must keep the per-initiator wording (a pair meets twice), because
+        the engine never deduplicates there; the synchronous control under
+        the same knob says once.
+        """
+        data = get_scenario_info("donation_game_threshold").config.model_dump(mode="json")
+        data["dynamics"]["reproduction_mode"] = "energy_economy"  # the note's gate
+        data["matching"]["encounter_mode"] = "per_pair"
+        report = calibration_report(ExperimentConfig.model_validate(data))
+        assert report.memory_note is not None
+        assert "twice" in report.memory_note
+        sync_data = get_scenario_info("spatial_reciprocity").config.model_dump(mode="json")
+        sync_data["matching"]["encounter_mode"] = "per_pair"
+        control = calibration_report(ExperimentConfig.model_validate(sync_data))
+        assert control.memory_note is not None
+        assert "once" in control.memory_note
+
+    def test_the_window_lower_bound_is_strict(self) -> None:
+        """#176 R1: cost exactly at the all-D income sits BELOW the window.
+
+        At L = all-D income a defector nets exactly zero and never
+        starves — the boundary point defeats the filter, so the verdict
+        must say "below", matching the strict printed window and advisory
+        A1's inclusive trigger.
+        """
+        report = calibration_report(_economy_config(basic_living_cost=100.0))
+        assert report.all_d_income == 100.0
+        assert report.window_verdict == "below"
+        assert report.defector_net == pytest.approx(0.0)
 
     def test_fine_print_present_in_the_spatial_readout(self) -> None:
         """The single-source sentence rides the spatial regime note only."""

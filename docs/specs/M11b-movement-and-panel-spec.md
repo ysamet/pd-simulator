@@ -2,8 +2,9 @@
 
 **Status: frozen; in progress** (created 2026-08-17, Phase 0; Phase A
 landed 2026-08-17 — DECISIONS #171; Phase B landed 2026-08-18 — DECISIONS
-#172; Phase C landed 2026-08-20 — DECISIONS #174/#175). This spec is a
-frozen historical
+#172; Phase C landed 2026-08-20 — DECISIONS #174/#175; Phase D landed
+2026-08-24 — DECISIONS #176/#177, the ruling-7 measurement gate PASSED).
+This spec is a frozen historical
 record (#62): deviations during implementation become new DECISIONS
 entries, never retro-edits of this file beyond this status line.
 

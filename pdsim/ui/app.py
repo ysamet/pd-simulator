@@ -51,7 +51,7 @@ from pdsim.sweep.spec import (
     sweep_spec_yaml,
     sweep_validation_messages,
 )
-from pdsim.ui import economy_helpers, helpers, sweep_helpers
+from pdsim.ui import advisories, economy_helpers, helpers, sweep_helpers
 from pdsim.ui.economy_helpers import ECONOMY_HELP
 from pdsim.viz import charts
 
@@ -93,11 +93,14 @@ STRUCTURE_HELP = {
     "effective_neighbours": (
         "The number of matches an interior cell actually starts per generation "
         "under spatial interaction: 'Opponents per agent' clamped to the "
-        "neighbours that exist — min(k, 8) on a Moore neighbourhood, min(k, 4) "
-        "on von Neumann. This is the k the b/c > k cooperation threshold "
-        "counts. On a bounded grid, edge and corner cells have fewer "
-        "neighbours still (a corner keeps 3 of Moore's 8); a torus has no "
-        "edges, so every cell plays exactly this number."
+        "neighbours REACHABLE within the interaction radius — at the default "
+        "radius 1 that is min(k, 8) on a Moore neighbourhood and min(k, 4) on "
+        "von Neumann; a larger radius enlarges the reachable set (and a blank "
+        "radius reaches the whole grid), so the clamp loosens accordingly. "
+        "This is the k the b/c > k cooperation threshold counts. On a "
+        "bounded grid, edge and corner cells have fewer neighbours still (a "
+        "corner keeps 3 of Moore's 8 at radius 1); a torus has no edges, so "
+        "every cell plays exactly this number."
     ),
     "pixel_array": (
         "Whether the grid is currently drawn as ONE image — a pixel array, "
@@ -319,6 +322,15 @@ def _load_state(
         for spec in info.params:
             param = spec.key.rsplit(".", maxsplit=1)[-1]
             st.session_state[spec.key] = strategy_params.get(info.name, {}).get(param, spec.default)
+    # The advisory baseline (#176 R5): retain what this load wrote, so A2
+    # can detect "changed since load" as a pure function of (current,
+    # loaded) values. Every load — scenario, Custom, recorded config —
+    # passes through here, so loading clears the advisories by
+    # construction. Display-side state only; nothing reads it but the
+    # advisory rules.
+    st.session_state["_loaded_values"] = {
+        spec.key: values.get(spec.key, spec.default) for spec in helpers.panel_specs()
+    }
 
 
 def _scenario_area() -> None:
@@ -359,6 +371,28 @@ def _scenario_area() -> None:
         info = scenarios[choice]
         st.markdown(info.description)
         st.caption(f"**Things to try:** {info.things_to_try}")
+
+
+def _advisory_captions(surface: str, values: dict[str, ParamValue]) -> None:
+    """Render whatever advisories fire at one surface (M11b Phase D).
+
+    Presentation only (the #38 split): the rules live in
+    :mod:`pdsim.ui.advisories` — one predicate table, evaluated there —
+    and this helper just paints what fired: ``st.warning`` for a caution,
+    ``st.info`` for an info.
+
+    Args:
+        surface: A widget's registry key, or the Economy panel's
+            pseudo-surface (:data:`advisories.ECONOMY_PANEL_SURFACE`).
+        values: The widget values gathered so far this script run (plus
+            the app's lookahead).
+    """
+    loaded = st.session_state.get("_loaded_values", {})
+    for advisory in advisories.advisories_for_surface(surface, values, loaded):
+        if advisory.severity == "caution":
+            st.warning(advisory.message)
+        else:
+            st.info(advisory.message)
 
 
 def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str, dict]]:
@@ -429,6 +463,10 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
                 disabled, note = helpers.greying(spec.key, {**lookahead, **values})
                 with columns[i % 2]:
                     values[spec.key] = _widget(spec, disabled=disabled, note=note)
+                    # The advisory seam (M11b Phase D): inline warnings
+                    # anchored at this widget — A2 at its nine trigger
+                    # keys, A3 beside the spatial-interaction toggle.
+                    _advisory_captions(spec.key, {**lookahead, **values})
             if section == "Game" and values.get("run.mode") == "evolution":
                 # The §12 payoff-additivity readout (#111) — whether the
                 # b/c > k threshold is even a well-formed question for
@@ -604,7 +642,7 @@ def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -
     col_d.metric("All-D income", f"{report.all_d_income:g}", help=ECONOMY_HELP["income"])
     col_window.metric(
         "Survival window",
-        f"{report.all_d_income:g} ≤ cost < {report.all_c_income:g}",
+        f"{report.all_d_income:g} < cost < {report.all_c_income:g}",
         help=ECONOMY_HELP["window"],
     )
     if report.window_verdict == "inside":
@@ -624,6 +662,9 @@ def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -
             f"Total per-generation cost **{report.total_cost:g}** is **below** the "
             "window — even defectors profit; the metabolic filter is switched off."
         )
+    # Advisory A1 (M11b Phase D, #176 R1/R4): beside the calibration
+    # readout, from the same predicate table as the inline advisories.
+    _advisory_captions(advisories.ECONOMY_PANEL_SURFACE, values)
 
     if report.escape_velocity is not None:
         st.metric(
@@ -827,11 +868,28 @@ def _structure_readouts(values: dict[str, ParamValue]) -> None:
         shape = values.get("structure.neighbourhood_shape")
         boundary = values.get("structure.boundary")
         k = values.get("matching.opponents_per_agent")
-        if isinstance(shape, str) and isinstance(boundary, str) and isinstance(k, int):
+        # The interaction radius is radius-aware input since M11b Phase D
+        # (#176 R6); None is a legitimate value (blank = unlimited reach).
+        radius = values.get("structure.interaction_radius")
+        if (
+            isinstance(shape, str)
+            and isinstance(boundary, str)
+            and isinstance(k, int)
+            and (radius is None or isinstance(radius, int))
+        ):
+            resolved_rows, resolved_cols = resolve_lattice_dimensions(
+                rows if isinstance(rows, int) else None,
+                cols if isinstance(cols, int) else None,
+                size,
+            )
             metrics.append(
                 (
                     "Effective neighbours (k)",
-                    str(effective_neighbour_count(shape, boundary, k)),
+                    str(
+                        effective_neighbour_count(
+                            shape, boundary, k, radius, resolved_rows * resolved_cols
+                        )
+                    ),
                     STRUCTURE_HELP["effective_neighbours"],
                 )
             )

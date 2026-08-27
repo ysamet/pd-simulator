@@ -45,6 +45,7 @@ __all__ = [
     "PopulationConfig",
     "StructureConfig",
     "effective_neighbour_count",
+    "interior_reach_size",
     "load_config",
     "payoff_additivity",
     "resolve_carrying_capacity",
@@ -184,38 +185,116 @@ def resolve_carrying_capacity(carrying_capacity: int | None, site_count: int | N
 
 
 def effective_neighbour_count(
-    neighbourhood_shape: str, boundary: str, opponents_per_agent: int
+    neighbourhood_shape: str,
+    boundary: str,
+    opponents_per_agent: int,
+    interaction_radius: int | None = 1,
+    site_count: int | None = None,
 ) -> int:
     """The neighbour count an interior cell actually plays — the threshold's k.
 
     ``opponents_per_agent`` clamps rather than errors when it exceeds the
-    neighbourhood size (#81): an interior cell has 8 neighbours on a Moore
-    neighbourhood and 4 on von Neumann, so the number of matches a cell
-    starts per generation under spatial interaction is
-    ``min(k, interior degree)`` — and that number is the k the b/c > k
-    cooperation threshold counts (M11a spec §12 readout 4).
+    reachable-neighbour count (#81): the number of matches a cell starts
+    per generation under spatial interaction is ``min(k, interior reach
+    size)`` — and that number is the k the b/c > k cooperation threshold
+    counts (M11a spec §12 readout 4).
+
+    Radius-aware since M11b Phase D (DECISIONS #176, ruling R6): the
+    interior reach size at (shape, radius r) is 2r(r+1) on von Neumann
+    (the Manhattan disc minus the origin) and (2r+1)² − 1 on Moore (the
+    Chebyshev square minus the origin) — at the default radius 1 exactly
+    the classic degrees 4 and 8, so every radius-1 figure is unchanged.
+    A blank radius (``None``) means unlimited reach (#137(a)): every
+    other site is a candidate, so the size is ``site_count − 1``. These
+    closed forms are cross-pinned for equality against the engine's own
+    cached reach enumeration (``Structure.reach``, #156) so the readout
+    and the engine cannot drift.
 
     A pure free function on the spec Design 11 paint-time pattern, so the
     panel readout and any future validator arithmetic cannot drift. The
     ``boundary`` argument completes the readout's inputs but does not move
-    the number: the interior degree is the same on a torus and a bounded
+    the number: the interior reach is the same on a torus and a bounded
     grid — the difference is that a torus has ONLY interior cells, while a
     bounded grid's edge and corner cells clamp lower still (a corner keeps
-    3 of Moore's 8), which the readout's explanation notes rather than
-    averages over.
+    3 of Moore's 8 at radius 1), which the readout's explanation notes
+    rather than averages over.
 
     Args:
-        neighbourhood_shape: ``"moore"`` (8 neighbours) or ``"von_neumann"``
-            (4 neighbours).
+        neighbourhood_shape: ``"moore"`` (Chebyshev distance) or
+            ``"von_neumann"`` (Manhattan distance).
         boundary: ``"torus"`` or ``"bounded"`` — documented above; accepted
             so the signature states the full geometry the readout describes.
         opponents_per_agent: The configured k.
+        interaction_radius: The interaction kernel's support radius R
+            (``structure.interaction_radius``), or ``None`` for unlimited
+            reach. Defaults to 1, the registry default — the classic
+            immediate-neighbourhood figures.
+        site_count: The grid's site count, needed for the unlimited-reach
+            case (and, when given, a truthful ceiling for a finite radius:
+            no reach can exceed ``site_count − 1``). Required when
+            ``interaction_radius`` is ``None``.
 
     Returns:
-        ``min(opponents_per_agent, interior degree)``.
+        ``min(opponents_per_agent, interior reach size)``.
+
+    Raises:
+        ValueError: If ``interaction_radius`` is ``None`` and no
+            ``site_count`` was given (unlimited reach has no size without
+            knowing the grid).
     """
-    interior_degree = 8 if neighbourhood_shape == "moore" else 4
-    return min(opponents_per_agent, interior_degree)
+    return min(
+        opponents_per_agent,
+        interior_reach_size(neighbourhood_shape, interaction_radius, site_count),
+    )
+
+
+def interior_reach_size(
+    neighbourhood_shape: str,
+    interaction_radius: int | None,
+    site_count: int | None = None,
+) -> int:
+    """How many sites an interior cell can reach — the R6 radius-aware degree.
+
+    The closed forms behind :func:`effective_neighbour_count` (#176 R6),
+    named separately because advisory A3 compares the configured k against
+    the reach size ITSELF (k ≥ degree = the whole neighbourhood is
+    playable), a question ``min(k, size)`` cannot answer. One
+    implementation for both callers, so the readout and the advisory
+    cannot drift.
+
+    Args:
+        neighbourhood_shape: ``"moore"`` (Chebyshev) or ``"von_neumann"``
+            (Manhattan).
+        interaction_radius: The support radius R, or ``None`` for
+            unlimited reach (#137(a)).
+        site_count: The grid's site count — required when the radius is
+            ``None``, and, when given, a truthful ceiling otherwise (no
+            reach exceeds the grid minus the origin).
+
+    Returns:
+        The interior reach size: 2r(r+1) on von Neumann, (2r+1)² − 1 on
+        Moore, ``site_count − 1`` at unlimited radius.
+
+    Raises:
+        ValueError: If ``interaction_radius`` is ``None`` and no
+            ``site_count`` was given.
+    """
+    if interaction_radius is None:
+        if site_count is None:
+            raise ValueError(
+                "site_count is required when interaction_radius is None "
+                "(unlimited reach spans the whole grid)."
+            )
+        return site_count - 1
+    if neighbourhood_shape == "moore":
+        reach_size = (2 * interaction_radius + 1) ** 2 - 1
+    else:
+        reach_size = 2 * interaction_radius * (interaction_radius + 1)
+    if site_count is not None:
+        # No reach can exceed the grid minus the origin — a large radius
+        # on a small torus wraps onto itself.
+        reach_size = min(reach_size, site_count - 1)
+    return reach_size
 
 
 class PayoffAdditivity(NamedTuple):

@@ -38,6 +38,7 @@ from pydantic import ValidationError
 import pdsim.core.async_dynamics as async_dynamics_module
 import pdsim.core.matcher as matcher_module
 from pdsim.config.experiment import ExperimentConfig
+from pdsim.config.scenarios import get_scenario_info
 from pdsim.core.agent import Agent
 from pdsim.core.async_dynamics import AsyncDynamics
 from pdsim.core.dynamics import EconomyDynamics, PopulationDynamics
@@ -620,3 +621,55 @@ class TestSpatialInteractionValidator:
             }
         )
         assert config.mode == "tournament"
+
+
+# ---------------------------------------------------------------------------
+# The M11b Phase D async match-budget pin (#176/#177 — the #139 precedent)
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncSpatialMatchBudget:
+    """The Phase D permanent pin: the #139 arithmetic holds in event time.
+
+    The #169 gate's measurement (#177) found the population mean EXACTLY
+    2 × min(k, degree) matches per agent per generation-equivalent on the
+    fully occupied fixed_n torus — because every event's focal plays
+    exactly min(k, degree) matches and fixed_n pins N. This test pins that
+    arithmetic permanently (a test, not a golden — the #139 precedent):
+    per-event focal match count and per-window totals, at k = 4 and k = 2,
+    on the donation_game_threshold configuration the measurement ran.
+    """
+
+    @pytest.mark.parametrize(("k", "per_event"), [(4, 4), (2, 2)])
+    def test_per_event_and_per_window_match_counts(self, k: int, per_event: int) -> None:
+        """Every event plays min(k, degree) matches; windows total N × that.
+
+        Matches are grouped by the engine's own clock stamp — ``time``
+        advances once at event start (Δt = 1/N), so one stamp is one
+        event. Two generation-equivalents of the N = 100 configuration
+        give exactly 200 events; each 100-event window totals
+        100 × min(k, 4), making the population mean per window exactly
+        2 × min(k, 4) — the calibration branch's async figure.
+        """
+        data = get_scenario_info("donation_game_threshold").config.model_dump(mode="json")
+        data["dynamics"]["generations"] = 2
+        data["matching"]["opponents_per_agent"] = k
+        config = ExperimentConfig.model_validate(data)
+        dynamics = AsyncDynamics(config, np.random.default_rng(config.seed))
+        counts_by_stamp: dict[float, int] = {}
+        stamp_order: list[float] = []
+
+        def observe(result: MatchResult) -> None:
+            stamp = dynamics.time
+            if stamp not in counts_by_stamp:
+                stamp_order.append(stamp)
+                counts_by_stamp[stamp] = 0
+            counts_by_stamp[stamp] += 1
+
+        for _ in dynamics.run(on_match=observe):
+            pass
+        counts = [counts_by_stamp[stamp] for stamp in stamp_order]
+        assert len(counts) == 200  # N = 100 events per generation-equivalent, twice
+        assert set(counts) == {per_event}  # min(k, degree), every single event
+        assert sum(counts[:100]) == 100 * per_event
+        assert sum(counts[100:]) == 100 * per_event
