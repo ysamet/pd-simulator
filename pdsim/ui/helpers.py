@@ -649,6 +649,20 @@ def _composition_rule(values: Mapping[str, ParamValue]) -> str | None:
     return None
 
 
+_SUMMARY_CAUSES: dict[str, str] = {
+    _MOVEMENT_WELL_MIXED_NOTE: "inactive (well-mixed)",
+    _MOVEMENT_IMITATION_NOTE: "inactive under imitation",
+    _MOVEMENT_FIXED_N_NOTE: "inactive under fixed_n",
+}
+"""Greyed-note → short cause phrase for gateless summary labels (#178 R5).
+
+Keyed by the EXACT note text the greying-table cell returns, so a
+collapsed section's summary and the tooltips on the greyed widgets
+inside it can never name different causes (the §12 one-source
+discipline). Only gateless collapse candidates need entries — Movement
+today; a gated section's summary names its gate value instead."""
+
+
 STRUCTURE_GREYING: dict[str, GreyingRule] = {
     "structure.kind": GreyingRule(sync=_always_live, asynchronous=_always_live),
     "structure.rows": GreyingRule(sync=_geometry_only, asynchronous=_geometry_only),
@@ -703,6 +717,105 @@ column); the tournament wholesale-ignore runs BEFORE either branch via
 through self-guarding predicates (:func:`_spatial_sampling_active`,
 :func:`_composition_rule`).
 """
+
+
+SECTION_GATES: dict[str, tuple[str, ...]] = {
+    "Structure": ("structure.kind",),
+    "Movement": (),
+}
+"""The collapse-with-summary candidates and their gate keys (#178 R4).
+
+A GATE key is the section's own on/off switch: it stays live even when
+everything else in the section greys, so :func:`section_inert` excludes
+it from the all-grey test — otherwise a well-mixed Structure section
+could never be switched back to lattice from its collapsed state.
+Movement has NO gate: its rate is a value, not a liveness condition
+(#172 — the rate widget is how movement is turned on, and it greys with
+its section). Only these two sections ever collapse: Dynamics' greying
+lives in the #101 chains rather than the table and is never wholly
+inert under evolution (#158); the remaining sections never grey
+wholesale at all.
+"""
+
+
+def _table_keys_in_section(section: str) -> tuple[str, ...]:
+    """The greying table's rows that belong to one panel section.
+
+    Args:
+        section: The registry section name (e.g. ``"Structure"``).
+
+    Returns:
+        The registry keys registered under that section that have a
+        :data:`STRUCTURE_GREYING` row, in registration order.
+    """
+    return tuple(
+        spec.key
+        for spec in all_specs()
+        if spec.section == section and spec.key in STRUCTURE_GREYING
+    )
+
+
+def section_inert(section: str, values: Mapping[str, ParamValue], branch: str) -> bool:
+    """Whether a whole section is inert — the collapse predicate (#178 R4).
+
+    True iff EVERY table-covered key in the section, excluding the
+    section's gate keys, currently greys under the given clock branch.
+    Computed FROM :data:`STRUCTURE_GREYING`'s own columns — the same
+    predicates :func:`greying` consults — so collapse can never drift
+    from greying.
+
+    Args:
+        section: The panel section name.
+        values: Widget values (with the app's lookahead), exactly as
+            :func:`greying` receives them.
+        branch: Which table column answers — ``"sync"`` or
+            ``"asynchronous"`` (a :class:`GreyingRule` field name).
+
+    Returns:
+        True when the section should render collapsed under its summary
+        label; always False for a section that is not a
+        collapse-with-summary candidate (anything outside
+        :data:`SECTION_GATES`).
+    """
+    gates = SECTION_GATES.get(section)
+    if gates is None:
+        return False
+    keys = [key for key in _table_keys_in_section(section) if key not in gates]
+    if not keys:
+        return False
+    return all(getattr(STRUCTURE_GREYING[key], branch)(values) is not None for key in keys)
+
+
+def section_summary_label(section: str, values: Mapping[str, ParamValue], branch: str) -> str:
+    """An inert section's collapsed summary label (#178 R5).
+
+    Section label, em dash, then the cause: where the section has a
+    gate key, the gate's current value names it ("Structure —
+    well-mixed, inactive"); where it has none, the short phrase mapped
+    from the exact greying note the table cell returned ("Movement —
+    inactive under imitation") — :data:`_SUMMARY_CAUSES` is keyed by the
+    note itself, so the summary and the tooltips one level down share
+    one source.
+
+    Args:
+        section: The panel section name (a :data:`SECTION_GATES`
+            candidate).
+        values: Widget values (with the app's lookahead).
+        branch: Which table column answers — ``"sync"`` or
+            ``"asynchronous"``.
+
+    Returns:
+        The label the collapsed expander shows.
+    """
+    gates = SECTION_GATES[section]
+    if gates:
+        gate_value = str(values.get(gates[0], "")).replace("_", "-")
+        return f"{section} — {gate_value}, inactive"
+    for key in _table_keys_in_section(section):
+        note = getattr(STRUCTURE_GREYING[key], branch)(values)
+        if note is not None and note in _SUMMARY_CAUSES:
+            return f"{section} — {_SUMMARY_CAUSES[note]}"
+    return f"{section} — inactive"
 
 
 def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:
@@ -941,6 +1054,11 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
         config.structure,
         config.movement,
         config.dynamics,
+        # config.output joined at M11b Phase E1 (#172(f6)/#178 C1): its
+        # omission made every load fall back to the recording-cadence
+        # registry defaults, so a per_event recording loaded showing
+        # per_generation_equivalent.
+        config.output,
     ]
     values: dict[str, ParamValue] = {}
     for model in models:

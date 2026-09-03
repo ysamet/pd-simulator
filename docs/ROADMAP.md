@@ -331,6 +331,30 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     mechanism shipped as the `ui/advisories.py` predicate table with
     A1–A3 live in the panel (#170's amended triggers; gates #176
     R4/R7). Zero re-recordings, zero new goldens; 1190 tests passing.
+    ✅ **M11b Phase E1 landed 2026-09-01** (DECISIONS #178 pre-drafting
+    rulings, #179 build record): the #158 tab split executed —
+    `run.mode`'s widget became the panel's tab strip (a segmented
+    control with `required=True`, still keyed by the registry key;
+    st.tabs not used, though #179(a) records that 1.58 has made it
+    stateful, outdating C2's rationale). The tournament tab hides
+    Structure, Movement, and Dynamics per SECTION — Matching's
+    tournament-greyed spatial keys still render, the greying table
+    byte-untouched beneath (#178 R10) — under the R1/R2 preservation
+    contract (session-state keep-alive plus the lookahead completed to
+    every panel key), pinned by an evolution→tournament→evolution
+    round trip and a recorded-tournament-config test. Structure and
+    Movement collapse-with-summary off the #141 table
+    (`SECTION_GATES`/`section_inert`, cause phrases keyed by the exact
+    greying note); the Economy panel's gate moved onto `economy_active`
+    with cause-naming summaries when inactive (#177(f1) closed for the
+    async variable_n stranded-imitation corner; the
+    donation_game_threshold fixed_n contradiction reported, #179(d)).
+    Passengers: the A2 "rescales" reword (#178 R8), the #172(f6)
+    `config.output` loading fix, DESIGN §2.10's strict lower bound.
+    Zero re-recordings, zero new goldens; 1210 tests passing. A
+    validation-feedback fix followed (2026-09-03, #180): stable
+    section-expander keys — the inert/live label swap no longer
+    collapses an open pane under the user mid-edit.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

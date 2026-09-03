@@ -38,12 +38,12 @@ Trigger and message amended per DECISIONS #176 R1 (2026-08-24), implemented in M
 ### A2 — Income-multiplying parameter changed without recalibration
 
 - **Trigger:** any change (relative to the LOADED scenario's values — DECISIONS #176 R5) to `matching.matcher`, `matching.opponents_per_agent`, `match.rounds_per_match`, `match.continuation_probability`, `structure.neighbourhood_shape`, `structure.kind`, `matching.spatial_interaction`, `matching.encounter_mode`, or `structure.interaction_radius` while the economy is active — evolution mode AND ((synchronous AND `reproduction_mode = energy_economy`) OR (asynchronous AND `async_population = variable_n`)) (DECISIONS #176 R4)
-- **Message:** This change multiplies every agent's income. Recompute the survival window before trusting the living cost.
+- **Message:** This change rescales every agent's income (it may raise or lower it). Recompute the survival window before trusting the living cost.
 - **Severity:** caution
 - **Surface:** inline at the changed widget
 - **Owner:** M11b
 
-Trigger list amended per DECISIONS #170 (2026-08-17): `movement.rate` and `interaction_decay` deliberately excluded — see the entry for reasons. Gate amended per DECISIONS #176 R4 (2026-08-24), implemented in M11b Phase D; the radius trigger's key corrected in the same edit to `structure.interaction_radius` — the parameter's REGISTERED key (it renders in the Structure section); #170's `matching.interaction_radius` named the same parameter by its owning concept, not its registry key (a Rule 7 report in #177).
+Trigger list amended per DECISIONS #170 (2026-08-17): `movement.rate` and `interaction_decay` deliberately excluded — see the entry for reasons. Gate amended per DECISIONS #176 R4 (2026-08-24), implemented in M11b Phase D; the radius trigger's key corrected in the same edit to `structure.interaction_radius` — the parameter's REGISTERED key (it renders in the Structure section); #170's `matching.interaction_radius` named the same parameter by its owning concept, not its registry key (a Rule 7 report in #177). Message reworded per DECISIONS #178 R8 (2026-09-01, implemented in M11b Phase E1): the old "multiplies every agent's income" implied income only ever goes up — several triggers can lower it — so the message now says "rescales (it may raise or lower it)".
 
 ### A3 — Spatial interaction with k at or above the neighbourhood size
 

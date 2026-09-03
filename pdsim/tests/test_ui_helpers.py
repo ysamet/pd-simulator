@@ -1145,3 +1145,124 @@ class TestMovementGreying:
                         for key in self.TRIO:
                             _, note = helpers.greying(key, values)
                             assert "infeasible" not in note.lower()
+
+
+class TestSectionGates:
+    """The collapse-with-summary candidate map (M11b Phase E1, #178 R4)."""
+
+    def test_shape(self) -> None:
+        """Structure gates on its kind; Movement is gateless; nothing else."""
+        assert helpers.SECTION_GATES == {
+            "Structure": ("structure.kind",),
+            "Movement": (),
+        }
+
+    def test_non_candidates_never_collapse(self) -> None:
+        """Every other section answers False regardless of values."""
+        values: dict[str, object] = {"run.mode": "evolution"}
+        for section in ("Game", "Matching", "Match", "Population", "Dynamics", "Output", "Run"):
+            assert helpers.section_inert(section, values, "sync") is False
+            assert helpers.section_inert(section, values, "asynchronous") is False
+
+
+class TestSectionInert:
+    """section_inert on both sides of every boundary (#178 R4)."""
+
+    def test_structure_inert_under_well_mixed_both_branches(self) -> None:
+        """With no geometry, every non-gate Structure key greys — inert."""
+        values = {"structure.kind": "well_mixed"}
+        assert helpers.section_inert("Structure", values, "sync") is True
+        assert helpers.section_inert("Structure", values, "asynchronous") is True
+
+    def test_structure_live_on_a_lattice_both_branches(self) -> None:
+        """One live row (rows/cols at least) keeps the section open."""
+        values = {"structure.kind": "lattice"}
+        assert helpers.section_inert("Structure", values, "sync") is False
+        assert helpers.section_inert("Structure", values, "asynchronous") is False
+
+    def test_movement_sync_inert_causes_and_live_case(self) -> None:
+        """Sync: well-mixed and imitation are inert; the economy is live."""
+        assert helpers.section_inert("Movement", {"structure.kind": "well_mixed"}, "sync") is True
+        imitation = {"structure.kind": "lattice", "dynamics.reproduction_mode": "imitation"}
+        assert helpers.section_inert("Movement", imitation, "sync") is True
+        economy = {"structure.kind": "lattice", "dynamics.reproduction_mode": "energy_economy"}
+        assert helpers.section_inert("Movement", economy, "sync") is False
+
+    def test_movement_async_inert_causes_and_live_case(self) -> None:
+        """Async: well-mixed and fixed_n are inert; variable_n is live."""
+        well_mixed = {"structure.kind": "well_mixed"}
+        assert helpers.section_inert("Movement", well_mixed, "asynchronous") is True
+        fixed_n = {"structure.kind": "lattice", "dynamics.async_population": "fixed_n"}
+        assert helpers.section_inert("Movement", fixed_n, "asynchronous") is True
+        variable_n = {"structure.kind": "lattice", "dynamics.async_population": "variable_n"}
+        assert helpers.section_inert("Movement", variable_n, "asynchronous") is False
+
+
+class TestSectionSummaryLabel:
+    """Summary-label content and sourcing (#178 R5)."""
+
+    def test_structure_summary_names_the_gate_value(self) -> None:
+        """A gated section's label carries the gate's current value."""
+        values = {"structure.kind": "well_mixed"}
+        label = helpers.section_summary_label("Structure", values, "sync")
+        assert label == "Structure — well-mixed, inactive"
+
+    def test_movement_summary_phrases_per_cause(self) -> None:
+        """A gateless section's label carries the short cause phrase."""
+        well_mixed = {"structure.kind": "well_mixed"}
+        assert (
+            helpers.section_summary_label("Movement", well_mixed, "sync")
+            == "Movement — inactive (well-mixed)"
+        )
+        imitation = {"structure.kind": "lattice", "dynamics.reproduction_mode": "imitation"}
+        assert (
+            helpers.section_summary_label("Movement", imitation, "sync")
+            == "Movement — inactive under imitation"
+        )
+        fixed_n = {"structure.kind": "lattice", "dynamics.async_population": "fixed_n"}
+        assert (
+            helpers.section_summary_label("Movement", fixed_n, "asynchronous")
+            == "Movement — inactive under fixed_n"
+        )
+
+    def test_movement_phrases_source_from_the_table_cell(self) -> None:
+        """One source (#178 R5): the phrase map is keyed by the cell's note.
+
+        The exact note text the greying cell returns indexes the phrase,
+        so summary and tooltip cannot name different causes.
+        """
+        rule = helpers.STRUCTURE_GREYING["movement.rate"]
+        cases = (
+            ({"structure.kind": "well_mixed"}, "sync"),
+            ({"structure.kind": "lattice", "dynamics.reproduction_mode": "imitation"}, "sync"),
+            (
+                {"structure.kind": "lattice", "dynamics.async_population": "fixed_n"},
+                "asynchronous",
+            ),
+        )
+        for values, branch in cases:
+            note = getattr(rule, branch)(values)
+            assert note in helpers._SUMMARY_CAUSES
+            label = helpers.section_summary_label("Movement", values, branch)
+            assert label == f"Movement — {helpers._SUMMARY_CAUSES[note]}"
+
+
+class TestOutputSectionLoads:
+    """#172(f6)/#178 C1: config.output flattens into the widget values."""
+
+    def test_per_event_cadence_survives_the_flatten(self) -> None:
+        """'Async: Imitation Only' records per_event — the values say so."""
+        config = get_scenario_info("imitation_overlay_only").config
+        values = helpers.widget_values_from_config(config)
+        assert values["output.recording_cadence"] == "per_event"
+
+    def test_output_keys_round_trip(self) -> None:
+        """A non-default cadence survives config -> values -> config."""
+        original = get_scenario_info("imitation_overlay_only").config
+        rebuilt = helpers.build_config(
+            helpers.widget_values_from_config(original),
+            original.population.composition,
+            original.strategy_params,
+        )
+        assert rebuilt.output.recording_cadence == original.output.recording_cadence
+        assert rebuilt == original

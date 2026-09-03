@@ -112,10 +112,11 @@ A1_MESSAGE = (
 """A1's message (docs/ADVISORIES.md, first clause per #176 R1)."""
 
 A2_MESSAGE = (
-    "This change multiplies every agent's income. Recompute the survival "
-    "window before trusting the living cost."
+    "This change rescales every agent's income (it may raise or lower it). "
+    "Recompute the survival window before trusting the living cost."
 )
-"""A2's message (docs/ADVISORIES.md, verbatim)."""
+"""A2's message (docs/ADVISORIES.md, as reworded by #178 R8 — the old
+"multiplies" implied income only ever goes up)."""
 
 A2_TRIGGER_KEYS = (
     "matching.matcher",

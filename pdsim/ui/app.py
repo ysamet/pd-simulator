@@ -58,6 +58,19 @@ from pdsim.viz import charts
 CUSTOM = "Custom"
 """The dropdown entry that starts from registry defaults (DECISIONS #36/#40)."""
 
+TOURNAMENT_HIDDEN_SECTIONS = ("Structure", "Movement", "Dynamics")
+"""The sections the tournament tab does not render (#158's total fork; #178 R3).
+
+Hiding is per SECTION, never per key — a renderer decision layered ABOVE
+the greying table, which is untouched underneath (#178 R10): the
+tournament-greyed Matching keys (`spatial_interaction`,
+`encounter_mode`) still render greyed with their existing notes, because
+Matching as a section stays. The hidden sections' widget VALUES are
+preserved across the switch and still feed the gathered config (#178
+R1/R2), so a config recorded under tournament carries what the widgets
+held, not registry defaults.
+"""
+
 STRUCTURE_HELP = {
     "site_count": (
         "How many cells the world has. Every cell holds at most one agent, so this "
@@ -395,6 +408,37 @@ def _advisory_captions(surface: str, values: dict[str, ParamValue]) -> None:
             st.info(advisory.message)
 
 
+def _preserve_hidden_widget_state(specs: dict[str, ParameterSpec]) -> None:
+    """Keep every panel key's session state alive across mode switches (#178 R1).
+
+    Streamlit deletes a widget's session-state entry at the end of any
+    script run in which that widget was not rendered — exactly what
+    happens to the Structure, Movement, and Dynamics widgets while the
+    tournament tab hides their sections (#178 R3). Re-assigning a key
+    before any widget is instantiated marks it as app state for this
+    run, which interrupts that cleanup (Streamlit's documented
+    preservation idiom, verified in this project's Task 0 probe), so an
+    evolution → tournament → evolution round trip hands every widget its
+    old value back. The re-assignment never fights a user edit: the
+    frontend's new value is applied at widget instantiation, after this
+    runs.
+
+    Args:
+        specs: The panel's specs by registry key.
+    """
+    keys: list[str] = []
+    for spec in specs.values():
+        if spec.nullable and spec.kind in ("int", "float"):
+            # Nullable numbers render as a checkbox/value widget PAIR
+            # under derived keys (DECISIONS #38); both carry state.
+            keys.extend((f"{spec.key}#limit", f"{spec.key}#value"))
+        else:
+            keys.append(spec.key)
+    for key in keys:
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+
+
 def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str, dict]]:
     """Render the whole generated panel; return everything a run needs.
 
@@ -403,17 +447,26 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         collected strategy-parameter overrides.
     """
     specs = {spec.key: spec for spec in helpers.panel_specs()}
+    _preserve_hidden_widget_state(specs)
     values: dict[str, ParamValue] = {}
 
-    # Run row — mode is the prominent radio; its value drives the greying.
+    # The mode strip (#178 C2): run.mode's widget IS the panel's tab
+    # strip — a segmented control keyed by the registry key, so loading,
+    # gathering, and the #101 lookahead read it exactly as before.
+    # required=True: clicking the selected tab does nothing, so the
+    # value can never deselect to None mid-session. st.tabs is NOT used
+    # — run.mode must stay the single source of truth under its own key.
     mode_spec = specs["run.mode"]
-    mode = st.radio(
+    mode = st.segmented_control(
         mode_spec.label,
         options=list(mode_spec.choices or ()),
+        selection_mode="single",
+        required=True,
         key="run.mode",
-        horizontal=True,
         help=_help_text(mode_spec),
     )
+    if mode is None:  # unreachable once a load has written state; belt and braces
+        mode = mode_spec.default
     values["run.mode"] = mode
     col_seed, col_cycles = st.columns(2)
     with col_seed:
@@ -432,9 +485,11 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
     # Forward-looking greying (M10b): some dependencies point at widgets
     # that render LATER in registry order (reproduction_mode greys off
     # time_model; β greys off the imitation overlay). The lookahead maps
-    # every non-nullable panel key to what its widget WILL return this
-    # run — its session-state value, or the registry default before the
-    # first interaction. Values actually gathered this run always win.
+    # EVERY panel key to what its widget WILL return this run — its
+    # session-state value, or the registry default before the first
+    # interaction; complete coverage since E1, because the tournament tab
+    # gathers its hidden sections from it (#178 R2). Values actually
+    # gathered this run always win.
     lookahead: dict[str, ParamValue] = {
         key: st.session_state.get(key, spec.default)
         for key, spec in specs.items()
@@ -449,10 +504,50 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         if spec.nullable and spec.kind in ("int", "float"):
             limited = st.session_state.get(f"{key}#limit", spec.default is not None)
             lookahead[key] = st.session_state.get(f"{key}#value", spec.default) if limited else None
+        elif spec.nullable and spec.kind == "str":
+            # A nullable text box holds "" for unset (never None), so its
+            # forward value is reconstructed the way the widget returns it
+            # — blank means None. Completing the lookahead over EVERY
+            # panel key is what lets the tournament tab gather hidden
+            # sections from it (#178 R2).
+            raw = st.session_state.get(key, spec.default)
+            text = str(raw).strip() if raw is not None else ""
+            lookahead[key] = text if text else None
 
+    tournament = mode == "tournament"
     composition: dict[str, int] = {}
     for section, section_specs in sections.items():
-        with st.expander(section, expanded=section in ("Population", "Dynamics")):
+        merged = {**lookahead, **values}
+        if tournament and section in TOURNAMENT_HIDDEN_SECTIONS:
+            # The #158 total fork (#178 R3): the tournament tab skips
+            # these sections wholesale and gathers their PRESERVED
+            # session-state values from the lookahead instead (#178
+            # R1/R2) — never registry defaults — so recorded-config →
+            # load → run stays a faithful round trip in both directions.
+            for spec in section_specs:
+                values[spec.key] = lookahead[spec.key]
+            continue
+        # Collapse-with-summary (#158; #178 R4/R5): an inert Structure or
+        # Movement section renders collapsed under a cause-naming summary
+        # label; opening it shows the greyed widgets with their notes
+        # (grey-never-hide, one level down). The predicate reads the SAME
+        # table column as the greying inside, so the two cannot drift.
+        branch = "asynchronous" if merged.get("dynamics.time_model") == "asynchronous" else "sync"
+        if helpers.section_inert(section, merged, branch):
+            label = helpers.section_summary_label(section, merged, branch)
+            expanded = False
+        else:
+            label = section
+            expanded = section in ("Population", "Dynamics")
+        # The stable key is load-bearing (#180): without one, an expander's
+        # identity is generated from its other parameters — the label
+        # included — so the inert/live label swap minted a NEW element that
+        # mounted at its default and collapsed the pane under the user
+        # mid-edit. With the key, identity survives the relabel and the
+        # frontend keeps the pane exactly as the user left it; `expanded`
+        # still applies at every genuine mount (fresh session, mode-tab
+        # switch), so inert sections still START collapsed.
+        with st.expander(label, expanded=expanded, key=f"section_{section}"):
             columns = st.columns(2)
             for i, spec in enumerate(section_specs):
                 # Widgets render in registry order, so most values a
@@ -493,14 +588,19 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
                 # preview built on the default seed would show a different
                 # arrangement from the one the run founds.
                 _structure_panel({**lookahead, **values}, composition)
-            if (
-                section == "Dynamics"
-                and values.get("run.mode") == "evolution"
-                and values.get("dynamics.reproduction_mode") == "energy_economy"
-            ):
+            if section == "Dynamics":
                 # The Population section renders before Dynamics (registry
-                # order), so the composition is already gathered here.
-                _economy_panel(values, composition)
+                # order), so the composition is already gathered here. The
+                # render gate is economy_active — the #176 R4 predicate —
+                # not the raw reproduction-mode widget (#178 R9, closing
+                # #177(f1)): an async variable_n run with a stranded
+                # imitation widget now calibrates as loaded, and the
+                # inactive corners state their cause instead of the panel
+                # silently vanishing.
+                if economy_helpers.economy_active({**lookahead, **values}):
+                    _economy_panel(values, composition)
+                elif values.get("run.mode") == "evolution":
+                    _economy_summary_area({**lookahead, **values})
 
     with st.expander("Per-strategy parameters"):
         st.caption(
@@ -600,6 +700,28 @@ def _additivity_readout(values: dict[str, ParamValue]) -> None:
             f"costs a different amount against a cooperator (T − R = {t - r:g}) "
             f"than against a defector (P − S = {p - s:g})."
         )
+
+
+def _economy_summary_area(values: dict[str, ParamValue]) -> None:
+    """Render the Economy panel's collapsed-with-summary state (#178 R9).
+
+    Shown inside the Dynamics expander exactly when
+    :func:`economy_helpers.economy_active` is false on the evolution tab:
+    a cause-naming summary whose toggle reveals a one-line explanation —
+    no readout, because the calibration would describe a metabolic
+    filter that is not running. A toggle, not a nested expander: this is
+    the panel's existing in-Dynamics fold idiom (the concepts toggle),
+    and Streamlit's docs advise against nesting expanders even though
+    1.58 no longer forbids it.
+
+    Args:
+        values: The widget values gathered so far this script run (plus
+            the app's lookahead).
+    """
+    st.markdown("---")
+    label, explanation = economy_helpers.economy_inactive_summary(values)
+    if st.toggle(label, key="economy_inactive_summary", help=explanation):
+        st.caption(explanation)
 
 
 def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -> None:
@@ -706,8 +828,10 @@ def _economy_panel(values: dict[str, ParamValue], composition: dict[str, int]) -
     if report.memory_note:
         st.info(report.memory_note)
     st.caption(report.regime_note)
-    # A toggle, not an expander — Streamlit forbids nesting expanders, and
-    # this panel already lives inside the Dynamics expander.
+    # A toggle, not an expander — this panel lives inside the Dynamics
+    # expander, and Streamlit's docs advise against nesting expanders
+    # (1.58 no longer forbids it — E1's Task 0 probe — but the advice
+    # stands and this is the house fold idiom).
     if st.toggle(
         "Explain the economy concepts (?)",
         key="economy_concepts",

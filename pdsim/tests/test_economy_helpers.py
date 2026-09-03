@@ -13,6 +13,7 @@ from pdsim.ui.economy_helpers import (
     blocked_parents_visible,
     calibration_report,
     chart_carrying_capacity,
+    economy_inactive_summary,
     infeasible_parents_metric,
     infeasible_parents_visible,
     spatial_income_arithmetic,
@@ -437,3 +438,30 @@ class TestParentReadoutVisibility:
         assert infeasible_parents_metric([]) is None
         assert blocked_parents_metric([0, 2, 1]) == (1, 3)
         assert infeasible_parents_metric([6, 8, 8]) == (8, 22)
+
+
+class TestEconomyInactiveSummary:
+    """The collapsed panel's cause-naming summary (M11b Phase E1, #178 R9)."""
+
+    def test_sync_imitation_cause(self) -> None:
+        """Under the synchronous clock the inactive cause is imitation."""
+        values = {
+            "run.mode": "evolution",
+            "dynamics.time_model": "synchronous",
+            "dynamics.reproduction_mode": "imitation",
+        }
+        label, explanation = economy_inactive_summary(values)
+        assert label == "Economy — inactive under imitation"
+        assert "imitation" in explanation
+        assert "energy_economy" in explanation
+
+    def test_async_fixed_n_cause(self) -> None:
+        """Under the asynchronous clock the inactive corner is fixed_n."""
+        values = {
+            "run.mode": "evolution",
+            "dynamics.time_model": "asynchronous",
+            "dynamics.async_population": "fixed_n",
+        }
+        label, explanation = economy_inactive_summary(values)
+        assert label == "Economy — inactive under fixed_n (living cost not charged)"
+        assert "variable_n" in explanation

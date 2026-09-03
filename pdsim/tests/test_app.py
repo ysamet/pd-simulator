@@ -19,7 +19,7 @@ from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core import engine
 from pdsim.core.strategies import all_strategies
-from pdsim.io.results import RunRecorder, list_runs
+from pdsim.io.results import RunRecorder, list_runs, load_run
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "ui" / "app.py")
 
@@ -396,3 +396,190 @@ class TestResultsBrowser:
         # The staged note shows on the next render.
         app.run()
         assert any("partial folder was cleaned up" in item.value for item in app.info)
+
+
+def _set_tiny_population(app: AppTest) -> None:
+    """Point the mix widgets at a 4-agent TFT/AD population (test speed).
+
+    Args:
+        app: The AppTest handle, with the panel in evolution mode.
+    """
+    app.number_input(key="population.size").set_value(4)
+    for name in (
+        "always_cooperate",
+        "generous_tit_for_tat",
+        "grim_trigger",
+        "pavlov",
+        "random",
+    ):
+        app.number_input(key=f"composition.{name}").set_value(0)
+    app.number_input(key="composition.tit_for_tat").set_value(2)
+    app.number_input(key="composition.always_defect").set_value(2)
+
+
+class TestModeTabs:
+    """The E1 run-mode tab split (#158 executed per #178).
+
+    Hiding, preservation, the collapse summaries, and the Economy
+    panel's gate.
+    """
+
+    def test_tournament_tab_hides_sections_but_greys_matching(self) -> None:
+        """R3: no Structure/Movement/Dynamics widgets; Matching greys (R10).
+
+        The default scenario is The Classic Tournament, so the cold start
+        IS the tournament tab.
+        """
+        app = _fresh_app()
+        assert app.session_state["run.mode"] == "tournament"
+        with pytest.raises(KeyError):
+            app.selectbox(key="structure.kind")
+        with pytest.raises(KeyError):
+            app.number_input(key="movement.rate")
+        with pytest.raises(KeyError):
+            app.number_input(key="dynamics.generations")
+        with pytest.raises(KeyError):
+            app.selectbox(key="dynamics.reproduction_mode")
+        # The Matching section stays, its spatial keys greyed, not hidden.
+        spatial = app.checkbox(key="matching.spatial_interaction")
+        assert spatial.disabled is True
+        encounter = app.selectbox(key="matching.encounter_mode")
+        assert encounter.disabled is True
+        # The Economy panel is absent in BOTH of its shapes.
+        with pytest.raises(KeyError):
+            app.toggle(key="economy_concepts")
+        with pytest.raises(KeyError):
+            app.toggle(key="economy_inactive_summary")
+        assert not any("Economy calibration" in item.value for item in app.markdown)
+
+    def test_mode_round_trip_preserves_hidden_values(self) -> None:
+        """R1/R2: the mode round trip keeps every widget value.
+
+        Covered: a choice widget, a nullable checkbox/value pair, and a
+        composition count.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        assert app.session_state["run.mode"] == "evolution"
+        app.selectbox(key="structure.kind").select("lattice")
+        app.selectbox(key="structure.neighbourhood_shape").select("von_neumann")
+        app.checkbox(key="structure.rows#limit").set_value(True)
+        app.number_input(key="structure.rows#value").set_value(20)
+        app.number_input(key="composition.tit_for_tat").set_value(37)
+        app.run()
+        assert not app.exception
+        app.segmented_control(key="run.mode").set_value("tournament")
+        app.run()
+        assert not app.exception
+        with pytest.raises(KeyError):  # hidden on the tournament tab...
+            app.selectbox(key="structure.kind")
+        assert app.session_state["structure.kind"] == "lattice"  # ...but preserved
+        assert app.session_state["structure.neighbourhood_shape"] == "von_neumann"
+        assert app.session_state["structure.rows#limit"] is True
+        assert app.session_state["structure.rows#value"] == 20
+        app.segmented_control(key="run.mode").set_value("evolution")
+        app.run()
+        assert not app.exception
+        assert app.selectbox(key="structure.kind").value == "lattice"
+        assert app.selectbox(key="structure.neighbourhood_shape").value == "von_neumann"
+        assert app.checkbox(key="structure.rows#limit").value is True
+        assert app.number_input(key="structure.rows#value").value == 20
+        assert app.number_input(key="composition.tit_for_tat").value == 37
+
+    def test_tournament_config_carries_preserved_hidden_values(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2: a tournament recording carries preserved hidden values.
+
+        Not registry defaults — so recorded-config → load → run stays a
+        faithful round trip in both directions.
+        """
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        _set_tiny_population(app)
+        app.number_input(key="match.rounds_per_match").set_value(5)
+        app.number_input(key="dynamics.generations").set_value(7)  # hidden below
+        app.run()
+        app.segmented_control(key="run.mode").set_value("tournament")
+        app.run()
+        app.number_input(key="run.tournament_cycles").set_value(2)
+        app.slider(key="playback_delay").set_value(0.0)
+        app.run()  # record_run stays default ON — pointed at tmp_path
+        app.button(key="run_button").click()
+        app.run()
+        assert not app.exception
+        cards = list_runs(tmp_path)
+        assert cards
+        loaded = load_run(tmp_path / str(cards[0]["run_id"]))
+        assert loaded.config.mode == "tournament"
+        assert loaded.config.dynamics.generations == 7  # preserved, not default
+
+    def test_structure_and_movement_collapse_summaries(self) -> None:
+        """R4/R5: inert sections collapse under cause-naming labels.
+
+        Custom (well-mixed) collapses Structure and Movement; a lattice
+        reopens Structure and gives Movement its imitation cause.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        labels = [item.label for item in app.expander]
+        assert "Structure — well-mixed, inactive" in labels
+        assert "Movement — inactive (well-mixed)" in labels
+        app.selectbox(key="structure.kind").select("lattice")
+        app.run()
+        labels = [item.label for item in app.expander]
+        assert "Structure" in labels  # live again, plain label
+        assert "Movement — inactive under imitation" in labels  # Custom is imitation
+
+    def test_economy_panel_follows_economy_active(self) -> None:
+        """R9: the Economy panel renders per economy_active.
+
+        The summary under sync imitation; the readout as loaded for an
+        async variable_n config with a STRANDED imitation widget — the
+        #177(f1) corner.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        summary = app.toggle(key="economy_inactive_summary")
+        assert "inactive under imitation" in summary.label
+        assert not any("Economy calibration" in item.value for item in app.markdown)
+        # Async variable_n while reproduction_mode stays stranded at
+        # imitation: the economy IS active and now calibrates as loaded.
+        app.selectbox(key="dynamics.time_model").select("asynchronous")
+        app.run()
+        assert not app.exception
+        assert app.session_state["dynamics.reproduction_mode"] == "imitation"
+        assert any("Economy calibration" in item.value for item in app.markdown)
+        with pytest.raises(KeyError):
+            app.toggle(key="economy_inactive_summary")
+
+    def test_bc_threshold_scenario_shows_the_fixed_n_summary(self) -> None:
+        """R9 under fixed_n: the b/c > k scenario shows the summary.
+
+        The scenario is async fixed_n, so it states its cause instead of
+        a calibration that would describe an uncharged living cost.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("The b/c > k Threshold")
+        app.run()
+        assert not app.exception
+        summary = app.toggle(key="economy_inactive_summary")
+        assert "inactive under fixed_n" in summary.label
+        assert not any("Economy calibration" in item.value for item in app.markdown)
+
+    def test_output_cadence_loads_from_the_scenario(self) -> None:
+        """#172(f6)/#178 C1: a per_event cadence loads into the widgets.
+
+        'Async: Imitation Only' records per_event and the Output
+        section's cadence selectbox shows it as loaded.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Async: Imitation Only")
+        app.run()
+        assert not app.exception
+        assert app.selectbox(key="output.recording_cadence").value == "per_event"

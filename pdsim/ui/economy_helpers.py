@@ -427,6 +427,44 @@ def economy_active(values: Mapping[str, ParamValue]) -> bool:
     return values.get("dynamics.reproduction_mode") == "energy_economy"
 
 
+def economy_inactive_summary(values: Mapping[str, ParamValue]) -> tuple[str, str]:
+    """The collapsed Economy panel's summary label and explanation (#178 R9).
+
+    Consulted exactly when :func:`economy_active` is False on the
+    evolution tab, and names the cause the way the collapsed sections do
+    (#178 R5): under the asynchronous clock the inactive corner is
+    ``fixed_n`` — the living cost is never charged there, the Moran
+    replacement being the only demography — and under the synchronous
+    clock it is ``imitation`` reproduction, where nobody pays a living
+    cost or starves. Tournament never reaches this label: the whole
+    Dynamics section is hidden on that tab (#178 R3).
+
+    Args:
+        values: Widget values keyed by registry key (plus ``run.mode``).
+
+    Returns:
+        ``(summary label, one-line explanation)`` for the collapsed
+        panel — no readout; the calibration would describe a filter
+        that is not running.
+    """
+    if values.get("dynamics.time_model") == "asynchronous":
+        return (
+            "Economy — inactive under fixed_n (living cost not charged)",
+            "Under the fixed-size ('fixed_n' Moran) population the living "
+            "cost is never charged and nobody starves — the Moran "
+            "replacement is the only demography, so there is no survival "
+            "window to calibrate. Switch 'Async population' to "
+            "'variable_n' to run the economy in event time.",
+        )
+    return (
+        "Economy — inactive under imitation",
+        "Under 'imitation' reproduction nobody pays the living cost or "
+        "starves — agents copy strategies instead of breeding and dying, "
+        "so there is no survival window to calibrate. Switch "
+        "'Reproduction mode' to 'energy_economy' to run the economy.",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CalibrationReport:
     """Everything the Economy panel shows, derived straight from a config.

@@ -245,7 +245,7 @@ Under variable N, `random_k` clamps its draw to `min(k, N−1)` — a no-op in
 every fixed-N regime, so pre-M10a seeded histories are untouched (#81); a
 population of one plays nothing, still pays its bill, and starves. The
 UI's **Economy panel** (`ui/economy_helpers.calibration_report`) derives
-the survival window (`all-D income ≤ cost < all-C income`), escape velocity
+the survival window (`all-D income < cost < all-C income`), escape velocity
 `e* = cost / r`, and mortality/memory readouts straight from the config —
 note the window is N-stable under `random_k` (bounded ≈ 2k interaction
 budget) but moves with N under round-robin. Population structure and local birth

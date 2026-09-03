@@ -5491,3 +5491,179 @@ DESIGN §4.1 gains the advisory-mechanism passage (pre-authorized, the
 #174(g) precedent); ADVISORIES.md A1/A2/A3 amended citing #176;
 ROADMAP Phase D status line; spec status line; `PARAMETERS.md`
 regenerated; CLAUDE.md current-phase paragraph advanced to Phase E.
+
+**#178 — 2026-09-01 — Phase E1 pre-drafting rulings (design layer):
+run.mode's widget IS the tab strip, st.tabs rejected as stateless (C2);
+hidden-section values are preserved across tab switches and feed the
+gathered config (R1/R2); the tournament tab hides Structure, Movement,
+Dynamics, the Economy panel and the grid preview, per SECTION, with
+Matching's tournament-greyed keys still rendered (R3); collapse-with-
+summary is computed from the #141 table via SECTION_GATES +
+section_inert, Structure and Movement only (R4), summary labels sourced
+from the gate value or the greying cell's cause phrase (R5); sections
+remain expanders and E1 forecloses nothing for E2's fold, the nesting
+rule verified in Task 0 (R6); the split's scope is the parameter panel
+only (R7); A2's message is reworded to the rescales-may-raise-or-lower
+form, correcting "multiplies" (R8, executing the Phase D carry-in); the
+Economy panel's render gate moves onto economy_active with
+collapse-with-summary when inactive, closing #177(f1) in both
+directions (R9); IGNORED_IN_TOURNAMENT and both greying branches stay
+byte-for-byte beneath the renderer (R10); CLAUDE.md's expanded-defaults
+sentence is amended in-session (R11); the #172(f6) config.output
+loading gap rides E1 (C1); DESIGN §2.10's window lower bound gets the
+one-character strict fix missed by #177(d); #177(f3) and (f4) are HELD
+to E5 close-out; calibration-guide §4.4's stale encounter-mode sentence
+remains held for the guide's owner (M11b Phase E1; spec Phase E bullet
+E1 / #158, #141, #144, #167, #176, #177).**
+
+**#179 — 2026-09-01 — M11b Phase E1 BUILT: the run.mode tab strip
+(`st.segmented_control`, `required=True`, keyed by the registry key —
+#178 C2 as ruled), the tournament tab's per-section hiding with the
+preservation contract, collapse-with-summary for Structure and
+Movement, the Economy panel on `economy_active`, the A2 reword, the
+`config.output` loading fix, and the DESIGN §2.10 strict bound.
+(a) TASK 0 FINDINGS, Streamlit 1.58.0 (all verified against the
+installed source AND an AppTest probe). (i) st.tabs is NO LONGER
+stateless — 1.58 gives it `key`, `on_change="rerun"`, `default`, and a
+per-tab `.open` property — so #178 C2's stated rationale ("rejected as
+stateless") is OUTDATED; reported under Rule 7, not reconciled. The
+RULING's outcome was implemented as ruled and remains right on its
+other leg: run.mode must stay the single source of truth under its own
+widget key with choice-valued state, where st.tabs returns containers
+and tracks selection in tab-label shape — an adapter layer the
+segmented control does not need. Bonus fact secured for E1 itself:
+1.58's `st.segmented_control` takes `required=True` ("users cannot
+deselect... clicking an already-selected option does nothing"), which
+forecloses the deselect-to-None hazard with no guard machinery; it
+also has AppTest support (`ButtonGroup`), which the new pins drive.
+(ii) NESTED EXPANDERS NO LONGER RAISE — the old hard
+StreamlitAPIException is gone (delta_generator.py still carries a
+"prevent nested columns & expanders" comment with no enforcement
+behind it), and the expander docstring merely advises "don't nest
+expanders" as a design practice; verified empirically (an expander
+rendered inside an expander without exception). On the record for E2
+(#178 R6): nesting is POSSIBLE but doc-discouraged — and 1.58
+expanders also grew `on_change="rerun"` with an `.open` property,
+i.e. fold-state tracking E2 may want. (b) SESSION-STATE CLEANUP
+verified: a widget-backed key whose widget is not rendered on a script
+pass is DELETED from session state at the end of that pass (the probe's
+hidden checkbox lost its value; re-shown, it rendered at its default).
+Mechanism chosen for the R1 preservation contract: the documented
+keep-alive idiom — `_preserve_hidden_widget_state` re-assigns every
+panel key (`st.session_state[k] = st.session_state[k]`, nullable pairs
+included) at the top of the panel, before any widget instantiates,
+marking them app state for the run; probe-verified to survive hidden
+passes, restore on re-show, and never fight a user edit (the
+frontend's new value applies at widget instantiation, after the
+re-assignment). The GATHERING side reads hidden sections from the #101
+lookahead, which E1 completes to EVERY panel key — closing a latent
+gap: nullable STRING keys (`structure.layout_file`) were in neither
+lookahead branch, so the tournament gather would have raised KeyError;
+reconstructed blank-means-None, the widget's own contract. (c) THE
+EXPANDER-DEFAULT MAP as coded pre-E1: Population and Dynamics start
+expanded; Game, Matching, Match, Structure, Movement, Output, and
+Per-strategy parameters start collapsed. Post-E1 identical for LIVE
+sections; an inert Structure/Movement starts collapsed under its
+summary label (R4). (d) THE RULE 7 CONTRADICTION (f1): the E1 prompt's
+Task 4 validation consequence says "The b/c > k Threshold" now shows
+its calibration readout AS LOADED, but that scenario is async FIXED_N
+(`donation_game_threshold`, scenarios.py) and R9's ruled gate —
+`economy_active` — is FALSE under fixed_n; R9's own text supplies the
+fixed_n summary ("inactive under fixed_n (living cost not charged)"),
+so the ruling and the consequence sentence cannot both hold. BUILT AS
+RULED: the scenario shows the SUMMARY as loaded (pinned by test); the
+readout-as-loaded consequence is true for the async VARIABLE_N
+stranded-imitation corner — #177(f1)'s other direction — pinned via
+Custom → asynchronous (reproduction_mode stays stranded at imitation,
+the panel calibrates, A1's surface renders). Under the new gate the
+old three-step route no longer reaches a readout for a fixed_n config
+at all (`async_population` is the honest lever). Left to the design
+layer: whether fixed_n deserves a spatial matches-per-agent readout of
+its own — the #177 measurement showed exactly that figure is EXACT
+there, but the survival-window framing around it would describe an
+uncharged living cost. A second, smaller expectation error in the same
+prompt (f2): the walkthrough item expects "Cooperation Survives in
+Clusters" to show Movement's SUMMARY, but the flagship is a
+synchronous lattice ENERGY ECONOMY — movement's own live gate (#172:
+rate is a value, not a liveness condition) — so Movement renders LIVE
+with its plain label there; the summary shows on Custom (well-mixed)
+and under imitation instead, which is where the walkthrough now points.
+(e) AS-BUILT DECISIONS. The inactive Economy
+summary renders with the house in-Dynamics fold idiom (a toggle, key
+`economy_inactive_summary`) rather than a nested expander — legal per
+(a)(ii) but doc-discouraged, and minimum change; `_economy_panel`'s
+stale "Streamlit forbids nesting" comment corrected in passing.
+`economy_inactive_summary(values)` (economy_helpers) returns the
+label/explanation pair; `SECTION_GATES`/`section_inert`/
+`section_summary_label` (helpers, beside the table) derive a section's
+table rows from the registry `section` field ∩ STRUCTURE_GREYING keys,
+answer via the named branch column (`getattr(rule, branch)`), and
+source gateless cause phrases from `_SUMMARY_CAUSES`, a dict KEYED BY
+THE EXACT NOTE TEXT the cell returns (§12: summary and tooltip cannot
+name different causes); a gated section's label renders the gate value
+with underscores as hyphens ("Structure — well-mixed, inactive").
+Hiding is `TOURNAMENT_HIDDEN_SECTIONS = (Structure, Movement,
+Dynamics)` in app.py — a renderer constant, the greying table
+byte-untouched beneath it (R10 verified: helpers' tournament/greying
+branches unchanged). The grid preview and Economy panel were confirmed
+already evolution-gated (grid_visible; the old reproduction-mode
+conjunct) before the section hiding was layered above them. (f) A2:
+no test pinned the literal "multiplies" — the one wording pin asserts
+against the `A2_MESSAGE` constant — so the reword retired ZERO tests.
+(g) TESTS AND BUDGET: 1210 passing (1190 + 20: 11 in
+`test_ui_helpers.py` — SECTION_GATES shape, section_inert both sides
+of every boundary on both branches, summary labels + the sourcing pin,
+the config.output flatten/round-trip pins; 2 in
+`test_economy_helpers.py` — both inactive-summary causes; 7 in
+`test_app.py` — tournament hiding with Matching still greyed, the
+evolution→tournament→evolution value round trip, the recorded-config
+preservation pin (a tournament run records `dynamics.generations = 7`
+set under evolution), the collapse summaries, the Economy panel's two
+states, the fixed_n scenario summary, the per_event load pin); ZERO
+tests retired; ruff check and format clean;
+ZERO golden re-recordings, ZERO new goldens; `PARAMETERS.md` untouched
+(no registry change — the drift test stayed green). DOCS: #178
+appended verbatim; ADVISORIES.md A2 message line reworded citing #178;
+DESIGN §2.10's lower bound made strict (surrounding prose checked —
+nothing made false); CLAUDE.md's expanded-defaults sentence and
+current-phase paragraph advanced; ROADMAP E1 status line; spec status
+line only.**
+
+**#180 — 2026-09-03 — E1 validation feedback: the gate flip collapsed
+the open section — fixed with stable expander keys. The owner's
+walkthrough (steps 2/3 of the #179 handback) found that changing
+"World structure" from well-mixed to lattice inside an opened
+"Structure — well-mixed, inactive" expander applied the change but
+collapsed the pane immediately, forcing a re-expand to keep editing —
+and the same on every inert/live boundary crossing. ROOT CAUSE,
+verified in the Streamlit 1.58 source: a keyless expander's element
+identity is generated FROM ITS OTHER PARAMETERS — the label included
+(the `key` parameter's own docs state it: "If this is None (default),
+a key will be generated for the widget based on the values of the
+other parameters") — so the R5 label swap (summary ↔ plain) minted a
+NEW element whenever the section crossed the inert boundary, and the
+new element mounted at its `expanded` default (False for Structure and
+Movement), discarding the pane's open state. FIX: every section
+expander now carries a stable `key=f"section_{section}"`; 1.58's
+stateless-keyed branch computes the element id from ("expander",
+user_key, type) — the label NOT among the inputs — so identity
+survives the relabel and the frontend keeps the pane exactly as the
+user left it. CONSEQUENCES, both directions: (a) inert → live with the
+pane open: STAYS OPEN — the reported fix; (b) live → inert with the
+pane open: ALSO stays open, now under the summary label with the
+greyed widgets and their notes showing — a deliberate, recorded
+softening of #178 R4's "renders collapsed": collapsed-under-summary
+remains the START state (the `expanded` argument applies at every
+genuine mount — fresh session, mode-tab switch, first render), but an
+open pane is never yanked shut under the user mid-edit, which is the
+report's own principle mirrored. No session state is created (the
+stateless-keyed branch registers an element id only), so `_load_state`
+and the R1 keep-alive are untouched, and a scenario load that flips
+the gate leaves an unopened section collapsed as before. NOT
+HEADLESSLY PINNABLE, said plainly (Rule 7): the regression lives in
+frontend expand/collapse UI state, which AppTest does not model, and
+the block-level element id is not exposed through its element tree —
+the pin is the owner's re-validation plus the load-bearing-key comment
+at the call site. All 1210 tests pass unchanged (zero new, zero
+retired, zero golden churn); ruff clean; the one changed file is
+`pdsim/ui/app.py`.**

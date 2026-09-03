@@ -30,10 +30,15 @@ Automated tests complement — never substitute for — the owner seeing the
 feature work in the app.
 
 **Validation-instruction precision (owner request 2026-07-28, sharpened
-2026-08-20).** Every widget named in validation steps gets its FULL,
-VERIFIED path: the tab, the expander and whether it starts collapsed
-(only Population and Dynamics start expanded), and the widget's registry
-label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
+2026-08-20; expander defaults restated per #178 R11).** Every widget
+named in validation steps gets its FULL, VERIFIED path: the tab, the
+expander and whether it starts collapsed (only Population and Dynamics
+start expanded; since M11b E1 the Run lab's parameter panel is split by
+the run-mode tab strip below the Scenario dropdown — under tournament
+the Structure, Movement, and Dynamics sections do not render at all —
+and an INERT Structure or Movement section starts collapsed under a
+summary label such as "Structure — well-mixed, inactive" instead of its
+plain name), and the widget's registry label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
 session that writes the instructions — never from assumptions about
 typical Streamlit apps. Known traps, learned the hard way: this app has
 NO sidebar (the Scenario dropdown sits at the top of the main area), and
@@ -330,9 +335,23 @@ marked "expected"; the strict survival-window lower bound everywhere;
 radius-aware `effective_neighbour_count` cross-pinned to the engine's
 reach cache; `pdsim/ui/advisories.py` shipping A1–A3 on the #141
 predicate-table pattern with the R5 loaded-values baseline; zero
-re-recordings, zero new goldens; 1190 tests). The next implementation
-effort is Phase E** (sub-prompts E1–E5: tabs, disclosure, live-run
-continuity, layout painter, close-out; the #172(f6) `config.output`
-widget-loading gap is E1's).
+re-recordings, zero new goldens; 1190 tests). Phase E1 — the run-mode
+tab split (#158 per the #178 rulings) — landed 2026-09-01 (DECISIONS
+#178 pre-drafting rulings + #179 build record; the segmented-control
+mode strip keyed `run.mode` with `required=True`, tournament hiding
+Structure/Movement/Dynamics per SECTION under the R1/R2 preservation
+contract (keep-alive + the completed lookahead), collapse-with-summary
+via `SECTION_GATES`/`section_inert` sourced from the #141 table, the
+Economy panel gated on `economy_active` with cause-naming summaries —
+the donation_game_threshold fixed_n contradiction reported as #179(d)
+— the A2 "rescales" reword, and the #172(f6) `config.output` loading
+gap DISCHARGED; zero re-recordings, zero new goldens; 1210 tests). A
+validation-feedback fix followed (2026-09-03, #180): stable
+section-expander keys, so the inert/live label swap no longer
+collapses an open pane mid-edit.
+**The next implementation effort is Phase E2** (sub-prompts E2–E5:
+disclosure, live-run continuity, layout painter, close-out; Task 0
+facts for E2 — nested expanders legal-but-discouraged in Streamlit
+1.58, expander `on_change="rerun"`/`.open` available — are in #179(a)).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.
