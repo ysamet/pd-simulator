@@ -50,13 +50,21 @@ NO sidebar (the Scenario dropdown sits at the top of the main area), and
 that dropdown lists scenarios by their `display_name` — so name the
 display title the owner will actually see (e.g. "Cooperation Survives in
 Clusters"), with the machine name (`spatial_reciprocity`) at most in
-parentheses. Never project shorthand in anything addressed to the
-owner (owner request 2026-09-04): not "the flagship", not "the spatial
-reciprocity scenario", not a bare machine name — the DECISIONS log's
-internal vocabulary is translated to the dropdown title before it
-reaches an instruction, and run lengths are stated as the exact
-"Generations" value to leave or set, never "run it for N generations"
-loosely.
+parentheses. Never project shorthand in ANYTHING addressed to the owner
+(owner request 2026-09-04, widened 2026-09-04 beyond validation steps to
+every handback, report, question, and summary): not "the flagship", not
+"the spatial reciprocity scenario", not a bare machine name, not a bare
+phase or sub-prompt label ("E3"), not a bare decision or finding
+reference ("#182(f4)", "R9"). Every reference to a past decision, phase,
+document section, scenario, or finding is stated in plain words the
+first time it appears — what it is and where it lives — with the label
+at most in parentheses afterwards (e.g. "the live-run display continuity
+sub-prompt (Phase E3)", "the stale "radio" wording in DESIGN §4.1 item 3
+(#182 finding f4)"). Scenario names are the dropdown's display title,
+with the machine name at most in parentheses. Run lengths are stated as
+the exact "Generations" value to leave or set, never "run it for N
+generations" loosely. The DECISIONS log's internal vocabulary is for the
+log; it is translated before it reaches the owner.
 
 ## Hard rules
 
