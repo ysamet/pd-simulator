@@ -583,3 +583,169 @@ class TestModeTabs:
         app.run()
         assert not app.exception
         assert app.selectbox(key="output.recording_cadence").value == "per_event"
+
+
+MATCHES_READOUT = "Expected matches per agent per generation"
+"""The Structure section's matches readout label (M11b Phase E2, #181 R7)."""
+
+
+def _fold_labels(app: AppTest) -> list[str]:
+    """Every "Advanced settings" expander header currently rendered.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        The fold labels in tree order (the section list order).
+    """
+    return [item.label for item in app.expander if item.label.startswith("Advanced settings")]
+
+
+def _matches_readout(app: AppTest) -> str | None:
+    """The matches readout's value, or ``None`` when it is not rendered.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        The metric's body text, or ``None`` when the gate is false.
+    """
+    values = [item.value for item in app.metric if item.label == MATCHES_READOUT]
+    assert len(values) <= 1
+    return values[0] if values else None
+
+
+class TestAdvancedFold:
+    """The E2 disclosure fold and the matches readout (#181 as built)."""
+
+    def test_fold_present_in_exactly_the_four_sections(self) -> None:
+        """(i) Matching, Structure, Movement, Dynamics carry a fold; nothing else.
+
+        The fold is nested inside its section, so in the flattened
+        expander list it directly follows its section's own expander.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+        app.run()
+        assert not app.exception
+        labels = [item.label for item in app.expander]
+        assert _fold_labels(app) == ["Advanced settings"] * 4
+        for section in ("Matching", "Structure", "Movement", "Dynamics"):
+            assert labels[labels.index(section) + 1] == "Advanced settings", section
+        for section in ("Game", "Match", "Population", "Output"):
+            assert not labels[labels.index(section) + 1].startswith("Advanced settings"), section
+
+    def test_folded_widgets_are_in_the_tree_while_collapsed(self) -> None:
+        """(ii) R5: a collapsed fold still instantiates its widgets."""
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+        app.run()
+        assert app.selectbox(key="matching.encounter_mode").value == "per_initiator"
+        assert app.number_input(key="structure.birth_decay").value == 0.0
+        assert app.selectbox(key="structure.placement_contest").value == "random"
+        assert app.number_input(key="movement.decay").value == 0.0
+        assert app.selectbox(key="dynamics.boundary_order").value == "death_first"
+        assert app.number_input(key="dynamics.capital_return_rate").value == 0.0
+        # No new session state: a keyed expander registers no widget (R5).
+        for section in ("Matching", "Structure", "Movement", "Dynamics"):
+            assert f"advanced_{section}" not in app.session_state
+
+    def test_folded_edit_reaches_the_gathered_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """(iii) boundary_order edited inside the fold lands in the recorded config."""
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        _set_tiny_population(app)
+        app.number_input(key="match.rounds_per_match").set_value(5)
+        app.number_input(key="dynamics.generations").set_value(2)
+        app.selectbox(key="dynamics.boundary_order").select("birth_first")
+        app.slider(key="playback_delay").set_value(0.0)
+        app.run()
+        assert not app.exception
+        app.button(key="run_button").click()
+        app.run()
+        assert not app.exception
+        cards = list_runs(tmp_path)
+        assert cards
+        loaded = load_run(tmp_path / str(cards[0]["run_id"]))
+        assert loaded.config.dynamics.boundary_order == "birth_first"
+
+    def test_fold_label_reports_and_reverts(self) -> None:
+        """(iv) The R3 header after an edit; the plain header after reverting."""
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+        app.run()
+        app.selectbox(key="dynamics.boundary_order").select("birth_first")
+        app.run()
+        assert not app.exception
+        assert "Advanced settings — 1 changed: Boundary order = birth_first" in _fold_labels(app)
+        app.number_input(key="dynamics.capital_return_rate").set_value(0.02)
+        app.run()
+        assert (
+            "Advanced settings — 2 changed: Capital return rate (r) = 0.02, "
+            "Boundary order = birth_first"
+        ) in _fold_labels(app)
+        app.selectbox(key="dynamics.boundary_order").select("death_first")
+        app.number_input(key="dynamics.capital_return_rate").set_value(0.0)
+        app.run()
+        assert _fold_labels(app) == ["Advanced settings"] * 4
+
+    def test_tournament_tab_keeps_matchings_fold_with_encounter_mode_greyed(self) -> None:
+        """(v) Under tournament only Matching's fold renders; encounter_mode greys inside."""
+        app = _fresh_app()  # The Classic Tournament: the cold start IS the tournament tab
+        assert app.session_state["run.mode"] == "tournament"
+        assert _fold_labels(app) == ["Advanced settings"]
+        encounter = app.selectbox(key="matching.encounter_mode")
+        assert encounter.disabled is True
+        assert "IGNORED in tournament mode" in encounter.proto.help
+
+    def test_matches_readout_follows_mode_clock_and_gate(self) -> None:
+        """(vi) 8 → 4 (per_pair) → 8 (async, stranded) → absent (well-mixed) → 8 (fixed_n).
+
+        The last leg is the #179(d) resolution pinned: donation_game_threshold
+        shows 8 in Structure while the Economy panel shows its fixed_n
+        summary exactly as E1 built it.
+        """
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+        app.run()
+        assert _matches_readout(app) == "8"
+        neighbours = [item.value for item in app.metric if item.label == "Effective neighbours (k)"]
+        assert neighbours == ["4"]
+        app.selectbox(key="matching.encounter_mode").select("per_pair")
+        app.run()
+        assert not app.exception
+        assert _matches_readout(app) == "4"
+        economy = [item.value for item in app.metric if item.label == "Matches per agent"]
+        assert economy == ["4"]  # the Economy panel agrees (one arithmetic source)
+        app.selectbox(key="dynamics.time_model").select("asynchronous")
+        app.run()
+        assert not app.exception
+        assert app.session_state["matching.encounter_mode"] == "per_pair"  # stranded
+        assert _matches_readout(app) == "8"  # #176 R3 forcing
+        readout_help = [item.help for item in app.metric if item.label == MATCHES_READOUT]
+        assert "EXPECTED value per generation-equivalent" in readout_help[0]
+        app.selectbox(key="scenario_choice").select("Custom")
+        app.run()
+        assert _matches_readout(app) is None  # well-mixed: the gate is false
+        app.selectbox(key="scenario_choice").select("The b/c > k Threshold")
+        app.run()
+        assert not app.exception
+        assert _matches_readout(app) == "8"  # 2 × min(4, 4), exact under fixed_n
+        summary = app.toggle(key="economy_inactive_summary")
+        assert "inactive under fixed_n" in summary.label
+        assert not any("Economy calibration" in item.value for item in app.markdown)
+
+    def test_moran_scenario_shows_its_changed_weights_as_loaded(self) -> None:
+        """(vii) The Task 0(d) scenario: the R3 summary before any click."""
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Async: Mixed Moran Rules")
+        app.run()
+        assert not app.exception
+        assert (
+            "Advanced settings — 2 changed: Moran weight: birth-death = 0.8, "
+            "Moran weight: death-birth = 0.2"
+        ) in _fold_labels(app)

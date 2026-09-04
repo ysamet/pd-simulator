@@ -146,9 +146,16 @@ def _parameter_block(spec: ParameterSpec, heading: str) -> list[str]:
         f"- **Type:** {_KIND_LABELS[spec.kind]}",
         f"- **Allowed values:** {_format_range(spec)}",
         f"- **Default:** {_format_default(spec)}",
-        "",
-        spec.description,
     ]
+    if spec.advanced:
+        # The disclosure mark (M11b Phase E2, DECISIONS #181 R6): the
+        # registry flag is metadata the app and this generator read, so the
+        # reference says where the app puts the widget and why.
+        lines.append(
+            "- **Disclosure:** advanced setting — the app folds it under "
+            '"Advanced settings" in its section; its default is the canonical choice'
+        )
+    lines += ["", spec.description]
     if spec.learn_more:
         lines += ["", f"*Learn more:* {spec.learn_more}"]
     lines.append("")

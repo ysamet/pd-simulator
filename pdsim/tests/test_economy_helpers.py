@@ -14,6 +14,7 @@ from pdsim.ui.economy_helpers import (
     calibration_report,
     chart_carrying_capacity,
     economy_inactive_summary,
+    expected_matches_per_agent,
     infeasible_parents_metric,
     infeasible_parents_visible,
     spatial_income_arithmetic,
@@ -337,6 +338,83 @@ class TestSpatialCalibration:
         frontier = calibration_report(get_scenario_info("the_drifting_frontier").config)
         assert frontier.memory_note is not None
         assert "random_k" in frontier.memory_note
+
+
+class TestExpectedMatchesPerAgent:
+    """The one arithmetic source for the spatial matches figure (#181 R7)."""
+
+    def test_von_neumann_k4_per_initiator_and_per_pair(self) -> None:
+        """Von Neumann k = 4: 2 × 4 = 8 per initiator; 1 × 4 = 4 per pair."""
+        assert (
+            expected_matches_per_agent(
+                "von_neumann", "torus", 4, 1, 100, "per_initiator", "synchronous"
+            )
+            == 8
+        )
+        assert (
+            expected_matches_per_agent("von_neumann", "torus", 4, 1, 100, "per_pair", "synchronous")
+            == 4
+        )
+
+    def test_moore_k8(self) -> None:
+        """Moore k = 8: 16 per initiator; 8 per pair."""
+        assert (
+            expected_matches_per_agent("moore", "torus", 8, 1, 100, "per_initiator", "synchronous")
+            == 16
+        )
+        assert (
+            expected_matches_per_agent("moore", "torus", 8, 1, 100, "per_pair", "synchronous") == 8
+        )
+
+    def test_async_forces_two_x_for_a_stranded_per_pair(self) -> None:
+        """#176 R3: under the asynchronous clock the multiplier is ALWAYS 2."""
+        assert (
+            expected_matches_per_agent(
+                "von_neumann", "torus", 4, 1, 100, "per_pair", "asynchronous"
+            )
+            == 8
+        )
+        assert (
+            expected_matches_per_agent(
+                "von_neumann", "torus", 4, 1, 100, "per_initiator", "asynchronous"
+            )
+            == 8
+        )
+
+    def test_radius_two_von_neumann_clamps_k_first(self) -> None:
+        """Von Neumann radius 2 reaches 12; k = 5 clamps to 5, so 2 × 5 = 10."""
+        assert (
+            expected_matches_per_agent(
+                "von_neumann", "torus", 5, 2, 100, "per_initiator", "synchronous"
+            )
+            == 10
+        )
+
+    @pytest.mark.parametrize("encounter_mode", ["per_initiator", "per_pair"])
+    @pytest.mark.parametrize("time_model", ["synchronous", "asynchronous"])
+    def test_calibration_report_cannot_drift_from_the_helper(
+        self, encounter_mode: str, time_model: str
+    ) -> None:
+        """The flagship's report equals the helper, both modes, both clocks."""
+        data = get_scenario_info("spatial_reciprocity").config.model_dump(mode="json")
+        data["matching"]["encounter_mode"] = encounter_mode
+        data["dynamics"]["time_model"] = time_model
+        config = ExperimentConfig.model_validate(data)
+        report = calibration_report(config)
+        assert report.spatial is True
+        expected = expected_matches_per_agent(
+            config.structure.neighbourhood_shape,
+            config.structure.boundary,
+            config.matching.opponents_per_agent,
+            config.structure.interaction_radius,
+            config.structure.rows * config.structure.cols,  # type: ignore[operator]
+            encounter_mode,
+            time_model,
+        )
+        assert report.expected_matches == float(expected)
+        # The numbers themselves, so the pin is not vacuous: k = 5 clamps to
+        # 4 on von Neumann, halved only under synchronous per_pair.
+        assert expected == (4 if (encounter_mode, time_model) == ("per_pair", "synchronous") else 8)
 
 
 class TestChartCarryingCapacity:

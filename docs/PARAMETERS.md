@@ -103,6 +103,7 @@ How many randomly drawn opponents each agent starts matches against per generati
 - **Type:** choice
 - **Allowed values:** one of: `per_initiator`, `per_pair`
 - **Default:** `per_initiator`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 Under spatial interaction each agent initiates its own partner draws, so two neighbours that draw each other play twice per generation — once in each initiator seat. 'per_initiator' keeps every drawn match (the default and the historical behaviour; the doubling was measured in the engine's validation). 'per_pair' collapses duplicate pairs after the draws, so each pair plays at most once per generation. Only WHICH matches run changes — the random draws themselves are identical in both modes. Live only while spatial interaction is on; the well-mixed matchers are untouched.
 
@@ -243,6 +244,7 @@ How far from its parent a newborn can be placed, in grid distance (the neighbour
 - **Type:** number
 - **Allowed values:** 0 to 20
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How steeply a newborn's placement prefers sites CLOSER to its parent, within the birth radius. This is the decay β of the reach kernel: a candidate site at distance d is weighted exp(−β·d). At 0 — the default — every empty site within the radius is equally likely; higher values keep children ever closer to home even where the radius technically allows more distance. IRRELEVANT at a birth radius of 1: all candidates then sit at the same distance, so every β gives the same behaviour. Under the fixed-size ('fixed_n' Moran) population mode this decay also weights the competition for a freed site — nearer neighbours are likelier to win it. Ignored under the 'well_mixed' structure.
 
@@ -251,6 +253,7 @@ How steeply a newborn's placement prefers sites CLOSER to its parent, within the
 - **Type:** choice
 - **Allowed values:** one of: `random`, `energy_priority`
 - **Default:** `random`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 Who places first when several parents breed at the same generation boundary — the order matters on a lattice, because an earlier parent can take the last empty site in a neighbourhood another parent wanted. 'random' — the default — shuffles the admitted parents once and lets each place in turn: reproduction order is luck (the Hammond–Axelrod convention), so wealth decides only WHO MAY BREED (via the reproduction threshold), never who wins contested ground. 'energy_priority' lets the RICHEST admitted parent place first: an advantage that COMPOUNDS spatially — a good neighbourhood raises earnings, which wins more contested cells, which acquires more good territory — a substantive modelling claim to switch on deliberately, not to inherit silently. Only matters under a synchronous energy-economy run on a lattice; nowhere else is this shuffle drawn (a well-mixed world has no cells to contest). Under the asynchronous clock several births CAN resolve in one event — the whole eligible set is admitted per event and placed in ascending agent-id order, so a shared last empty site goes to the lower id; whether that should instead be one birth per event is held as an open question for M12 scoping — but this setting is not consulted there.
 
@@ -267,6 +270,7 @@ How far away a potential match PARTNER can be, in grid distance (the neighbourho
 - **Type:** number
 - **Allowed values:** 0 to 20
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How steeply partner choice prefers CLOSER agents, within the interaction radius. This is the decay β of the reach kernel: a candidate at distance d is weighted exp(−β·d). At 0 — the default — every reachable agent is equally likely (a uniform disc); higher values make distant partners reachable but increasingly unlikely. IRRELEVANT at an interaction radius of 1: all candidates then sit at the same distance, so every β gives the same behaviour. Only consulted while 'Spatial interaction' (in the Matching section) is on; ignored otherwise, and ignored under the 'well_mixed' structure.
 
@@ -293,6 +297,7 @@ How far a single move can carry an agent, in grid distance (the neighbourhood sh
 - **Type:** number
 - **Allowed values:** 0 to 20
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How steeply a move prefers empty sites CLOSER to the agent's current position, within the movement radius. This is the decay β of the reach kernel: a candidate site at distance d is weighted exp(−β·d). At 0 — the default — every empty site within the radius is equally likely; higher values keep moves short even where the radius technically allows a longer jump. IRRELEVANT at a movement radius of 1: all candidates then sit at the same distance, so every β gives the same behaviour. Only consulted while the movement rate above is positive and movement applies (energy economy on a lattice); ignored otherwise.
 
@@ -351,6 +356,7 @@ How strongly scores drive selection when the selection rule is 'fermi'. At 0, sc
 - **Type:** whole number
 - **Allowed values:** 2 to 10000
 - **Default:** `3`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How many randomly drawn candidates compete for each next-generation slot when the selection rule is 'tournament_k'. The best scorer among the candidates wins the slot. Bigger values mean stronger selection pressure — with k equal to the whole population, the top scorer wins every slot. Cannot exceed the population size. Not related to the tournament run mode. Ignored under other selection rules.
 
@@ -359,6 +365,7 @@ How many randomly drawn candidates compete for each next-generation slot when th
 - **Type:** number
 - **Allowed values:** 0 to 1
 - **Default:** `0.2`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 The top share of scorers that the 'truncation' selection rule copies from. At 0.2, only the best-scoring 20% of agents can be parents — every next-generation agent is a copy of someone from that elite. At least one agent always qualifies, and 1.0 means everyone does. Must be above 0. Ignored under other selection rules.
 
@@ -367,6 +374,7 @@ The top share of scorers that the 'truncation' selection rule copies from. At 0.
 - **Type:** number
 - **Allowed values:** 0 to 10
 - **Default:** `1.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 The survival bar for the 'threshold_cloning' selection rule, as a multiple of the generation's mean score. Agents at or above the bar keep their strategies; everyone else becomes a copy of a random survivor. At 1.0, scoring at least average means survival; higher values are stricter (if nobody clears the bar, the top scorers survive). Ignored under other selection rules.
 
@@ -393,6 +401,7 @@ Which score selection looks at. 'per_generation' uses only the current generatio
 - **Type:** whole number
 - **Allowed values:** 1 to 100000
 - **Default:** `5`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How many recent generations are averaged when score accounting is 'sliding_window'. The score selection sees is the mean of the last W generation scores (fewer while the run is younger than W). A window of 1 behaves exactly like per-generation accounting. Ignored under other accounting choices.
 
@@ -401,6 +410,7 @@ How many recent generations are averaged when score accounting is 'sliding_windo
 - **Type:** number
 - **Allowed values:** 0 to below 1
 - **Default:** `0.5`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How much of the past is kept when score accounting is 'exponential_discount'. Each generation, the score selection sees blends the new raw score with the previous blended score — higher values remember longer. At 0 the past is forgotten entirely, exactly like per-generation accounting. Must be below 1, or new scores would never matter at all.
 
@@ -443,6 +453,7 @@ Energy every agent pays at the end of each generation simply for existing, in th
 - **Type:** number
 - **Allowed values:** at least 0
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 Energy an agent pays per match it takes part in, in the energy economy. At 0, playing is free and more matches are always better; above 0, every interaction has a price, so agents that get drawn into many matches also pay more.
 
@@ -451,6 +462,7 @@ Energy an agent pays per match it takes part in, in the energy economy. At 0, pl
 - **Type:** number
 - **Allowed values:** at least 0
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 Extra energy a parent burns at each birth, on top of the offspring stake, in the energy economy. The stake reaches the child; this overhead simply disappears — it is the cost of the act of reproduction itself.
 
@@ -459,6 +471,7 @@ Extra energy a parent burns at each birth, on top of the offspring stake, in the
 - **Type:** number
 - **Allowed values:** at least 0
 - **Default:** `0.0`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 Interest earned on energy carried between generations, in the energy economy: carried-over energy is multiplied by (1 + this rate) each generation. Above zero it creates rentiers — an agent whose stock exceeds the 'escape velocity' shown in the Economy panel pays its bills from returns alone, forever, no matter how it plays.
 
@@ -501,6 +514,7 @@ A hard age cap, in the energy economy: an agent that reaches this age dies at th
 - **Type:** choice
 - **Allowed values:** one of: `death_first`, `birth_first`
 - **Default:** `death_first`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 The order of deaths and births at each synchronous generation boundary. 'death_first' — the default, and this platform's behaviour in every earlier version — applies deaths first, then lets survivors breed into the room the deaths freed. 'birth_first' is Hammond & Axelrod's period order: reproduction runs first, then the death phase. Two real consequences, both pushing the population DOWN relative to 'death_first'. (1) Births are rationed against the PRE-death population: free seats under the carrying capacity are counted before the dead have vacated theirs, so FEWER births are admitted — with capacity 200, 180 alive and 20 deaths, death-first admits 40 births where birth-first admits only 20. That is a different demographic regime, not a phase offset, and it is present even without a lattice. (2) Newborns go through the death phase in their own birth round — the age-mortality coin included — so a child can die the very round it was born. A 'birth_first' run sitting at a visibly lower population is correct, not broken. On a lattice the choice additionally decides WHICH sites are empty when children are placed: deaths-first lets newborns fill the interior graves the dead just left, while births-first offers only the cells that were already empty — the frontier. Only read under the synchronous time model.
 
@@ -531,6 +545,7 @@ The order of the death half and the birth half of each fixed-size replacement. '
 - **Type:** number
 - **Allowed values:** at least 0
 - **Default:** `0.5`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How often the 'random' Moran rule fires a birth-death replacement, as a weight against the death-birth weight below. The two are normalised at use — 0.8 here against 0.2 there means birth-death fires 80% of the time. Only read when the Moran rule is 'random'; the two weights cannot both be zero (there would be nothing to roll between).
 
@@ -539,6 +554,7 @@ How often the 'random' Moran rule fires a birth-death replacement, as a weight a
 - **Type:** number
 - **Allowed values:** at least 0
 - **Default:** `0.5`
+- **Disclosure:** advanced setting — the app folds it under "Advanced settings" in its section; its default is the canonical choice
 
 How often the 'random' Moran rule fires a death-birth replacement, as a weight against the birth-death weight above. The two are normalised at use — equal weights mean a fair coin each activation. Only read when the Moran rule is 'random'; the two weights cannot both be zero.
 

@@ -24,6 +24,21 @@ from pdsim.config.registry import ParamValue
 from pdsim.core.economy import age_mortality_active
 from pdsim.core.movement import movement_active
 
+ASYNC_EXPECTED_MATCHES_NOTE = (
+    "Under the asynchronous clock the spatial figure is an EXPECTED value per "
+    "generation-equivalent — each agent is activated once on average and "
+    "drawn in by each activated neighbour — where the synchronous count is "
+    "exact."
+)
+"""The async "expected figure" sentence, in one place (#177(c); #181 R7).
+
+Both (?) texts that print a spatial matches figure — the Economy panel's
+``ECONOMY_HELP["expected_matches"]`` and the Structure section's
+"Expected matches per agent per generation" readout (M11b Phase E2) — end
+with this sentence under the asynchronous clock, so the two explanations
+cannot describe the same number differently.
+"""
+
 ECONOMY_HELP: dict[str, str] = {
     "energy": (
         "Energy is a STOCK, not a score: an agent owns it across generations, "
@@ -62,11 +77,7 @@ ECONOMY_HELP: dict[str, str] = {
         "drawn into as many in return). With encounter mode 'per_pair' the "
         "duplicate pairs are collapsed after the draws, so the spatial "
         "figure is 1 × the effective neighbour count instead — each "
-        "neighbouring pair plays at most once per generation. Under the "
-        "asynchronous clock the spatial figure is an EXPECTED value per "
-        "generation-equivalent — each agent is activated once on average "
-        "and drawn in by each activated neighbour — where the synchronous "
-        "count is exact."
+        "neighbouring pair plays at most once per generation. " + ASYNC_EXPECTED_MATCHES_NOTE
     ),
     "income": (
         "The two income extremes per generation: what an agent earns if every "
@@ -280,6 +291,67 @@ class SpatialIncome(NamedTuple):
     window_high: float
 
 
+def expected_matches_per_agent(
+    neighbourhood_shape: str,
+    boundary: str,
+    opponents_per_agent: int,
+    interaction_radius: int | None,
+    site_count: int | None,
+    encounter_mode: str,
+    time_model: str,
+) -> int:
+    """Matches an interior agent on a full grid plays per generation (#181 R7).
+
+    The ONE arithmetic source for the spatial matches figure — the
+    Structure section's "Expected matches per agent per generation"
+    readout, the Economy panel's calibration report, and advisory A1 all
+    consume it (through :func:`spatial_income_arithmetic`), so the three
+    surfaces cannot drift. Extracted in M11b Phase E2 from the multiplier
+    that :func:`spatial_income_arithmetic` used to inline.
+
+    Every agent initiates ``min(k, degree)`` matches (the radius-aware
+    :func:`~pdsim.config.experiment.effective_neighbour_count`) and is
+    drawn into about as many by its neighbours — twice the effective
+    neighbour count under ``"per_initiator"`` (measured exactly in #139
+    and #177(a)); equal to it under ``"per_pair"``, which collapses the
+    duplicate pairs after the draws and plays each pair once (#166/#174).
+    Under the ASYNCHRONOUS clock the multiplier is ALWAYS 2, whatever the
+    (greyed, possibly stranded) ``encounter_mode`` value says: the async
+    loop never deduplicates (#175(a)), so honouring a stranded
+    ``per_pair`` would print 4 where the engine plays 8 (#176 R3 /
+    #177(c)).
+
+    Args:
+        neighbourhood_shape: ``"moore"`` or ``"von_neumann"`` —
+            ``structure.neighbourhood_shape``.
+        boundary: ``"torus"`` or ``"bounded"`` — ``structure.boundary``
+            (passed through; it does not move the interior number).
+        opponents_per_agent: The configured k —
+            ``matching.opponents_per_agent``.
+        interaction_radius: ``structure.interaction_radius``, or ``None``
+            for unlimited reach.
+        site_count: The grid's site count (rows × cols), required at
+            unlimited radius and a truthful ceiling otherwise.
+        encounter_mode: ``matching.encounter_mode`` — ``"per_initiator"``
+            or ``"per_pair"``; consulted only under the synchronous clock.
+        time_model: ``dynamics.time_model`` — ``"synchronous"`` or
+            ``"asynchronous"``.
+
+    Returns:
+        The whole-number matches figure: 2 × or 1 × the effective
+        neighbour count.
+    """
+    per_pair = time_model != "asynchronous" and encounter_mode == "per_pair"
+    multiplier = 1 if per_pair else 2
+    return multiplier * effective_neighbour_count(
+        neighbourhood_shape,
+        boundary,
+        opponents_per_agent,
+        interaction_radius,
+        site_count,
+    )
+
+
 def spatial_income_arithmetic(
     *,
     neighbourhood_shape: str,
@@ -293,6 +365,7 @@ def spatial_income_arithmetic(
     encounter_mode: str = "per_initiator",
     interaction_radius: int | None = 1,
     site_count: int | None = None,
+    time_model: str = "synchronous",
 ) -> SpatialIncome:
     """The spatial survival-window arithmetic, as a pure paint-time function.
 
@@ -338,17 +411,27 @@ def spatial_income_arithmetic(
             the registry default.
         site_count: The grid's site count (rows × cols), required for the
             unlimited-radius case and a truthful ceiling otherwise.
+        time_model: ``dynamics.time_model``; under ``"asynchronous"`` the
+            matches figure is ALWAYS 2 × (#176 R3 — the async loop never
+            deduplicates), whatever ``encounter_mode`` says. Defaults to
+            the synchronous clock, where the encounter mode decides.
 
     Returns:
         The full :class:`SpatialIncome` arithmetic.
     """
-    multiplier = 1.0 if encounter_mode == "per_pair" else 2.0
-    matches = multiplier * effective_neighbour_count(
-        neighbourhood_shape,
-        boundary,
-        opponents_per_agent,
-        interaction_radius,
-        site_count,
+    # One arithmetic source (#181 R7): the matches figure comes from the
+    # same function the Structure readout shows, so the panel, the readout,
+    # and advisory A1 cannot drift.
+    matches = float(
+        expected_matches_per_agent(
+            neighbourhood_shape,
+            boundary,
+            opponents_per_agent,
+            interaction_radius,
+            site_count,
+            encounter_mode,
+            time_model,
+        )
     )
     rounds_per_agent = matches * _expected_rounds(
         length_mode, rounds_per_match, continuation_probability
@@ -595,6 +678,7 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
             encounter_mode=encounter_mode,
             interaction_radius=config.structure.interaction_radius,
             site_count=site_count,
+            time_model=dynamics.time_model,
         )
         matches = arithmetic.matches_per_agent
         regime_note = _spatial_regime_note(encounter_mode, asynchronous)

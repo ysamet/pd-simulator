@@ -355,6 +355,25 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     validation-feedback fix followed (2026-09-03, #180): stable
     section-expander keys — the inert/live label swap no longer
     collapses an open pane under the user mid-edit.
+    ✅ **M11b Phase E2 landed 2026-09-03** (DECISIONS #181 pre-drafting
+    rulings, #182 build record): the novice/advanced disclosure axis
+    (#158/#167) — a registry `advanced` flag on exactly sixteen entries
+    (pinned as an exact set; `continuation_probability` struck,
+    `selection_beta` kept everyday), rendered as a per-section
+    "Advanced settings" NESTED keyed expander after the everyday
+    widgets (Matching, Structure, Movement, Dynamics), collapsed at
+    every genuine mount, greying and inline advisories live inside
+    through the one factored per-widget call, its header naming any
+    folded value that differs from its default ("Advanced settings —
+    2 changed: …" as loaded on Async: Mixed Moran Rules); gendocs marks
+    flagged entries with a Disclosure bullet. The #179(d) fixed_n
+    carry-in RESOLVED by option (c): "Expected matches per agent per
+    generation" joins the Structure §12 readouts on the engine's
+    spatial gate, sourced from the extracted
+    `expected_matches_per_agent` that the calibration report and A1
+    now consume too. Reported: 1.58's expander has no `help=`, so the
+    fold's one explanation renders as its first line. Zero
+    re-recordings, zero new goldens; 1240 tests passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

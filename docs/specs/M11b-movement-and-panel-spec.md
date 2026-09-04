@@ -4,7 +4,8 @@
 landed 2026-08-17 — DECISIONS #171; Phase B landed 2026-08-18 — DECISIONS
 #172; Phase C landed 2026-08-20 — DECISIONS #174/#175; Phase D landed
 2026-08-24 — DECISIONS #176/#177, the ruling-7 measurement gate PASSED;
-Phase E1 landed 2026-09-01 — DECISIONS #178/#179).
+Phase E1 landed 2026-09-01 — DECISIONS #178/#179; Phase E2 landed
+2026-09-03 — DECISIONS #181/#182).
 This spec is a frozen historical
 record (#62): deviations during implementation become new DECISIONS
 entries, never retro-edits of this file beyond this status line.

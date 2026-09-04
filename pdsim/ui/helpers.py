@@ -25,7 +25,7 @@ from pdsim.config.experiment import (
     resolve_lattice_dimensions,
     resolve_senescence_factor,
 )
-from pdsim.config.registry import ParameterSpec, ParamValue, all_specs
+from pdsim.config.registry import ParameterSpec, ParamValue, all_specs, get_spec
 from pdsim.core.timeseries import RunTimeseries
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
@@ -816,6 +816,101 @@ def section_summary_label(section: str, values: Mapping[str, ParamValue], branch
         if note is not None and note in _SUMMARY_CAUSES:
             return f"{section} — {_SUMMARY_CAUSES[note]}"
     return f"{section} — inactive"
+
+
+ADVANCED_FOLD_HELP = (
+    "Settings whose default is the canonical choice; change them only when "
+    "you mean to. Greyed ones are ignored under the current configuration — "
+    "the (?) beside each says why. The header lists any that differ from "
+    "their defaults."
+)
+"""The one explanation of the per-section "Advanced settings" fold (#181).
+
+Single source (the #152 discipline): the app renders this sentence inside
+every fold, so the four folds cannot explain themselves differently.
+"""
+
+
+def advanced_keys(section: str) -> tuple[str, ...]:
+    """A section's advanced (folded) registry keys, in registry order.
+
+    The novice/advanced disclosure axis (#158/#167/#181) is a registry
+    ``advanced`` flag, so this is a pure read of the registry: the panel
+    renders these keys inside the section's collapsed "Advanced settings"
+    expander, after the everyday widgets. Strategy parameters are out of
+    scope (they live in their own expander), so only panel specs count.
+
+    Args:
+        section: The registry section name (e.g. ``"Dynamics"``).
+
+    Returns:
+        The flagged keys registered under that section, in registration
+        (= display) order; empty for a section with none.
+    """
+    return tuple(spec.key for spec in panel_specs() if spec.section == section and spec.advanced)
+
+
+def _format_advanced_value(value: ParamValue) -> str:
+    """Render a folded value the way its widget shows it.
+
+    Floats use the panel's own number-input format (``%.4g`` — the
+    ``format`` argument every float widget in ``app.py`` carries), so the
+    header and the widget cannot print the same number two ways; whole
+    numbers, choices, and booleans are their plain ``str``.
+
+    Args:
+        value: The widget value to render.
+
+    Returns:
+        The value as the header shows it (``"0.02"``, ``"birth_first"``).
+    """
+    if isinstance(value, float):
+        return f"{value:.4g}"
+    return str(value)
+
+
+def advanced_fold_label(section: str, values: Mapping[str, ParamValue]) -> str:
+    """The "Advanced settings" expander's header for one section (#181 R3).
+
+    A folded key at its registry default is invisible-safe by the flagging
+    criterion's own first clause; a folded key at a NON-default value —
+    loaded by a scenario or a recorded config, or edited and then folded
+    away — is exactly the invisible-effect case #158 forbids, so the header
+    names every such key with its registry display name (the §12 rule:
+    the (?) and the label cannot name a knob differently) and its value::
+
+        "Advanced settings"
+        "Advanced settings — 1 changed: Boundary order = birth_first"
+        "Advanced settings — 2 changed: Boundary order = birth_first,
+         Capital return rate (r) = 0.02"
+
+    Values are compared to their defaults with ``==`` — every advanced
+    default is a concrete number or choice string (pinned in the registry
+    tests), so a float typed as the default's value compares equal. A key
+    missing from ``values`` counts as unchanged (the first paint, before
+    the app's lookahead has anything to say).
+
+    Args:
+        section: The registry section name.
+        values: Widget values (with the app's lookahead) — the SAME mapping
+            the greying reads, so the header and the greying inside the
+            fold cannot disagree within one paint.
+
+    Returns:
+        The header text, listing the changed keys in registry order.
+    """
+    changed: list[str] = []
+    for key in advanced_keys(section):
+        if key not in values:
+            continue
+        spec = get_spec(key)
+        value = values[key]
+        if value == spec.default:
+            continue
+        changed.append(f"{spec.label} = {_format_advanced_value(value)}")
+    if not changed:
+        return "Advanced settings"
+    return f"Advanced settings — {len(changed)} changed: {', '.join(changed)}"
 
 
 def greying(key: str, values: Mapping[str, ParamValue]) -> tuple[bool, str]:

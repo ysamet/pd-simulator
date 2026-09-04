@@ -5667,3 +5667,252 @@ the pin is the owner's re-validation plus the load-bearing-key comment
 at the call site. All 1210 tests pass unchanged (zero new, zero
 retired, zero golden churn); ruff clean; the one changed file is
 `pdsim/ui/app.py`.**
+
+**#181 — 2026-09-03 — Phase E2 pre-drafting rulings (design layer):
+the `advanced` flag set is fixed at sixteen keys, with
+`match.continuation_probability` STRUCK from the spec's candidate
+list and `selection_beta` excluded (R1); the fold is a nested,
+stably-keyed expander with the #179(e) toggle idiom as a reported
+fallback only (R2); the fold's label reports values that differ from
+their registry defaults (R3); placement after the everyday widgets
+and before readouts, registry order inside, greying and inline
+advisories inside, tournament-visible (R4); no new session state
+(R5); the flag is registry metadata, marked by gendocs, pinned as an
+exact set (R6); and the #179(d) fixed_n question is RESOLVED by
+moving the matches figure to the Structure §12 readouts as
+"Expected matches per agent per generation" on the engine's spatial
+gate, option (c), leaving the Economy panel's fixed_n summary as
+built (R7) (M11b Phase E2; spec ruling 5 / #167, #158, #176 R3/R7,
+#179, #180).** R1 THE SET: Matching `encounter_mode`; Structure
+`birth_decay`, `placement_contest`, `interaction_decay`; Movement
+`decay`; Dynamics `selection_tournament_k`, `selection_elite_fraction`,
+`selection_threshold_multiplier`, `accounting_window`,
+`accounting_discount`, `engagement_cost`, `reproduction_overhead`,
+`capital_return_rate`, `boundary_order`, `moran_weight_birth_death`,
+`moran_weight_death_birth`. Applied test (ruling 5): the default is
+the canonical choice AND changing it presupposes a mechanism the
+novice tooltips do not assume. Three tiers were ruled: the spec's
+candidates confirmed, minus `continuation_probability` — its
+liveness is switched by the everyday `length_mode` choice whose own
+tooltip explains continuation and the shadow of the future, so
+folding it would make a novice hunt for the knob that choice just
+made live; "the selection-rule internals" resolved to the three
+non-default-rule sub-knobs and NOT `selection_beta` (the default
+rule's own dial, `drift_vs_meritocracy`'s subject); the consistency
+extension to the other sub-knobs live only under a non-default
+everyday selector (the accounting pair, the Moran weights); and the
+three economy knobs whose zero default switches a mechanism off
+(engagement, overhead, capital return — rentiers). Kept everyday by
+ruling: the aging trio, the Game guard toggles (a rejected payoff's
+reason must sit beside the payoffs), every radius (the intuitive
+"how far" dial; only decays fold), `boundary`, `neighbourhood_shape`,
+`moran_rule`, `fixed_n_death_rule` (they define what fixed_n is;
+`pure_random` is the replication setting). R2 THE FOLD: ruling 5 and
+#167 say expander; #179(a)(ii) verified nesting no longer raises in
+1.58; a keyed expander creates no session state, and #180's
+stable-key mechanism is exactly what R3's relabelling needs.
+Alternative: the #179(e) toggle — a real widget with state that
+would have to join the keep-alive list; pre-authorised only as a
+fallback on a concrete, described rendering defect, and must be
+reported. R3 THE LABEL: a folded key at its default is safe by the
+criterion's own first clause; a folded key at a NON-default value —
+loaded by a scenario or a recorded config — is precisely the
+invisible-effect case #158 forbids, so the header names it ("Advanced
+settings — 1 changed: Boundary order = birth_first"); the plain
+constant label was rejected as reintroducing that invisibility. R4
+placement and travel as stated in the header; R5 no new session
+state, fold collapsed at every genuine mount (the E1 rule, one level
+down); R6 metadata not parameter, exact-set pin so drift is
+deliberate. R7 THE fixed_n CARRY-IN: under `fixed_n` the living cost
+is never charged, so the calibration framing describes a filter that
+does not exist and E1's summary is right — but the matches figure is
+exact there by construction (#177(a): every event's focal plays
+min(k, degree) on a full grid; 100 events × 4 matches, each counted
+for two agents, ÷ 100 agents = 8). Options: (a) leave it; (b) a slim
+fixed_n Economy readout of matches and gross incomes — rejected
+because the incomes there have no decision attached (the readout
+exists to place L; with no L to place the income pair answers no
+question the panel can name), and it adds a third panel state; (c)
+CHOSEN: the matches figure belongs to structure and matching, not to
+the economy — it now renders in the Structure §12 readouts wherever
+the engine's spatial gate holds, which also covers synchronous
+imitation on a lattice with spatial interaction on, a configuration
+where scores scale with matches and no surface printed the figure.
+One arithmetic source for the readout, the calibration report and
+A1. A fixed_n income readout waits for the weak-selection backlog
+item, where it acquires the question it answers. ADJACENT, HELD, not
+E2's: under the asynchronous clock in a well-mixed world the
+calibration report still branches on the greyed matcher (#154's
+untouched pre-existing branch), so a `round_robin` config there
+prints N − 1 where the async engine plays ≈ 2k; no shipped scenario
+appears to hit it; for the E5 sweep. The calibration guide's two
+Phase-C-stale sentences (§4.2 "does not remove these duplicates",
+§4.4 "on the roadmap") remain held for the guide's owner
+(#177(f6)/#178); the §4.2 #139 parenthetical was found ALREADY
+PRESENT, so no edit rides E2.
+
+**#182 — 2026-09-03 — M11b Phase E2 BUILT: the `advanced` registry
+flag on exactly sixteen entries (pinned as an exact set), the
+per-section "Advanced settings" NESTED keyed expander with the
+non-default-reporting header, the factored per-widget call, and the
+Structure §12 "Expected matches per agent per generation" readout on
+ONE extracted arithmetic source — #181 as ruled, with one reported
+deviation: Streamlit 1.58's expander takes no `help=`, so the fold's
+(?) sentence renders as its first line.**
+(a) TASK 0 FINDINGS, Streamlit 1.58.0 confirmed (g). (i) The registry
+entry is `ParameterSpec`, `frozen=True, slots=True`; `section` is a
+plain string field; thirteen fields before E2 (key, kind, default,
+label, description, section, minimum, maximum, minimum_exclusive,
+maximum_exclusive, choices, nullable, learn_more). Iteration order is
+`_REGISTRY` insertion = registration = display order via
+`all_specs()`; the panel reads `helpers.panel_specs()` (strategy.*
+excluded) and groups by section in first-appearance order; gendocs
+consumes `all_specs()` through `_parameter_block`, whose metadata list
+was Type / Allowed values / Default. (ii) The panel loop: each section
+is `st.expander(label, expanded, key=f"section_{section}")` (#180) →
+`st.columns(2)` → per spec `helpers.greying(key, {**lookahead,
+**values})`, `_widget`, `_advisory_captions`, in `columns[i % 2]`; the
+section's readouts and panels follow the widget loop INSIDE the same
+expander — Game's additivity readout, Population's composition panel,
+Structure's `_structure_panel` (gated `grid_visible`; it calls
+`_structure_readouts` first, then the grid), Dynamics' Economy panel
+or summary. `_structure_readouts` builds a `metrics` list and appends
+"Effective neighbours (k)" only under the spatial toggle with
+well-typed inputs — ABSENT, not greyed, otherwise; because it runs
+inside `grid_visible` (evolution ∧ lattice), its effective gate
+already equalled the engine's spatial gate. (iii)
+`effective_neighbour_count` and `interior_reach_size` live in
+`pdsim/config/experiment.py`; `spatial_income_arithmetic` and
+`calibration_report` in `pdsim/ui/economy_helpers.py`;
+`_spatial_sampling_active` in `pdsim/ui/helpers.py`, imported by
+advisories.py for A3. NO named helper yielded expected matches with
+the encounter-mode branch: the 2×/1× multiplier was INLINED in
+`spatial_income_arithmetic` and the async forcing lived in
+`calibration_report` — extracted, see (b). (iv) Shipped scenarios
+loading a non-default advanced value: exactly ONE — `moran_random_mix`
+("Async: Mixed Moran Rules"), `moran_weight_birth_death` 0.8 and
+`moran_weight_death_birth` 0.2; the other thirteen load all sixteen at
+their defaults. (v) None of the sixteen is nullable; every default is
+concrete (per_initiator, 0.0, random, 0.0, 0.0, 3, 0.2, 1.0, 5, 0.5,
+0.0, 0.0, 0.0, death_first, 0.5, 0.5). (vi) THE PROBE (temporary,
+never shipped — the #117/#130 precedent): a keyed `expanded=False`
+expander nested inside a keyed expander, holding a number_input —
+(1) no exception; (2) the inner widget IS in the element tree while
+the fold is collapsed, its value readable; (3) editing it changes its
+session value; (4) relabelling the inner expander across two script
+passes keeps the inner widget's value, and the identity mechanism is
+verified in the 1.58 source: with `key` and the default
+`on_change="ignore"` the block id is computed from ("expander",
+user_key, type) — the label NOT among the inputs — and NO widget is
+registered, so no session state is created (`advanced_Outer` absent
+from session state after the run; AppTest exposes no block id, #180's
+limit, so the source is the pin). The probe's FIRST pass found the
+R2-relevant fact: `st.expander(..., help=...)` raises TypeError —
+1.58's signature is (label, expanded, *, key, icon, type, width,
+on_change, args, kwargs), no `help`. (vii) Streamlit 1.58.0.
+(b) AS-BUILT DECISIONS. The registry field `advanced: bool = False`,
+documented as metadata; the sixteen flagged and nothing else; gendocs
+renders the verbatim Disclosure bullet after the Default line (16 in
+the regenerated PARAMETERS.md). Helpers (`pdsim/ui/helpers.py`,
+beside `section_summary_label`): `advanced_keys(section)` reads
+`panel_specs()`, so strategy parameters are out of scope by
+construction; `advanced_fold_label(section, values)` compares with
+`==`, renders floats with the panel's own `%.4g` number-input format
+(the `format` every float widget in app.py carries) and everything
+else via `str()`, and lists changes in REGISTRY order;
+`ADVANCED_FOLD_HELP` is the single source. App: the per-widget call
+is FACTORED into `_panel_widget(spec, lookahead, values)` — greying,
+widget, inline advisory — used by the everyday loop and the fold
+alike, so nothing forks; everyday widgets keep their two-column grid
+and the fold gets its own; the fold renders after the everyday
+widgets and before the section's readouts/panels; `key=
+f"advanced_{section}"`, `expanded=False`, the header computed from
+the same merged mapping the greying reads, with the load-bearing-key
+comment at the call site. THE NESTED EXPANDER SHIPPED (R2's primary):
+no rendering defect appeared, the #179(e) toggle fallback was NOT
+used, and nothing joins `_preserve_hidden_widget_state`. THE ONE
+DEVIATION from the prompt's Task 3 call: no `help=` exists on 1.58's
+expander, so `ADVANCED_FOLD_HELP` renders as an `st.caption` first
+line INSIDE the fold (visible on opening) rather than as a (?) on the
+header — the minimum change, reported here, never a silent choice.
+The multiplier: `expected_matches_per_agent(shape, boundary, k,
+interaction_radius, site_count, encounter_mode, time_model) -> int`
+EXTRACTED into economy_helpers beside `spatial_income_arithmetic`,
+which gained `time_model="synchronous"` and consumes it;
+`calibration_report` passes the clock through AND keeps its own
+per-initiator forcing for the regime and memory notes (both pinned;
+belt and braces). The readout: in `_structure_readouts`, immediately
+after "Effective neighbours (k)" inside the same typed-input block,
+gated on `_spatial_sampling_active(values)` REUSED (imported from
+helpers, the advisories.py precedent), absent when false; help
+`STRUCTURE_HELP["expected_matches"]` verbatim, with the async
+sentence appended from the new `ASYNC_EXPECTED_MATCHES_NOTE` constant
+that `ECONOMY_HELP["expected_matches"]` now composes byte-identically
+— one source for the two (?) texts. The Economy panel's fixed_n
+summary is untouched, exactly as E1 built it. `IGNORED_IN_TOURNAMENT`,
+`STRUCTURE_GREYING`, `SECTION_GATES`, `section_inert`,
+`section_summary_label`, `_SUMMARY_CAUSES`, both greying branches,
+and `TOURNAMENT_HIDDEN_SECTIONS` are byte-untouched (#178 R10).
+(c) TASK 0(d)'s LIST and the walkthrough: only `moran_random_mix`
+qualifies, so step 7 loads "Async: Mixed Moran Rules" and reads the
+Dynamics fold's header AS LOADED: "Advanced settings — 2 changed:
+Moran weight: birth-death = 0.8, Moran weight: death-birth = 0.2"
+(pinned by AppTest (vii) and a helpers test).
+(d) RULE 7 FINDINGS. (f1) The `help=` contradiction above: the
+prompt's Task 3 call cannot execute on 1.58; built with the in-fold
+caption. (f2) Task 2's two-change EXAMPLE lists "Boundary order =
+birth_first, Capital return rate (r) = 0.02", but the RULE (R3 /
+Task 2 / Task 5) is registry order, and `capital_return_rate`
+(position 49) registers before `boundary_order` (54) — built to the
+rule: "Advanced settings — 2 changed: Capital return rate (r) = 0.02,
+Boundary order = birth_first"; the walkthrough's step 3 says only
+"counts 2 and lists both", which holds. (f3) Column placement of the
+EVERYDAY widgets shifts in the four folded sections (the two-column
+alternation now runs over everyday widgets only) — a layout
+consequence of R4, no value or state change; the five unfolded
+sections render byte-identically. (f4) ADJACENT, not touched: DESIGN
+§4.1 item 3 still calls `run.mode` "a prominent radio" — stale since
+E1's segmented control (#179); held for the E5 docs sweep. (f5) The
+#181 text as delivered wrapped one identifier across a line break
+(`selection_elite_` / `fraction`); appended with the identifier whole
+— a transfer artifact, not a content change. (f6) Nothing in the
+Economy panel's `_economy_panel` needed the helper directly: it reads
+`report.expected_matches`, which the report now derives from the
+helper, so the panel's "Matches per agent" (4 under synchronous
+per_pair) and the Structure readout are pinned equal in AppTest (vi).
+(f7) ADJACENT, pre-existing, not E2's, found while verifying the
+walkthrough's greying claims: on `donation_game_threshold` (async
+`fixed_n`) the three economy knobs now folded — Engagement cost,
+Reproduction overhead, Capital return rate — render LIVE inside the
+Dynamics fold, although `fixed_n` charges no living cost and has no
+insolvency deaths (#176 R4's own reasoning; `_VARIABLE_N_ONLY` covers
+θ, K, and the aging trio but not these three) — a greying-chain
+question for the E5 sweep, reported, not reconciled. On the flagship
+the selection and accounting sub-knobs carry the ENERGY-ECONOMY note
+(the paradigm-level check wins over the non-selected-rule note, as
+`greying`'s documented order says), and the three economy knobs are
+live there, correctly.
+(e) TESTS AND BUDGET: 1240 passing (1210 + 30: 3 in
+`test_registry.py` — the exact-set pin in both directions, the
+no-nullable pin, the flag-is-metadata pin; 3 in `test_gendocs.py` —
+the bullet present on a flagged entry after the Default line, absent
+on `selection_beta` and `continuation_probability`, count exactly 16;
+9 in `test_ui_helpers.py` — `advanced_keys` per section plus the
+empty five, and seven header cases including registry-order listing,
+the missing-key and float-equals-default contracts, the `%.4g`
+rendering, and the moran scenario as loaded; 8 in
+`test_economy_helpers.py` — the helper's von Neumann / Moore /
+async-forcing / radius-2 numbers and the four-way
+mode × clock cannot-drift pin against `calibration_report` on the
+flagship; 7 in `test_app.py` — (i)–(vii) as specified, (iii) through
+a recorded tiny Custom run whose config carries `birth_first`, (vi)
+also pinning the Economy panel's agreeing 4 and the async (?)
+sentence, (vii) the moran scenario); ZERO retired; ruff check and
+format clean; ZERO golden re-recordings, ZERO new goldens — no RNG
+path was touched, all 31 goldens and every counting pin passed
+untouched. (f) DOCS: #181 appended verbatim; this entry; DESIGN §5's
+field list gains `advanced` and §4.1 item 3 the disclosure sentence
+(pre-authorised, the #174(g) precedent); CLAUDE.md's
+validation-precision paragraph (the fold sentence) and current-phase
+paragraph (E2 landed; next E3); ROADMAP's E2 status line; the spec's
+status line only; `PARAMETERS.md` regenerated (16 Disclosure bullets).

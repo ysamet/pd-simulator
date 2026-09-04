@@ -52,7 +52,12 @@ from pdsim.sweep.spec import (
     sweep_validation_messages,
 )
 from pdsim.ui import advisories, economy_helpers, helpers, sweep_helpers
-from pdsim.ui.economy_helpers import ECONOMY_HELP
+from pdsim.ui.economy_helpers import (
+    ASYNC_EXPECTED_MATCHES_NOTE,
+    ECONOMY_HELP,
+    expected_matches_per_agent,
+)
+from pdsim.ui.helpers import ADVANCED_FOLD_HELP, _spatial_sampling_active
 from pdsim.viz import charts
 
 CUSTOM = "Custom"
@@ -114,6 +119,17 @@ STRUCTURE_HELP = {
         "bounded grid, edge and corner cells have fewer neighbours still (a "
         "corner keeps 3 of Moore's 8 at radius 1); a torus has no edges, so "
         "every cell plays exactly this number."
+    ),
+    "expected_matches": (
+        "How many matches an interior agent on a full grid plays per "
+        "generation (per generation-equivalent under the asynchronous "
+        "clock). Every agent initiates min(k, neighbours) matches and is "
+        "drawn into about as many by its neighbours — twice the effective "
+        "neighbour count under 'per_initiator'; equal to it under "
+        "'per_pair', which plays each pair once. The asynchronous clock is "
+        "always per-initiator. Edge agents on a bounded grid and agents "
+        "beside empty sites play fewer. The Economy panel's income "
+        "arithmetic uses this same figure."
     ),
     "pixel_array": (
         "Whether the grid is currently drawn as ONE image — a pixel array, "
@@ -439,6 +455,36 @@ def _preserve_hidden_widget_state(specs: dict[str, ParameterSpec]) -> None:
             st.session_state[key] = st.session_state[key]
 
 
+def _panel_widget(
+    spec: ParameterSpec, lookahead: dict[str, ParamValue], values: dict[str, ParamValue]
+) -> None:
+    """Render ONE panel widget with its greying and inline advisories.
+
+    Factored out of the panel loop in M11b Phase E2 (#181 R4) so the
+    everyday widgets and the "Advanced settings" fold share one code path
+    — a folded widget greys, explains itself, and carries its inline
+    advisory exactly as an everyday one does. Writes the widget's value
+    into ``values`` under its registry key.
+
+    Args:
+        spec: The parameter to render.
+        lookahead: The app's forward map of every panel key to what its
+            widget WILL return this run (see :func:`_parameter_panel`).
+        values: The values gathered so far this script run; this widget's
+            value is added to it.
+    """
+    # Widgets render in registry order, so most values a widget's greying
+    # keys off (run.mode, matching.matcher, dynamics.reproduction_mode)
+    # are already gathered when it renders; the lookahead covers the
+    # forward M10b dependencies (helpers.greying, DECISIONS #34).
+    disabled, note = helpers.greying(spec.key, {**lookahead, **values})
+    values[spec.key] = _widget(spec, disabled=disabled, note=note)
+    # The advisory seam (M11b Phase D): inline warnings anchored at this
+    # widget — A2 at its nine trigger keys, A3 beside the
+    # spatial-interaction toggle.
+    _advisory_captions(spec.key, {**lookahead, **values})
+
+
 def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str, dict]]:
     """Render the whole generated panel; return everything a run needs.
 
@@ -548,20 +594,37 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         # still applies at every genuine mount (fresh session, mode-tab
         # switch), so inert sections still START collapsed.
         with st.expander(label, expanded=expanded, key=f"section_{section}"):
+            # The disclosure axis (#158/#167/#181): a section's advanced
+            # keys render AFTER its everyday widgets, inside a collapsed
+            # "Advanced settings" fold, through the SAME per-widget call —
+            # greying, (?) text, and inline advisories included — so the
+            # fold never forks the widget-rendering code.
+            folded = helpers.advanced_keys(section)
+            everyday = [spec for spec in section_specs if spec.key not in folded]
             columns = st.columns(2)
-            for i, spec in enumerate(section_specs):
-                # Widgets render in registry order, so most values a
-                # widget's greying keys off (run.mode, matching.matcher,
-                # dynamics.reproduction_mode) are already gathered when it
-                # renders; the lookahead covers the forward M10b
-                # dependencies (helpers.greying, DECISIONS #34).
-                disabled, note = helpers.greying(spec.key, {**lookahead, **values})
+            for i, spec in enumerate(everyday):
                 with columns[i % 2]:
-                    values[spec.key] = _widget(spec, disabled=disabled, note=note)
-                    # The advisory seam (M11b Phase D): inline warnings
-                    # anchored at this widget — A2 at its nine trigger
-                    # keys, A3 beside the spatial-interaction toggle.
-                    _advisory_captions(spec.key, {**lookahead, **values})
+                    _panel_widget(spec, lookahead, values)
+            if folded:
+                # The header reads the SAME merged mapping the greying
+                # reads (#181 R3/R4), so the two cannot disagree within a
+                # paint. The stable key is load-bearing, exactly as for
+                # the section expanders (#180): the label changes on every
+                # non-default edit inside the fold, and without the key
+                # that relabel would mint a new element that mounts
+                # collapsed — snapping the pane shut under the user
+                # mid-edit. A keyed expander registers no session state
+                # (#181 R5; Task 0 probe), so nothing joins the keep-alive
+                # list and the fold starts collapsed at every genuine
+                # mount. Streamlit 1.58's expander takes no `help=`, so the
+                # fold's one explanation renders as its first line instead.
+                fold_label = helpers.advanced_fold_label(section, {**lookahead, **values})
+                with st.expander(fold_label, expanded=False, key=f"advanced_{section}"):
+                    st.caption(ADVANCED_FOLD_HELP)
+                    fold_columns = st.columns(2)
+                    for i, spec in enumerate(spec for spec in section_specs if spec.key in folded):
+                        with fold_columns[i % 2]:
+                            _panel_widget(spec, lookahead, values)
             if section == "Game" and values.get("run.mode") == "evolution":
                 # The §12 payoff-additivity readout (#111) — whether the
                 # b/c > k threshold is even a well-formed question for
@@ -1017,6 +1080,47 @@ def _structure_readouts(values: dict[str, ParamValue]) -> None:
                     STRUCTURE_HELP["effective_neighbours"],
                 )
             )
+            # The matches figure (M11b Phase E2, #181 R7 — the #179(d)
+            # carry-in): it belongs to structure and matching, not to the
+            # economy, so it renders here wherever the ENGINE's spatial
+            # gate holds — evolution AND lattice AND toggle, the same
+            # predicate advisory A3 uses (#176 R7), reused not re-derived
+            # — which also covers configurations the Economy panel never
+            # calibrates (fixed_n, synchronous imitation on a lattice).
+            # Same arithmetic as the calibration report and A1 (one
+            # source), same radius/site-count pass-throughs as the
+            # neighbours readout above (#177(e)). Absent, not greyed, when
+            # the gate is false: a readout, not a widget.
+            encounter_mode = values.get("matching.encounter_mode")
+            time_model = values.get("dynamics.time_model")
+            if (
+                _spatial_sampling_active(values)
+                and isinstance(encounter_mode, str)
+                and isinstance(time_model, str)
+            ):
+                matches_help = STRUCTURE_HELP["expected_matches"]
+                if time_model == "asynchronous":
+                    # The (?) cannot contradict the number (#154's rule):
+                    # under the async clock the figure is an EXPECTED one,
+                    # stated in the same sentence the Economy (?) uses.
+                    matches_help = f"{matches_help} {ASYNC_EXPECTED_MATCHES_NOTE}"
+                metrics.append(
+                    (
+                        "Expected matches per agent per generation",
+                        str(
+                            expected_matches_per_agent(
+                                shape,
+                                boundary,
+                                k,
+                                radius,
+                                resolved_rows * resolved_cols,
+                                encounter_mode,
+                                time_model,
+                            )
+                        ),
+                        matches_help,
+                    )
+                )
     if not metrics:
         return
     columns = st.columns(max(len(metrics), 2))

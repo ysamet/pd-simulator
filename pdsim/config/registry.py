@@ -78,6 +78,13 @@ class ParameterSpec:
         nullable: If True, ``None`` is an accepted value (rendered as
             "unlimited" / "off" in the UI).
         learn_more: Optional pointer to background reading for the curious.
+        advanced: Disclosure metadata (M11b Phase E2; DECISIONS #167/#181):
+            True folds the widget under its section's collapsed "Advanced
+            settings" expander in the app and marks the entry in the
+            generated ``docs/PARAMETERS.md``. Read ONLY by the UI's
+            disclosure fold and the docs generator — never by validation,
+            config assembly, persistence, or the engine. A flag on the
+            entry, not a parameter: it changes nothing about the value.
     """
 
     key: str
@@ -93,6 +100,7 @@ class ParameterSpec:
     choices: tuple[str, ...] | None = None
     nullable: bool = False
     learn_more: str | None = None
+    advanced: bool = False
 
     def __post_init__(self) -> None:
         """Check that the spec itself is well-formed (fail fast at import time).
@@ -501,6 +509,7 @@ register(
 register(
     ParameterSpec(
         key="matching.encounter_mode",
+        advanced=True,
         kind="choice",
         default="per_initiator",
         choices=("per_initiator", "per_pair"),
@@ -933,6 +942,7 @@ register(
 register(
     ParameterSpec(
         key="structure.birth_decay",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -959,6 +969,7 @@ register(
 register(
     ParameterSpec(
         key="structure.placement_contest",
+        advanced=True,
         kind="choice",
         default="random",
         choices=("random", "energy_priority"),
@@ -1024,6 +1035,7 @@ register(
 register(
     ParameterSpec(
         key="structure.interaction_decay",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -1133,6 +1145,7 @@ register(
 register(
     ParameterSpec(
         key="movement.decay",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -1300,6 +1313,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.selection_tournament_k",
+        advanced=True,
         kind="int",
         default=3,
         minimum=2,
@@ -1320,6 +1334,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.selection_elite_fraction",
+        advanced=True,
         kind="float",
         default=0.2,
         minimum=0.0,
@@ -1340,6 +1355,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.selection_threshold_multiplier",
+        advanced=True,
         kind="float",
         default=1.0,
         minimum=0.0,
@@ -1403,6 +1419,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.accounting_window",
+        advanced=True,
         kind="int",
         default=5,
         minimum=1,
@@ -1422,6 +1439,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.accounting_discount",
+        advanced=True,
         kind="float",
         default=0.5,
         minimum=0.0,
@@ -1526,6 +1544,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.engagement_cost",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -1543,6 +1562,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.reproduction_overhead",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -1560,6 +1580,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.capital_return_rate",
+        advanced=True,
         kind="float",
         default=0.0,
         minimum=0.0,
@@ -1670,6 +1691,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.boundary_order",
+        advanced=True,
         kind="choice",
         default="death_first",
         choices=("death_first", "birth_first"),
@@ -1781,6 +1803,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.moran_weight_birth_death",
+        advanced=True,
         kind="float",
         default=0.5,
         minimum=0.0,
@@ -1800,6 +1823,7 @@ register(
 register(
     ParameterSpec(
         key="dynamics.moran_weight_death_birth",
+        advanced=True,
         kind="float",
         default=0.5,
         minimum=0.0,

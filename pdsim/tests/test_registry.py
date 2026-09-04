@@ -195,3 +195,57 @@ class TestRegistry:
         }
         registered = {spec.key for spec in registry.all_specs()}
         assert expected <= registered
+
+
+ADVANCED_KEYS: frozenset[str] = frozenset(
+    {
+        "matching.encounter_mode",
+        "structure.birth_decay",
+        "structure.placement_contest",
+        "structure.interaction_decay",
+        "movement.decay",
+        "dynamics.selection_tournament_k",
+        "dynamics.selection_elite_fraction",
+        "dynamics.selection_threshold_multiplier",
+        "dynamics.accounting_window",
+        "dynamics.accounting_discount",
+        "dynamics.engagement_cost",
+        "dynamics.reproduction_overhead",
+        "dynamics.capital_return_rate",
+        "dynamics.boundary_order",
+        "dynamics.moran_weight_birth_death",
+        "dynamics.moran_weight_death_birth",
+    }
+)
+"""The sixteen advanced entries as ruled (M11b Phase E2, DECISIONS #181 R1).
+
+A deliberate pin: flagging or unflagging any entry must be a conscious
+edit of this set, never a drive-by — the exact-set test below fails in
+BOTH directions.
+"""
+
+
+class TestAdvancedFlag:
+    """The `advanced` disclosure flag (#167/#181 R6): metadata, pinned as a set."""
+
+    def test_flagged_set_is_exactly_the_ruled_sixteen(self) -> None:
+        """Every flagged entry is in the pin, and every pinned key is flagged."""
+        flagged = {spec.key for spec in registry.all_specs() if spec.advanced}
+        assert flagged == ADVANCED_KEYS
+        assert len(ADVANCED_KEYS) == 16
+
+    def test_no_advanced_entry_is_nullable(self) -> None:
+        """Every folded default is a concrete value the fold header can compare."""
+        for key in ADVANCED_KEYS:
+            spec = registry.get_spec(key)
+            assert spec.nullable is False, f"{key} is nullable"
+            assert spec.default is not None, f"{key} has no concrete default"
+
+    def test_flag_defaults_off_and_never_touches_validation(self) -> None:
+        """The flag is metadata: off by default, and validate() ignores it."""
+        assert _spec().advanced is False
+        flagged = _spec(advanced=True)
+        assert flagged.advanced is True
+        assert flagged.validate(0.25) == 0.25
+        with pytest.raises(ValueError, match="at most"):
+            flagged.validate(2.0)

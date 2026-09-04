@@ -38,14 +38,25 @@ the run-mode tab strip below the Scenario dropdown — under tournament
 the Structure, Movement, and Dynamics sections do not render at all —
 and an INERT Structure or Movement section starts collapsed under a
 summary label such as "Structure — well-mixed, inactive" instead of its
-plain name), and the widget's registry label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
+plain name; since M11b E2 every section with advanced parameters —
+Matching, Structure, Movement, Dynamics — ends its widgets with a
+collapsed "Advanced settings" expander, whose header reads "Advanced
+settings — N changed: …" when any folded value differs from its
+default, so a folded widget's path names its fold), and the widget's
+registry label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
 session that writes the instructions — never from assumptions about
 typical Streamlit apps. Known traps, learned the hard way: this app has
 NO sidebar (the Scenario dropdown sits at the top of the main area), and
 that dropdown lists scenarios by their `display_name` — so name the
 display title the owner will actually see (e.g. "Cooperation Survives in
 Clusters"), with the machine name (`spatial_reciprocity`) at most in
-parentheses.
+parentheses. Never project shorthand in anything addressed to the
+owner (owner request 2026-09-04): not "the flagship", not "the spatial
+reciprocity scenario", not a bare machine name — the DECISIONS log's
+internal vocabulary is translated to the dropdown title before it
+reaches an instruction, and run lengths are stated as the exact
+"Generations" value to leave or set, never "run it for N generations"
+loosely.
 
 ## Hard rules
 
@@ -348,10 +359,22 @@ the donation_game_threshold fixed_n contradiction reported as #179(d)
 gap DISCHARGED; zero re-recordings, zero new goldens; 1210 tests). A
 validation-feedback fix followed (2026-09-03, #180): stable
 section-expander keys, so the inert/live label swap no longer
-collapses an open pane mid-edit.
-**The next implementation effort is Phase E2** (sub-prompts E2–E5:
-disclosure, live-run continuity, layout painter, close-out; Task 0
-facts for E2 — nested expanders legal-but-discouraged in Streamlit
-1.58, expander `on_change="rerun"`/`.open` available — are in #179(a)).
+collapses an open pane mid-edit. Phase E2 — the disclosure axis —
+landed 2026-09-03 (DECISIONS #181 pre-drafting rulings + #182 build
+record; the registry `advanced` flag on exactly sixteen entries,
+pinned as an exact set; the per-section "Advanced settings" nested
+keyed expander after the everyday widgets with its
+non-default-reporting header, greying and inline advisories live
+inside through the factored `_panel_widget` call; the #179(d)
+carry-in resolved by the Structure §12 "Expected matches per agent
+per generation" readout on the extracted `expected_matches_per_agent`
+that the calibration report and A1 consume too; 1.58's expander has
+no `help=`, so the fold's explanation is its first line; zero
+re-recordings, zero new goldens; 1240 tests).
+**The next implementation effort is Phase E3** (sub-prompts E3–E5:
+live-run continuity per ruling 6 with the Rule 7 toggle-classification
+report, the layout painter, close-out; the E5 sweep carries the held
+items #177(f3)/(f4), the async well-mixed round_robin calibration
+branch (#181), and DESIGN §4.1's stale "radio" wording (#182(f4))).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

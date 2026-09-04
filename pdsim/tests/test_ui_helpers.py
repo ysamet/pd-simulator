@@ -1247,6 +1247,119 @@ class TestSectionSummaryLabel:
             assert label == f"Movement — {helpers._SUMMARY_CAUSES[note]}"
 
 
+DYNAMICS_ADVANCED = (
+    "dynamics.selection_tournament_k",
+    "dynamics.selection_elite_fraction",
+    "dynamics.selection_threshold_multiplier",
+    "dynamics.accounting_window",
+    "dynamics.accounting_discount",
+    "dynamics.engagement_cost",
+    "dynamics.reproduction_overhead",
+    "dynamics.capital_return_rate",
+    "dynamics.boundary_order",
+    "dynamics.moran_weight_birth_death",
+    "dynamics.moran_weight_death_birth",
+)
+"""The Dynamics fold's eleven keys in registry order (#181 R1)."""
+
+
+class TestAdvancedKeys:
+    """advanced_keys: the fold's contents per section (M11b Phase E2, #181)."""
+
+    def test_sixteen_keys_across_four_sections_in_registry_order(self) -> None:
+        """Matching 1, Structure 3, Movement 1, Dynamics 11 — registry order."""
+        assert helpers.advanced_keys("Matching") == ("matching.encounter_mode",)
+        assert helpers.advanced_keys("Structure") == (
+            "structure.birth_decay",
+            "structure.placement_contest",
+            "structure.interaction_decay",
+        )
+        assert helpers.advanced_keys("Movement") == ("movement.decay",)
+        assert helpers.advanced_keys("Dynamics") == DYNAMICS_ADVANCED
+        folded = ("Matching", "Structure", "Movement", "Dynamics")
+        assert sum(len(helpers.advanced_keys(section)) for section in folded) == 16
+
+    def test_sections_without_advanced_keys_answer_empty(self) -> None:
+        """Game, Match, Population, Output, and Run have no fold."""
+        for section in ("Game", "Match", "Population", "Output", "Run"):
+            assert helpers.advanced_keys(section) == ()
+
+
+class TestAdvancedFoldLabel:
+    """advanced_fold_label: the header names every non-default folded value (#181 R3)."""
+
+    def test_all_default_is_the_plain_label(self) -> None:
+        """Registry defaults everywhere → the bare header in every section."""
+        values = helpers.default_widget_values()
+        for section in ("Matching", "Structure", "Movement", "Dynamics"):
+            assert helpers.advanced_fold_label(section, values) == "Advanced settings"
+
+    def test_one_change_names_the_registry_display_name(self) -> None:
+        """The exact R3 string, with the registry label verbatim."""
+        values = {**helpers.default_widget_values(), "dynamics.boundary_order": "birth_first"}
+        assert (
+            helpers.advanced_fold_label("Dynamics", values)
+            == "Advanced settings — 1 changed: Boundary order = birth_first"
+        )
+
+    def test_two_changes_count_and_list_in_registry_order(self) -> None:
+        """Two changes → count 2, both listed in REGISTRY order.
+
+        Capital return rate registers before Boundary order, so it leads
+        regardless of which was edited first.
+        """
+        values = {
+            **helpers.default_widget_values(),
+            "dynamics.boundary_order": "birth_first",
+            "dynamics.capital_return_rate": 0.02,
+        }
+        assert helpers.advanced_fold_label("Dynamics", values) == (
+            "Advanced settings — 2 changed: Capital return rate (r) = 0.02, "
+            "Boundary order = birth_first"
+        )
+
+    def test_a_missing_key_counts_as_unchanged(self) -> None:
+        """First paint before the lookahead: absent keys are not 'changed'."""
+        assert helpers.advanced_fold_label("Dynamics", {}) == "Advanced settings"
+        partial = {"dynamics.boundary_order": "birth_first"}
+        assert (
+            helpers.advanced_fold_label("Dynamics", partial)
+            == "Advanced settings — 1 changed: Boundary order = birth_first"
+        )
+
+    def test_a_float_equal_to_its_default_is_unchanged(self) -> None:
+        """A float typed as the default's value compares equal (0.5 == 0.5; 3.0 == 3)."""
+        values = {
+            "dynamics.accounting_discount": 0.5,
+            "dynamics.selection_tournament_k": 3.0,
+            "dynamics.engagement_cost": 0.0,
+        }
+        assert helpers.advanced_fold_label("Dynamics", values) == "Advanced settings"
+
+    def test_floats_render_with_the_panels_number_format(self) -> None:
+        """Values print as the widget shows them — the panel's %.4g for floats."""
+        values = {"dynamics.capital_return_rate": 0.02}
+        assert (
+            helpers.advanced_fold_label("Dynamics", values)
+            == "Advanced settings — 1 changed: Capital return rate (r) = 0.02"
+        )
+        assert helpers.advanced_fold_label("Structure", {"structure.birth_decay": 0.25}) == (
+            "Advanced settings — 1 changed: Birth decay (β) = 0.25"
+        )
+
+    def test_moran_scenario_loads_as_two_changed(self) -> None:
+        """The one shipped scenario with non-default advanced values (Task 0(d)).
+
+        'Async: Mixed Moran Rules' loads both Moran weights off their
+        defaults, so its Dynamics fold names both as loaded.
+        """
+        values = helpers.widget_values_from_config(get_scenario_info("moran_random_mix").config)
+        assert helpers.advanced_fold_label("Dynamics", values) == (
+            "Advanced settings — 2 changed: Moran weight: birth-death = 0.8, "
+            "Moran weight: death-birth = 0.2"
+        )
+
+
 class TestOutputSectionLoads:
     """#172(f6)/#178 C1: config.output flattens into the widget values."""
 

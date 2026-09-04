@@ -79,3 +79,48 @@ class TestWriter:
         """What is written (LF-normalized) is exactly what was generated."""
         target = write_parameters_doc(tmp_path / "PARAMETERS.md")
         assert target.read_text(encoding="utf-8") == generate_parameters_markdown()
+
+
+DISCLOSURE_BULLET = (
+    "- **Disclosure:** advanced setting — the app folds it under "
+    '"Advanced settings" in its section; its default is the canonical choice'
+)
+"""The verbatim mark a flagged entry carries (M11b Phase E2, DECISIONS #181 R6)."""
+
+
+def _entry_block(document: str, key: str) -> str:
+    """Cut one parameter's block out of the generated document.
+
+    Args:
+        document: The generated markdown.
+        key: The registry key whose ``####`` block to return.
+
+    Returns:
+        The text from that entry's heading up to the next ``####`` heading.
+    """
+    _, after = document.split(f"#### `{key}`", maxsplit=1)
+    return after.split("####", maxsplit=1)[0]
+
+
+class TestDisclosureMark:
+    """Flagged entries carry the Disclosure bullet; unflagged ones do not."""
+
+    def test_flagged_entry_carries_the_bullet(self) -> None:
+        """An advanced key's block holds the verbatim bullet in its metadata list."""
+        document = generate_parameters_markdown()
+        block = _entry_block(document, "dynamics.boundary_order")
+        assert DISCLOSURE_BULLET in block
+        # In the metadata list — after the Default line, before the prose.
+        assert block.index("- **Default:**") < block.index(DISCLOSURE_BULLET)
+
+    def test_unflagged_entry_carries_no_bullet(self) -> None:
+        """An everyday key (the default rule's own dial) is unmarked."""
+        document = generate_parameters_markdown()
+        assert DISCLOSURE_BULLET not in _entry_block(document, "dynamics.selection_beta")
+        assert DISCLOSURE_BULLET not in _entry_block(document, "match.continuation_probability")
+
+    def test_bullet_count_equals_the_flagged_count(self) -> None:
+        """Exactly one bullet per flagged registry entry, no more."""
+        document = generate_parameters_markdown()
+        flagged = sum(1 for spec in all_specs() if spec.advanced)
+        assert document.count(DISCLOSURE_BULLET) == flagged == 16

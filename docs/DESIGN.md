@@ -942,7 +942,13 @@ top, parameters, live plots below):
    are greyed out (never hidden) with a tooltip explaining why (#34). The
    same pattern keys `matching.opponents_per_agent` off the *matcher*
    widget's current value: k is greyed while round_robin is selected (#57).
-   The greying rules live in the Streamlit-free `ui/helpers.py`.
+   The greying rules live in the Streamlit-free `ui/helpers.py`. The
+   novice/advanced axis is a registry `advanced` flag rendered as a
+   per-section "Advanced settings" expander — collapsed but present, after
+   the section's everyday widgets, greying live inside — whose header names
+   any folded value that differs from its registry default ("Advanced
+   settings — 1 changed: Boundary order = birth_first"); orthogonal to the
+   mode tabs (#158, #167, #181).
 4. **Run controls** — granularity (labelled "cycle" at the coarse level in
    tournament mode), playback delay, Run (disabled while the mix ≠ size),
    Stop (session-state flag checked per event).
@@ -994,8 +1000,14 @@ share one arithmetic and cannot disagree.
 
 Every tunable parameter and every strategy is declared exactly once in
 `config/registry.py` with: key, type, range/choices, default, display name,
-**plain-language description written for a non-expert**, and (optionally) a "learn
-more" note. From this registry we generate:
+**plain-language description written for a non-expert**, (optionally) a "learn
+more" note, and — since M11b Phase E2 (DECISIONS #167/#181) — a boolean
+`advanced` disclosure flag: metadata read ONLY by the app's per-section
+"Advanced settings" fold and the docs generator (which marks flagged
+entries in `docs/PARAMETERS.md`), never by validation, config assembly,
+persistence, or the engine; the flagged set is pinned exactly by a
+registry test, so widening or narrowing it is a deliberate edit. From this
+registry we generate:
 
 1. UI widgets with hover/click help text (Streamlit `help=`),
 2. the auto-generated `docs/PARAMETERS.md` reference,
