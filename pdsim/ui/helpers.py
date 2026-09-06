@@ -14,8 +14,9 @@ parameter has everywhere.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import NamedTuple
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import ValidationError
 
@@ -26,7 +27,20 @@ from pdsim.config.experiment import (
     resolve_senescence_factor,
 )
 from pdsim.config.registry import ParameterSpec, ParamValue, all_specs, get_spec
+from pdsim.core.events import (
+    CycleFinished,
+    Event,
+    GenerationFinished,
+    MatchFinished,
+    RoundPlayed,
+    RunFinished,
+)
 from pdsim.core.timeseries import RunTimeseries
+
+if TYPE_CHECKING:
+    # A type-only import: the recorder lives in ``pdsim/io`` and this module
+    # only ever HOLDS one, so the import is not needed at run time.
+    from pdsim.io.results import RunRecorder
 
 # Registry-key prefix -> ExperimentConfig section name. "run" is special:
 # its parameters live at the top level of the config (DECISIONS #34).
@@ -1157,8 +1171,8 @@ def widget_values_from_config(config: ExperimentConfig) -> dict[str, ParamValue]
     ]
     values: dict[str, ParamValue] = {}
     for model in models:
-        for field, key in type(model)._registry_keys.items():
-            values[key] = getattr(model, field)
+        for field_name, key in type(model)._registry_keys.items():
+            values[key] = getattr(model, field_name)
     # The two derived defaults (M10a): a validated config always holds the
     # RESOLVED plain numbers (hard rule 8), so "auto" is not stored. The
     # loss-free inverse: a stored value that equals what the auto rule
@@ -1530,3 +1544,139 @@ def should_redraw(now: float, last_redraw: float, delay: float, floor: float) ->
         the previous redraw.
     """
     return now - last_redraw >= max(delay, floor)
+
+
+# ---------------------------------------------------------------------------
+# The live run holder (M11b Phase E3, DECISIONS #168/#183/#184).
+#
+# The app used to consume the whole event stream inside one script run — an
+# in-script `for event in engine.run(...)` loop that any widget interaction
+# killed (#54). Since Phase E3 the run lives in session memory instead: this
+# holder carries the paused engine generator between script passes, and each
+# pass advances it by exactly one period (#183 R3), repaints with the display
+# toggles' CURRENT values, and schedules the next pass. Streamlit-free on
+# purpose (#38): the advance is a pure function of the holder, so the loop's
+# one-period contract is unit-tested without an app.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LiveRun:
+    """One run in progress, kept in session state between script passes.
+
+    A plain dataclass (introduced here as the project's first mutable one:
+    ``@dataclass`` writes ``__init__`` from the field list, and without
+    ``frozen=True`` the fields stay assignable, which is what a holder that
+    advances every pass needs). The engine's generator object is paused at
+    a ``yield`` between passes, so the run resumes exactly where it stopped
+    — nothing is pickled or copied; session state just keeps the reference.
+
+    Attributes:
+        events: The engine's event generator, created at the Run click with
+            the granularity bound then (#35 — hence #183 R1).
+        config: The config FROZEN at the Run click; the recorder writes
+            this one (hard rule 8), whatever the panel shows later.
+        mode: ``config.mode`` — the mode of the run being DISPLAYED, which
+            is what the time-scope greying keys off (#183 R4).
+        timeseries: The live accumulator every period folds into.
+        recorder: The open recorder while "Record this run" was on at the
+            click; ``None`` otherwise.
+        periods: Period events consumed so far (generations, cycles, or
+            async recording periods).
+        fine_events: ``RoundPlayed``/``MatchFinished`` events consumed so
+            far — the #39 progress-caption counter.
+        finished: True once ``RunFinished`` has arrived (or the stream is
+            exhausted); the finishing pass then finalises and clears the
+            holder.
+        delay: The playback-delay slider as read on the latest pass — the
+            pause before the next pass is scheduled (#183 R3).
+        last_redraw: ``time.monotonic()`` at the last chart REBUILD — the
+            #94 throttle's clock, kept across passes.
+        view: The (per_round, whole_game) pair the cached figures were
+            built with; a toggle flip forces a rebuild on its own pass.
+        figures: The last-built chart figures by role (the app's redraw
+            cache — re-emitted unchanged on passes inside the #94 throttle
+            window, so the browser keeps the previous frame).
+    """
+
+    events: Iterator[Event]
+    config: ExperimentConfig
+    mode: str
+    timeseries: RunTimeseries
+    recorder: RunRecorder | None
+    periods: int = 0
+    fine_events: int = 0
+    finished: bool = False
+    delay: float = 0.0
+    last_redraw: float = 0.0
+    view: tuple[bool, bool] | None = None
+    figures: dict[str, object] = field(default_factory=dict)
+
+
+def advance_one_period(
+    live: LiveRun,
+    on_progress: Callable[[int], None] | None = None,
+    progress_every: int = 200,
+) -> GenerationFinished | CycleFinished | None:
+    """Pull events until one period completes — the one-period-per-pass contract.
+
+    Every event pulled is folded into the live timeseries and, when
+    recording, the recorder — so the PERSISTED record is exactly what an
+    uninterrupted headless run records, whatever the passes do around it
+    (#183 R4, hard rule 8). Fine-grained events only advance the progress
+    callback, every ``progress_every`` of them (#39's cadence). The pull
+    stops at the first period-level event (``GenerationFinished`` /
+    ``CycleFinished``) or at ``RunFinished``, which marks the holder
+    finished; the generator stays paused for the next pass.
+
+    Args:
+        live: The run in progress; mutated in place (counters, the
+            finished flag, the folded series).
+        on_progress: Called with the running fine-event count every
+            ``progress_every`` fine events — the app's caption writer.
+        progress_every: The fine-event cadence for ``on_progress``.
+
+    Returns:
+        The period event that completed this pass, or ``None`` when the
+        stream finished instead (``live.finished`` is then True).
+    """
+    for event in live.events:
+        live.timeseries.add(event)
+        if live.recorder is not None:
+            live.recorder.add(event)
+        if isinstance(event, RoundPlayed | MatchFinished):
+            live.fine_events += 1
+            if on_progress is not None and live.fine_events % progress_every == 0:
+                on_progress(live.fine_events)
+        elif isinstance(event, GenerationFinished | CycleFinished):
+            live.periods += 1
+            return event
+        elif isinstance(event, RunFinished):
+            live.finished = True
+            return None
+    # A stream that ends without RunFinished cannot come from the engine
+    # (it always closes with one); treat exhaustion as finished so the
+    # holder can never spin forever.
+    live.finished = True
+    return None
+
+
+def time_scope_greyed(displayed_mode: str | None) -> bool:
+    """Whether the "Time scope" toggle is greyed out right now (#183 R4).
+
+    Keyed off the mode of the run being DISPLAYED — the live run while one
+    is in progress, else the persisted last run — never off the panel's
+    current ``run.mode`` widget: a mode-tab switch changes what the NEXT
+    run will be, not what the charts on screen show. Before any run there
+    is nothing displayed, so the toggle is live (it governs no chart yet).
+    Tournament scores never reset, so their plain series are already
+    whole-game figures and the toggle has nothing to do (#45).
+
+    Args:
+        displayed_mode: ``"evolution"`` / ``"tournament"`` for the run on
+            screen, or ``None`` when no run is displayed.
+
+    Returns:
+        True exactly when a tournament run is displayed.
+    """
+    return displayed_mode == "tournament"

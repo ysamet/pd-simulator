@@ -374,6 +374,27 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     now consume too. Reported: 1.58's expander has no `help=`, so the
     fold's one explanation renders as its first line. Zero
     re-recordings, zero new goldens; 1240 tests passing.
+    ✅ **M11b Phase E3 landed 2026-09-05** (DECISIONS #183 pre-drafting
+    rulings, #184 build record): live-run display continuity (#168,
+    spec ruling 6) — the run no longer lives inside one script run: a
+    `LiveRun` holder in session state carries the paused engine
+    generator, the config frozen at the Run click, the live series, and
+    the open recorder; each script pass advances exactly one period,
+    repaints with the toggles' CURRENT values, and reruns the script
+    (full-script `st.rerun`, scheduled last in `main`; the fragment
+    measured at 2.8 vs 70 ms per pass on the probe and rejected because
+    stock AppTest cannot drive a fragment-scoped pass and a fragment
+    cannot reschedule itself from a full-script pass). The Rule 7
+    classification: granularity BOUND AT RUN START (greyed mid-run with
+    its note — engine.py binds it at generator creation), playback delay
+    PAINT CADENCE, score view and time scope PAINT CADENCE as pure
+    re-renderings retroactive both ways; none is recording resolution,
+    and the persisted record is untouched by all four. Time-scope
+    greying now keys off the DISPLAYED run's mode; Run disabled while
+    running; Stop honoured once per pass with the #53 discard preserved;
+    the #94 throttle kept as cached-figure re-emission. Real app
+    measured at ≈ 0.17–0.23 s per pass. Zero re-recordings, zero new
+    goldens; 1255 tests passing.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

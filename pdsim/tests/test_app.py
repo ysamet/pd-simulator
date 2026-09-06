@@ -10,16 +10,21 @@ lives in the plain helpers and is tested without Streamlit.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
+import pandas as pd
 import pytest
+import streamlit
 from streamlit.testing.v1 import AppTest
 
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core import engine
 from pdsim.core.strategies import all_strategies
+from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, list_runs, load_run
+from pdsim.run import main as cli_main
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "ui" / "app.py")
 
@@ -118,7 +123,14 @@ class TestTinyRunCompletes:
     """A minimal custom run flows through the live loop to the summary."""
 
     def test_run_button_produces_a_completed_run(self) -> None:
-        """4 agents, 2 generations, 5-round matches: success + summary."""
+        """4 agents, 2 generations, 5-round matches: success + summary.
+
+        The #39 tiny-live-run pin, re-expressed on the E3 per-pass loop
+        (#184) without a change: the loop schedules each pass with
+        ``st.rerun()`` and AppTest's runner follows that chain to its end,
+        so the one ``run()`` after the click still drives the whole run —
+        three passes here — to the success message.
+        """
         app = _fresh_app()
         app.selectbox(key="scenario_choice").select("Custom")
         app.run()
@@ -357,8 +369,6 @@ class TestResultsBrowser:
         that dies mid-stream. The try/finally must still discard the
         partial folder so no ghost is left behind.
         """
-        from collections.abc import Iterator
-
         from pdsim.core import engine as core_engine
 
         real_run = core_engine.run
@@ -749,3 +759,349 @@ class TestAdvancedFold:
             "Advanced settings — 2 changed: Moran weight: birth-death = 0.8, "
             "Moran weight: death-birth = 0.2"
         ) in _fold_labels(app)
+
+
+LIVE_RUN_KEY = "_live_run"
+"""The app's session-state key for the run in progress (M11b Phase E3)."""
+
+
+@pytest.fixture
+def one_pass_per_run(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Make each ``AppTest.run()`` exactly ONE pass of the live loop.
+
+    The loop schedules its next pass with ``st.rerun()``, and AppTest's
+    runner follows a rerun chain to its end inside a single ``run()`` (which
+    is how the whole-run pin in :class:`TestTinyRunCompletes` drives a run
+    to completion in one call). Neutralising ``st.rerun`` here leaves every
+    other mechanism intact — the holder, the per-pass advance, the toggles
+    read fresh — so a test can flip a widget between passes.
+
+    Args:
+        monkeypatch: pytest's patcher (restores ``st.rerun`` afterwards).
+
+    Returns:
+        The list of keyword-argument dicts the loop passed to ``st.rerun``,
+        one entry per scheduled pass — so a test can assert nothing was
+        scheduled after a stop.
+    """
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(streamlit, "rerun", lambda **kwargs: calls.append(kwargs))
+    return calls
+
+
+def _prepare_tiny_evolution(app: AppTest, generations: int, record: bool = False) -> None:
+    """Point the panel at a 4-agent Custom evolution run and settle it.
+
+    Args:
+        app: The AppTest handle after its first run.
+        generations: The exact "Generations" value to set.
+        record: The "Record this run" checkbox value.
+    """
+    app.selectbox(key="scenario_choice").select("Custom")
+    app.run()
+    _set_tiny_population(app)
+    app.number_input(key="dynamics.generations").set_value(generations)
+    app.number_input(key="match.rounds_per_match").set_value(5)
+    app.slider(key="playback_delay").set_value(0.0)
+    app.checkbox(key="record_run").set_value(record)
+    app.run()
+    assert not app.exception
+
+
+def _prepare_tiny_tournament(app: AppTest, cycles: int) -> None:
+    """Point the panel at a 4-agent Custom TOURNAMENT run and settle it.
+
+    Args:
+        app: The AppTest handle after its first run.
+        cycles: The exact "Tournament cycles" value to set.
+    """
+    app.selectbox(key="scenario_choice").select("Custom")
+    app.run()
+    _set_tiny_population(app)
+    app.number_input(key="match.rounds_per_match").set_value(5)
+    app.segmented_control(key="run.mode").set_value("tournament")
+    app.run()
+    app.number_input(key="run.tournament_cycles").set_value(cycles)
+    app.slider(key="playback_delay").set_value(0.0)
+    app.checkbox(key="record_run").set_value(False)
+    app.run()
+    assert not app.exception
+
+
+def _fold(events: Iterator[object]) -> RunTimeseries:
+    """Fold an uninterrupted headless event stream into a RunTimeseries.
+
+    Args:
+        events: An ``engine.run`` stream (its first event decides nothing;
+            the mode comes from the events themselves via the accumulator).
+
+    Returns:
+        The accumulator after every event.
+    """
+    first = next(events)
+    mode = "tournament" if type(first).__name__ == "CycleFinished" else "evolution"
+    series = RunTimeseries(mode=mode)
+    series.add(first)  # type: ignore[arg-type]
+    for event in events:
+        series.add(event)  # type: ignore[arg-type]
+    return series
+
+
+def _assert_series_equal(actual: RunTimeseries, expected: RunTimeseries) -> None:
+    """Assert two accumulators carry the same periods, compositions, and scores.
+
+    Args:
+        actual: The series the live loop accumulated.
+        expected: The series an uninterrupted headless run accumulated.
+    """
+    assert actual.periods == expected.periods
+    assert actual.composition == expected.composition
+    assert actual.mean_scores == expected.mean_scores
+    assert actual.mean_scores_per_round == expected.mean_scores_per_round
+    assert actual.running_mean_scores == expected.running_mean_scores
+    assert actual.running_mean_scores_per_round == expected.running_mean_scores_per_round
+    assert actual.total_scores == expected.total_scores
+    assert actual.cooperation_overall == expected.cooperation_overall
+    assert actual.final == expected.final
+
+
+def _captions(app: AppTest) -> list[str]:
+    """Every caption currently rendered.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        Caption texts in tree order.
+    """
+    return [item.value for item in app.caption]
+
+
+class TestLiveRunContinuity:
+    """The E3 per-pass live loop (#168; #183 rulings; #184 build record).
+
+    One ``app.run()`` per pass via the ``one_pass_per_run`` fixture; the
+    whole-chain pin (a single ``run()`` driving a run to completion) is
+    :class:`TestTinyRunCompletes`, re-expressed unchanged on the new loop.
+    """
+
+    def test_toggles_flipped_mid_run_yield_the_headless_series(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """(i)/(iii) Score view after pass 2, time scope after pass 3: same series.
+
+        Each pass advances exactly one period, a flip never resets the
+        count, and the finished series equals an uninterrupted headless
+        run of the frozen config and seed.
+        """
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=4)
+        app.button(key="run_button").click()
+        app.run()  # pass 1: the click's own script run advances period 1
+        assert not app.exception
+        live = app.session_state[LIVE_RUN_KEY]
+        assert live.periods == 1
+        config = live.config
+        app.run()  # pass 2
+        assert app.session_state[LIVE_RUN_KEY].periods == 2
+        app.radio(key="score_view").set_value("per_round")
+        app.run()  # pass 3, per-round view
+        assert not app.exception
+        assert app.session_state[LIVE_RUN_KEY].periods == 3
+        app.radio(key="time_scope").set_value("whole_game")
+        app.run()  # pass 4, whole-game scope
+        assert not app.exception
+        assert app.session_state[LIVE_RUN_KEY].periods == 4
+        assert app.session_state[LIVE_RUN_KEY].view == (True, True)
+        app.run()  # pass 5: RunFinished — finalise
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        assert len(app.success) == 1
+        assert "4 generations" in app.success[0].value
+        _assert_series_equal(
+            app.session_state["last_run"]["timeseries"], _fold(iter(engine.run(config)))
+        )
+        assert len(one_pass_per_run) == 4  # passes 1-4 scheduled a successor; 5 did not
+
+    def test_recorded_folder_equals_a_headless_cli_recording(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        one_pass_per_run: list[dict[str, object]],
+    ) -> None:
+        """(ii) With "Record this run" on, the period tables equal the CLI's."""
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path / "app"))
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=3, record=True)
+        app.button(key="run_button").click()
+        app.run()  # pass 1
+        app.radio(key="score_view").set_value("per_round")
+        app.run()  # pass 2
+        app.radio(key="time_scope").set_value("whole_game")
+        app.run()  # pass 3
+        app.run()  # pass 4: finalise
+        assert not app.exception
+        assert any("Recorded to" in text for text in _captions(app))
+        cards = list_runs(tmp_path / "app")
+        assert len(cards) == 1
+        folder = tmp_path / "app" / str(cards[0]["run_id"])
+        # The same config + seed through `python -m pdsim.run`.
+        cli_out = str(tmp_path / "cli")
+        assert cli_main([str(folder / "config.yaml"), "--out", cli_out, "--quiet"]) == 0
+        cli_folders = [p for p in (tmp_path / "cli").iterdir() if p.is_dir()]
+        assert len(cli_folders) == 1
+        for name in ("timeseries.parquet", "cooperation.parquet"):
+            pd.testing.assert_frame_equal(
+                pd.read_parquet(folder / name), pd.read_parquet(cli_folders[0] / name)
+            )
+
+    def test_stop_after_pass_two_halts_and_nothing_advances_after(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        one_pass_per_run: list[dict[str, object]],
+    ) -> None:
+        """(iv) Stop is honoured on the next pass; the recording is discarded (R5)."""
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=6, record=True)
+        app.button(key="run_button").click()
+        app.run()  # pass 1
+        app.run()  # pass 2
+        assert app.session_state[LIVE_RUN_KEY].periods == 2
+        assert any(p.is_dir() for p in tmp_path.iterdir())  # the open recording
+        app.button(key="stop_button").click()
+        app.run()  # pass 3 sees the flag: halts before advancing
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        assert any("Run stopped" in item.value for item in app.warning)
+        last = app.session_state["last_run"]
+        assert last["note"].endswith("stopped early")
+        assert last["timeseries"].periods == [0, 1]
+        assert not any(p.is_dir() for p in tmp_path.iterdir())  # discarded, not ghosted
+        assert any("partial folder was cleaned up" in text for text in _captions(app))
+        scheduled = len(one_pass_per_run)
+        app.run()  # a further pass advances nothing
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        assert app.session_state["last_run"]["timeseries"].periods == [0, 1]
+        assert len(one_pass_per_run) == scheduled
+        assert not any("cleaned up" in item.value for item in app.info)  # no stray banner
+
+    def test_run_disabled_and_granularity_greyed_while_running(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """(v)/(vi) Run is disabled and granularity greyed mid-run; both live after.
+
+        The click's own script run paints the controls BEFORE the holder
+        exists (the button's return value is what starts the run), so that
+        one pass still shows them pre-run; the immediately scheduled second
+        pass greys them (#184 finding f3). The finishing pass paints them
+        live again in the SAME pass (the row is filled after the pass).
+        """
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=3)
+        assert app.button(key="run_button").disabled is False
+        assert app.selectbox(key="granularity").disabled is False
+        app.button(key="run_button").click()
+        app.run()  # pass 1: the click pass — controls painted before the holder
+        assert app.session_state[LIVE_RUN_KEY].periods == 1
+        assert app.button(key="run_button").disabled is False  # the one-pass lag (f3)
+        app.run()  # pass 2
+        assert app.button(key="run_button").disabled is True
+        granularity = app.selectbox(key="granularity")
+        assert granularity.disabled is True
+        assert "applies from the next Run" in granularity.proto.help
+        assert granularity.value == "generation"
+        app.run()  # pass 3
+        assert app.button(key="run_button").disabled is True
+        app.run()  # pass 4: finalise — and the row already shows the idle state
+        assert LIVE_RUN_KEY not in app.session_state
+        assert app.button(key="run_button").disabled is False
+        granularity = app.selectbox(key="granularity")
+        assert granularity.disabled is False
+        assert "applies from the next Run" not in granularity.proto.help
+
+    def test_mode_switch_and_scenario_load_mid_run_leave_the_run_untouched(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """(vii)/R4: a run.mode switch neither stops the run nor changes the series.
+
+        The time-scope toggle stays live (an evolution run is displayed),
+        the caption still counts generations, and a scenario load mid-run
+        changes the panel only — the frozen config keeps its seed.
+        """
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=5)
+        app.button(key="run_button").click()
+        app.run()  # pass 1
+        seed = app.session_state[LIVE_RUN_KEY].config.seed
+        app.segmented_control(key="run.mode").set_value("tournament")
+        app.run()  # pass 2, panel on the tournament tab
+        assert not app.exception
+        live = app.session_state[LIVE_RUN_KEY]
+        assert live.periods == 2
+        assert live.mode == "evolution"
+        assert live.timeseries.mode == "evolution"
+        assert "generation 2 finished" in _captions(app)
+        assert app.radio(key="time_scope").disabled is False
+        app.selectbox(key="scenario_choice").select("Defectors' Paradise")
+        app.run()  # pass 3, a scenario loaded into the panel
+        assert not app.exception
+        live = app.session_state[LIVE_RUN_KEY]
+        assert live.periods == 3
+        assert live.config.seed == seed
+        assert app.number_input(key="composition.always_defect").value == 20  # the panel moved
+
+    def test_time_scope_greying_follows_the_displayed_finished_run(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """(vii) A finished evolution run under the tournament tab keeps the toggle live.
+
+        And the converse: a finished tournament run under the evolution tab
+        keeps it greyed — the #45 corner keyed to the widget, corrected.
+        """
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=2)
+        app.button(key="run_button").click()
+        app.run()
+        app.run()
+        app.run()  # finalise
+        assert LIVE_RUN_KEY not in app.session_state
+        app.segmented_control(key="run.mode").set_value("tournament")
+        app.run()
+        assert not app.exception
+        assert app.radio(key="time_scope").disabled is False
+        assert "last_run" in app.session_state
+        # The converse, on a fresh session.
+        app = _fresh_app()
+        _prepare_tiny_tournament(app, cycles=2)
+        assert app.radio(key="time_scope").disabled is False  # nothing displayed yet
+        app.button(key="run_button").click()
+        app.run()  # the click pass: the row painted before the holder (f3)
+        app.run()  # pass 2
+        assert app.radio(key="time_scope").disabled is True  # a tournament is displayed
+        app.run()  # finalise
+        assert LIVE_RUN_KEY not in app.session_state
+        app.segmented_control(key="run.mode").set_value("evolution")
+        app.run()
+        assert not app.exception
+        assert app.radio(key="time_scope").disabled is True
+
+    def test_tournament_advances_by_cycle(self, one_pass_per_run: list[dict[str, object]]) -> None:
+        """(viii) One cycle per pass, then the cycles-elapsed message."""
+        app = _fresh_app()
+        _prepare_tiny_tournament(app, cycles=3)
+        app.button(key="run_button").click()
+        app.run()
+        assert "cycle 1 finished" in _captions(app)
+        app.run()
+        assert "cycle 2 finished" in _captions(app)
+        app.run()
+        assert "cycle 3 finished" in _captions(app)
+        assert app.session_state[LIVE_RUN_KEY].periods == 3
+        app.run()
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        assert "3 cycles" in app.success[0].value
+        assert app.session_state["last_run"]["timeseries"].mode == "tournament"

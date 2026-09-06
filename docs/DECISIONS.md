@@ -5916,3 +5916,272 @@ field list gains `advanced` and §4.1 item 3 the disclosure sentence
 validation-precision paragraph (the fold sentence) and current-phase
 paragraph (E2 landed; next E3); ROADMAP's E2 status line; the spec's
 status line only; `PARAMETERS.md` regenerated (16 Disclosure bullets).
+
+**#183 — 2026-09-04 — Phase E3 pre-drafting rulings (design layer): the
+granularity toggle is greyed while a run is in progress if the engine
+binds it at generator creation, with NO engine change — the #168
+"stays-pre-run" outcome (R1); Task 0 probes full-script rerun AND
+fragment under 1.58, measures both, and chooses the fragment only if
+AppTest drives it pass by pass and the four toggles sit consistently
+beside the charts (R2); one period per pass, the #39 200-event caption
+cadence inside the pass, the delay as the pause before scheduling (R3);
+the mid-run contract — parameters editable but inert until the next Run
+against the config frozen at the Run click (hard rule 8), Run disabled
+while running, scenario loads and mode switches leave the run untouched,
+the time-scope greying keyed off the DISPLAYED run's mode rather than the
+panel's run.mode, Stop checked per pass, other app tabs keep the run
+advancing (R4); Stop's recorder behaviour read from source and preserved
+exactly (R5); DESIGN §4.1 bullets 4–5 amended in-session while bullet 3's
+"radio" (#182(f4)) stays held for E5, alongside #177(f3)/(f4), the async
+well-mixed calibration branch (#181), #182(f7), and the calibration
+guide's two stale sentences (R6) (M11b Phase E3; spec ruling 6 / #168,
+#35, #39, #44, #45, #178–#182).** R1: #35 makes granularity a plain
+argument to engine.run; delivering #168's "finer detail from the switch
+point onward" would need a per-period re-read inside engine.py, which
+spec ruling 6 forbids; #168 pre-named the alternative. Option (b), a
+draw-neutral holder read per period, REJECTED as an engine edit under a
+display-only phase. Recorded now, so the classification report's
+granularity line is not mistaken for a shortcut: the PERSISTED record is
+untouched by all four toggles regardless. R2: a full-script rerun
+rebuilds the entire generated panel once per period where today one
+script pass hosts the whole run; the fragment avoids that but changes
+where widgets must live and what AppTest can drive — hence measure, then
+choose by the two criteria. R3: the period is the engine's natural
+quantum (#35 buffers fine events per period). R4: decoupling the run from
+the page creates cases the in-script loop never met; ruled once here so
+the build does not improvise. The time-scope greying corner pre-existed
+for finished runs under a switched tab (#45 keyed "tournament mode" to
+the widget); keying it to the displayed run fixes both. R5: undocumented
+in every source read; preserve, do not redesign.
+
+**#184 — 2026-09-05 — M11b Phase E3 BUILT: live-run display continuity —
+the `LiveRun` holder in session state, one period per full-script pass
+scheduled by `st.rerun` last in `main` (the fragment measured and
+rejected on the AppTest criterion), the four toggles read fresh every
+pass, granularity greyed mid-run as BOUND AT RUN START, the time-scope
+greying keyed to the DISPLAYED run's mode, Run disabled while running,
+Stop honoured once per pass with the #53 discard preserved, the #94
+throttle kept as cached-figure re-emission — #183 as ruled, with the
+classification report in (c) and findings f1–f11.**
+(a) TASK 0 FINDINGS, Streamlit 1.58.0 (verified against the installed
+source and two probes). (i) THE OLD LOOP: `_run_live` in app.py ran
+`for event in engine.run(config, granularity)` inside one script run;
+every event went to `timeseries.add` and `recorder.add`; fine events
+advanced the caption every `PROGRESS_EVERY = 200`; the chart
+placeholders were `chart_left`/`chart_right`/`chart_coop`, the
+`_economy_placeholders` trio, three metric placeholders, and
+`grid_live`; period redraws were throttled by `helpers.should_redraw`
+(#94) and given a fresh key per redraw; Stop was `stop_requested`,
+set by the Stop button's `_request_stop` callback and checked per
+event; the last run lived under `last_run` as `{timeseries, note,
+carrying_capacity}`, and the post-run summary came from
+`_final_summary_area` → `charts.final_summary_rows(timeseries.final)`
+plus `cooperation_pair_rows`. (ii) GRANULARITY IS BOUND AT GENERATOR
+CREATION — engine.py lines 141–146 (evolution), 206–211 (async),
+261–266 (tournament), identical shape: `on_match = None` / `if
+granularity != "generation":` / `def on_match(result): buffer.extend(
+_match_events(result, granularity))` — the closure captures the
+argument once, before the period loop, and nothing inside the loop
+reads it again; R1's expected outcome CONFIRMED. (iii) THE WIDGETS, all
+in the Run lab's controls row below the parameter panel (columns
+[2, 2, 2, 2, 1, 1]): "Update granularity" selectbox `granularity`;
+"Playback delay (s)" slider `playback_delay`; "Score view" radio
+`score_view`; "Time scope" radio `time_scope`; "Run" button
+`run_button`; "Stop" button `stop_button`; "Record this run" checkbox
+`record_run` renders full-width below the row (it is not in a column).
+The time-scope greying read `values["run.mode"] == "tournament"` — the
+panel's mode strip — and the same flag labelled the coarse granularity
+"cycle". (iv) STOP AND THE RECORDER TODAY: `RunRecorder.__init__`
+writes `config.yaml` immediately; `discard()` is
+`_rmtree_robust(folder)`; the UI wrapped the loop in try/finally with
+a `settled` flag (#54) and write-ahead staged the sentence "The
+interrupted run was not recorded — its partial folder was cleaned up."
+at run start (#55). In live Streamlit the Stop click KILLED the script
+(#54) and the finally discarded; under AppTest the flag branch ran and
+discarded. Either way the folder is REMOVED and the sentence shown —
+preserved exactly. (v) THE R2 PROBE (temporary, never shipped — the
+#117/#130 precedent): a probe app with a registry-sized panel (every
+panel spec as a widget) and a run area advancing one period per pass,
+driven on the real `ScriptRunner`. Full-script `st.rerun` chain:
+8 passes, 70 ms wall per pass; pass by pass with `streamlit.rerun`
+neutralised: 46 ms per `at.run()`. Fragment with `st.rerun(scope=
+"fragment")`: 8 passes, 2.8 ms per pass; the run area's own Python
+was ≈ 1 ms in both. AppTest facts: (1) `ScriptRunner._run_script`
+loops on `rerun_exception_data`, so ONE `AppTest.run()` follows an
+`st.rerun()` chain to its end — the existing tiny-run pin drives the
+whole new loop in one call, and per-pass control in tests is a
+`monkeypatch` of `streamlit.rerun`; (2) stock AppTest's
+`LocalScriptRunner.run` builds `RerunData` with NO `fragment_id_queue`
+and a FRESH `MemoryFragmentStorage` per runner, so a fragment-scoped
+pass could be driven only by a patched runner (shared storage +
+injected queue) — criterion (i) FAILS on the public API; (3) a widget
+change between fragment passes DID reach the fragment on its next pass
+(the radio flip showed in the fragment's output); (4) a fragment
+cannot reschedule itself from a FULL-script pass —
+`_new_fragment_id_queue` raises `StreamlitAPIException` for
+`scope="fragment"` outside a fragment rerun (source, execution_
+control.py), and `scope="app"` would make every later pass a full run
+— so every mid-run interaction R4 requires (a scenario load, a
+mode-strip switch, any panel edit: all full-script runs) would strand
+the loop unless `run_every`, a frontend timer with no headless driver,
+took over; (5) `_on_script_finished` skips widget-state cleanup on a
+premature stop, so a pass ended by `st.rerun` deletes no widget state.
+VERDICT: full-script rerun, per R2's two criteria. (vi) SESSION STATE:
+`runner.enforceSerializableSessionState` defaults to False and
+`SafeSessionState` holds plain references — the generator (paused at a
+`yield`), the `RunTimeseries`, and the open `RunRecorder` survive
+across passes with no pickling anywhere; every live-run test proves
+it. (vii) ELEMENT IDENTITY (found while choosing chart keys): keyed
+widgets register with `key_as_main_identity` (selectbox, button — the
+key is the identity, so greying granularity mid-run keeps its value),
+but `plotly_chart` registers with `key_as_main_identity=False` and
+hashes `plotly_spec` into the id — a chart whose data changed is a NEW
+element to the browser whatever key it carries, torn down and remounted
+blank until painted; #94's hazard is therefore per rebuilt figure, not
+per fresh key, and the throttle stays (see (b)). (viii) MEASURED
+PER-PASS COST OF THE REAL APP (AppTest, the whole page each pass): tiny
+Custom 4-agent evolution, 20 generations — chain 166 ms/pass (21
+passes, 3.48 s), pass by pass median 224 ms (a fresh runner per
+`run()`); "Cooperation Survives in Clusters" at 10 generations —
+226 ms/pass, of which the engine is 35 ms/generation headless (≈ 190 ms
+page overhead: panel, grid preview, calibration report, browser, sweep
+tab); with ONE recorded run under runs/ the Results browser's per-pass
+`load_run` adds ≈ 25 ms (190 ms/pass on the tiny run).
+(b) AS-BUILT DECISIONS. Helpers (Streamlit-free): `LiveRun`, a mutable
+`@dataclass` — `events`, `config` (frozen at the click), `mode`,
+`timeseries`, `recorder`, `periods`, `fine_events`, `finished`, plus
+the app's paint state `delay`, `last_redraw`, `view`, `figures`;
+`advance_one_period(live, on_progress, progress_every)` pulls until
+the next period event or `RunFinished` (folding EVERY event into the
+timeseries and recorder, the #39 cadence through the callback) and
+returns the period event; `time_scope_greyed(displayed_mode)`. App:
+`LIVE_RUN_KEY = "_live_run"` (app state — never in
+`_preserve_hidden_widget_state`); `_start_live_run` opens the
+generator/accumulator/recorder; `_live_pass` is one pass — Stop
+checked first, then the advance, then the paint, then finish/stop;
+`_schedule_next_pass` is called LAST in `main` (after every tab), so
+the Results browser and Sweep tabs run each pass (R4, accepted);
+`_run_controls` renders the row into a container created ABOVE the
+charts and filled AFTER the pass, with the pass reading the toggles
+via `_toggle_values_from_state` (session state, filled from the
+browser before the script runs, the widgets' own defaults) — so the
+finishing and stopping passes paint Run re-enabled and granularity
+live without an extra rerun; `_build_figures`/`_paint_figures` split
+the old `_draw_charts` (kept as their composition for the post-run
+view and the browser); `_live_grid_figure`, `_draw_blocked_metrics`,
+`_finish_live_run`, `_abandon_live_run`, `_close_events`. THE #94
+THROTTLE SURVIVES as cached re-emission: `should_redraw` (unchanged,
+its five tests kept) decides whether a pass REBUILDS the figures; a
+pass inside the window re-emits `live.figures` unchanged (an identical
+spec is an identical element — the browser leaves it alone); a toggle
+flip (`view` differs), the finishing pass, and the stopping pass always
+rebuild; chart keys are stable per pass (`chart_*_0`, `live_grid_0`).
+Metrics and the progress caption refresh every pass (cheap, no
+remount). THE RUN NEEDS G + 1 PASSES: the finishing pass consumes
+`RunFinished` alone (peeking would compute a whole period at
+generation granularity). THE WRITE-AHEAD STAGING OF #55 IS GONE as
+write-ahead: staged at run start it would surface as a banner at the
+next pass's top; the sentence (`DISCARD_NOTE`) is now staged at Stop
+time inside `_live_pass` — a live script handling a flag at pass start,
+not a dying script's finally, so the #55 race no longer exists — and by
+`_abandon_live_run` on a crash (the existing dying-engine test passes
+unchanged) or on Streamlit's own `StopException` (the header's Stop, a
+session shutting down), caught in `main` so an open recorder is never
+left behind; `RerunException` (a widget click mid-pass) is deliberately
+NOT caught — the holder survives and the next pass continues. Widget
+help texts updated: granularity gains `GRANULARITY_RUNNING_NOTE` while
+running; score view says mid-run switching re-renders the live chart;
+time scope says greyed "while a tournament run is displayed"; playback
+delay says a change takes effect from the next refresh.
+(c) THE RULE 7 TOGGLE CLASSIFICATION (from source). Update
+granularity — BOUND AT RUN START: engine.py 141–146/206–211/261–266
+(above) capture the argument at generator creation; the widget is
+greyed mid-run with the note; a new choice applies from the next Run.
+Playback delay — PAINT CADENCE: read fresh each pass (`_toggle_values_
+from_state` → `live.delay`), consumed only by `_schedule_next_pass`'s
+sleep and `should_redraw`'s window; switchable both directions; touches
+no data. Score view — PAINT CADENCE (a pure re-rendering): `charts.
+mean_score_chart(timeseries, per_round=…)` reads `mean_scores` or
+`mean_scores_per_round`, both accumulated EVERY period by
+`RunTimeseries.add` whatever the view, so a flip re-renders the whole
+history, retroactive both ways (#44). Time scope — PAINT CADENCE (a
+pure re-rendering): `whole_game` selects `running_mean_scores[_per_
+round]`, likewise accumulated every period (#45), retroactive both
+ways; greyed only while the DISPLAYED run is a tournament. NONE of the
+four is RECORDING RESOLUTION, and the PERSISTED record is untouched by
+all four: `advance_one_period` feeds the recorder every event
+regardless of the live view; `RunRecorder.add` → `RunTimeseries.add`
+ignores fine events, so the granularity toggle cannot change a
+recording either; the recording cadence is `output.recording_cadence`,
+a config parameter. The mid-run pin: the live series after flips equals
+an uninterrupted headless fold (test (i)), and the written folder's
+`timeseries.parquet`/`cooperation.parquet` equal a `python -m
+pdsim.run` recording of the same config and seed (test (ii)).
+(d) RULE 7 FINDINGS. (f1) The fragment is rejected on criterion (i)
+by stock AppTest's public API and by (a)(v)(4): the fragment loop
+cannot survive the full-script passes the mid-run contract itself
+requires; its measured advantage (2.8 vs 70 ms on the probe) is
+recorded for a future frontend-driven design. (f2) BEHAVIOUR CHANGE,
+an improvement: in the LIVE app the in-app Stop button used to kill
+the script (#54), so the "stopped early" branch — charts kept, note
+"— stopped early" — only ever ran under AppTest; on the per-pass loop
+the click sets the flag and the next pass honours it cooperatively, so
+the owner now keeps the charts up to the stop, exactly as #39 intended.
+(f3) THE CLICK PASS'S ONE-PASS LAG: the Run click's own script run
+paints the controls row before the holder exists (the button's return
+value is what starts the run), so Run shows enabled and granularity
+live for that one pass; the immediately scheduled second pass greys
+them; a second click landing in the window is guarded by `not
+running`. Pinned by the (v)/(vi) test. (f4) Every rebuilt figure
+REMOUNTS in the browser ((a)(vii)) — the per-pass cadence (≈ 0.17–0.25
+s measured) and the kept #94 window (≤ 2 rebuilds/s, or one per delay
+above 0.5 s) are the flicker guards; the delay slider is the lever if
+the owner sees flicker. (f5) The summary appears one pass (≈ 0.2 s)
+after the last period (G + 1 passes). (f6) Under the async
+`per_event` cadence a period is one event, so pass overhead dominates
+exactly as #183 R3 anticipated: at ≈ 0.2 s per pass a 100-agent,
+20-generation-equivalent per_event run (≈ 2,000 events) needs ≈ 7
+minutes where the in-script loop took seconds — reported, not tuned
+(the `per_generation_equivalent` cadence is the everyday choice; only
+"Async: Imitation Only" ships per_event). (f7) Before any run the
+time-scope toggle is LIVE even with the mode strip on tournament —
+R4's literal rule (nothing displayed); it greys the moment a tournament
+run is displayed. (f8) "Record this run" is not one of the four: it
+stays editable mid-run and is consumed at the click only — inert like a
+parameter. (f9) The Results browser re-reads `runs/` and re-loads the
+selected run EVERY pass (≈ 25 ms with one run; grows with the selected
+run's size) — R4's accepted cost, measured. (f10) Streamlit's own STOP
+(header Stop, disconnect) is honoured only when it reaches the script
+at an element call inside a pass — always, inside a chain, since the
+chain never idles between passes; a run whose session dies between
+`st.rerun` and the next pass's first element call would leave a
+`config.yaml`-only folder — the pre-E3 kill window, narrower now.
+(f11) ADJACENT, untouched: the crash test's dying engine raises from
+INSIDE `advance_one_period`, so the discard path is exercised; a crash
+inside `recorder.finalize()` on the finishing pass would surface with
+the holder already cleared and the folder half-written — the #53 crash
+semantics (config kept for diagnosis), unchanged.
+(e) TESTS AND BUDGET: 1255 passing (1240 + 15 − 0: 7 in `test_app.py`
+— (i)/(iii) the flipped-toggles series equal to the headless fold with
+the periods count never reset, (ii) the recorded folder's period
+tables equal to a `python -m pdsim.run` recording, (iv) Stop after pass
+two with the folder discarded and nothing advancing after, (v)/(vi)
+Run disabled and granularity greyed mid-run and live after, (vii) the
+mid-run mode switch + scenario load leaving the run untouched, (vii)
+the finished-run greying both ways, (viii) the tournament advancing by
+cycle; 8 in `test_ui_helpers.py` — one period per call, the #39
+callback cadence at "round" granularity, the recorder fed and
+finalised, the tournament cycle, per-instance defaults, and the
+time-scope rule × 3); the #39 tiny-live-run pin re-expressed WITHOUT
+change (its one `run()` follows the chain; docstring says so); the
+dying-engine and scenario-label tests pass unchanged; ZERO retired
+(`should_redraw`'s five kept, still consumed); ruff check and format
+clean; ZERO golden re-recordings, ZERO new goldens — nothing under
+`pdsim/core`, `pdsim/config`, or `pdsim/io` changed; `PARAMETERS.md`
+untouched (no registry change).
+(f) DOCS: #183 appended verbatim; this entry; DESIGN §4.1 bullets 4
+and 5 amended to the as-built loop (bullet 3's "radio" untouched, held
+for E5 per #182(f4)); CLAUDE.md's current-phase paragraph (E3 landed;
+next E4) — the validation-precision paragraph untouched because the
+run controls did not move; ROADMAP's E3 status line; the spec's status
+line only.

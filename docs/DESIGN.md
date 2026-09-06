@@ -949,23 +949,54 @@ top, parameters, live plots below):
    any folded value that differs from its registry default ("Advanced
    settings — 1 changed: Boundary order = birth_first"); orthogonal to the
    mode tabs (#158, #167, #181).
-4. **Run controls** — granularity (labelled "cycle" at the coarse level in
-   tournament mode), playback delay, Run (disabled while the mix ≠ size),
-   Stop (session-state flag checked per event).
-5. **Live charts** — placeholders redrawn only on period events; fine-grained
-   events advance a progress line, batched every 200 events (DECISIONS #39);
-   after the run, the final summary table and periods-elapsed message. The
-   mean-score chart has two orthogonal toggles (DECISIONS #44/#45): **score
-   view** — "Total" is the raw score selection acts on (scale ≈ payoff ×
-   (N−1) × rounds), "Per round" divides by rounds actually played, landing on
-   the payoff-matrix scale; and **time scope** — "This generation" plots each
-   generation's own figure, "Whole game" plots running averages over the run
-   so far (gradual movement; greyed out in tournament mode, whose scores are
-   already whole-game cumulative). The last run's results persist in session
-   state, so flipping any view re-renders without re-running. Below the
-   chart pair, a full-width **cooperation-rate chart** (M9b, #65): overall
-   population plus per-strategy actions-weighted lines, y pinned 0–1; the
-   final-summary area adds the cooperation pair matrix as table rows.
+4. **Run controls** — granularity (labelled "cycle" at the coarse level
+   when the mode strip says tournament; greyed while a run is in progress,
+   with a note that a new choice applies from the next Run, because the
+   engine binds it at generator creation — #35, #183 R1), playback delay
+   (the pause before the next pass is scheduled), Run (disabled while the
+   mix ≠ size AND while a run is in progress), Stop (session-state flag
+   checked once per pass). Since M11b Phase E3 (#168/#183/#184) a run no
+   longer lives inside one script run: a `LiveRun` holder in session state
+   (`ui/helpers.py`, app state — never widget state) carries the paused
+   engine generator, the config FROZEN at the Run click (the one the
+   recorder writes — hard rule 8), the live `RunTimeseries`, and the open
+   recorder; each script pass advances the engine by exactly ONE period (a
+   generation, a cycle, or one async recording period), repaints, and —
+   last in `main`, after every tab has rendered — sleeps the playback delay
+   and reruns the script (a full-script `st.rerun`, not a fragment: the E3
+   probe found stock AppTest cannot drive a fragment-scoped pass and a
+   fragment cannot reschedule itself from the full-script passes the
+   mid-run contract needs). The mid-run contract (#183 R4): parameter
+   widgets stay editable but inert until the next Run; a scenario load or
+   a mode-strip switch changes the panel only, the run continues; other
+   app tabs keep the run advancing while viewed; a widget interaction
+   mid-pass merely ends that pass early, the holder intact. Stop discards
+   a recording exactly as before (#53, #183 R5) and keeps the charts as
+   "stopped early"; a crash or Streamlit's own STOP discards it too.
+5. **Live charts** — every pass repaints with the toggles' CURRENT values
+   (#168); the chart figures are REBUILT at most once per max(delay,
+   0.5 s) (#94 — in Streamlit 1.58 a plotly figure's spec is part of its
+   element id, so a rebuilt figure is a new element the browser remounts)
+   and re-emitted unchanged on the passes in between, and always rebuilt
+   on a toggle flip, the finishing pass, and the stopping pass;
+   fine-grained events advance a progress line, batched every 200 events
+   within the pass (DECISIONS #39); after the run, the final summary table
+   and periods-elapsed message. The mean-score chart has two orthogonal
+   toggles (DECISIONS #44/#45), both switchable MID-RUN: **score view** —
+   "Total" is the raw score selection acts on (scale ≈ payoff × (N−1) ×
+   rounds), "Per round" divides by rounds actually played, landing on the
+   payoff-matrix scale; and **time scope** — "This generation" plots each
+   generation's own figure, "Whole game" plots running averages over the
+   run so far (gradual movement; greyed out while the run being DISPLAYED
+   — the live run, else the persisted last run — is a tournament, whose
+   scores are already whole-game cumulative; keyed to that displayed
+   run's mode and never to the mode strip, #183 R4, which also covers a
+   finished run shown under a switched tab). The last run's results
+   persist in session state, so flipping any view re-renders without
+   re-running. Below the chart pair, a full-width **cooperation-rate
+   chart** (M9b, #65): overall population plus per-strategy
+   actions-weighted lines, y pinned 0–1; the final-summary area adds the
+   cooperation pair matrix as table rows.
 
 Config assembly and scenario↔widget mapping live in the Streamlit-free
 `pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences

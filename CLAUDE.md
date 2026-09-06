@@ -379,10 +379,26 @@ per generation" readout on the extracted `expected_matches_per_agent`
 that the calibration report and A1 consume too; 1.58's expander has
 no `help=`, so the fold's explanation is its first line; zero
 re-recordings, zero new goldens; 1240 tests).
-**The next implementation effort is Phase E3** (sub-prompts E3–E5:
-live-run continuity per ruling 6 with the Rule 7 toggle-classification
-report, the layout painter, close-out; the E5 sweep carries the held
-items #177(f3)/(f4), the async well-mixed round_robin calibration
-branch (#181), and DESIGN §4.1's stale "radio" wording (#182(f4))).
+Phase E3 — live-run display continuity (#168 per the #183 rulings) —
+landed 2026-09-05 (DECISIONS #183 pre-drafting rulings + #184 build
+record; the `LiveRun` holder in session state (`ui/helpers.py`), one
+period per full-script pass with `st.rerun` scheduled last in `main`
+— the fragment measured (2.8 vs 70 ms per pass on the probe) and
+rejected because stock AppTest cannot drive a fragment-scoped pass and
+a fragment cannot reschedule itself from the full-script passes the
+mid-run contract needs; the four toggles read fresh every pass;
+granularity greyed mid-run as BOUND AT RUN START (engine.py binds it
+at generator creation); the time-scope greying keyed to the DISPLAYED
+run's mode via `helpers.time_scope_greyed`; Run disabled while running;
+Stop honoured once per pass with the #53 discard preserved; the #94
+throttle kept as cached-figure re-emission; the controls row filled
+after the pass so a finished run re-enables Run in the same pass; the
+real app measured at ≈ 0.17–0.23 s per pass; zero re-recordings, zero
+new goldens; 1255 tests).
+**The next implementation effort is Phase E4** (the mouse layout
+painter), then E5 close-out (which carries the held items
+#177(f3)/(f4), the async well-mixed round_robin calibration branch
+(#181), DESIGN §4.1's stale "radio" wording (#182(f4)), and the
+fixed_n greying of the three folded economy knobs (#182(f7))).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

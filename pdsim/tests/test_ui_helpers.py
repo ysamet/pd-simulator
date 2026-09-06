@@ -14,9 +14,18 @@ from typing import ClassVar
 import pytest
 from pydantic import ValidationError
 
+from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import get_scenario_info
-from pdsim.core.events import AgentSnapshot, GenerationFinished
+from pdsim.core import engine
+from pdsim.core.events import (
+    AgentSnapshot,
+    CycleFinished,
+    GenerationFinished,
+    MatchFinished,
+    RoundPlayed,
+)
 from pdsim.core.timeseries import RunTimeseries
+from pdsim.io.results import RunRecorder
 from pdsim.ui import helpers
 
 
@@ -1379,3 +1388,132 @@ class TestOutputSectionLoads:
         )
         assert rebuilt.output.recording_cadence == original.output.recording_cadence
         assert rebuilt == original
+
+
+def _tiny_config(**overrides: object) -> ExperimentConfig:
+    """A 4-agent, 5-round config for the live-run helper tests.
+
+    Args:
+        **overrides: Top-level fields to set (``mode``, ``tournament_cycles``,
+            or a replacement ``dynamics`` mapping).
+
+    Returns:
+        The validated config.
+    """
+    data: dict[str, object] = {
+        "seed": 7,
+        "population": {"size": 4, "composition": {"tit_for_tat": 2, "always_defect": 2}},
+        "match": {"rounds_per_match": 5},
+        "dynamics": {"generations": 3},
+    }
+    data.update(overrides)
+    return ExperimentConfig.model_validate(data)
+
+
+def _holder(config: ExperimentConfig, granularity: str = "generation") -> helpers.LiveRun:
+    """Open a live-run holder on a fresh engine stream, exactly as the app does.
+
+    Args:
+        config: The run's config.
+        granularity: The finest event level to request from the engine.
+
+    Returns:
+        The holder, nothing consumed yet.
+    """
+    return helpers.LiveRun(
+        events=engine.run(config, granularity),  # type: ignore[arg-type]
+        config=config,
+        mode=config.mode,
+        timeseries=RunTimeseries(mode=config.mode),
+        recorder=None,
+    )
+
+
+class TestLiveRunHelpers:
+    """The E3 live-run holder and its one-period advance (#183 R3; #184)."""
+
+    def test_each_call_consumes_exactly_one_period(self) -> None:
+        """Three generations: three period events, then None with finished set."""
+        config = _tiny_config()
+        live = _holder(config)
+        for expected_index in range(3):
+            period = helpers.advance_one_period(live)
+            assert isinstance(period, GenerationFinished)
+            assert period.index == expected_index
+            assert live.periods == expected_index + 1
+            assert live.finished is False
+            assert live.timeseries.final is None
+        assert helpers.advance_one_period(live) is None
+        assert live.finished is True
+        assert live.periods == 3
+        assert live.timeseries.final is not None
+        assert live.timeseries.final.completed == 3
+        # The accumulated series equals an uninterrupted headless fold.
+        headless = RunTimeseries(mode="evolution")
+        for event in engine.run(config):
+            headless.add(event)
+        assert live.timeseries.periods == headless.periods
+        assert live.timeseries.composition == headless.composition
+        assert live.timeseries.mean_scores == headless.mean_scores
+        assert live.timeseries.running_mean_scores == headless.running_mean_scores
+        # Advancing a finished holder is a harmless no-op.
+        assert helpers.advance_one_period(live) is None
+        assert live.periods == 3
+
+    def test_fine_events_drive_the_progress_callback_at_the_cadence(self) -> None:
+        """At "round" granularity the callback fires every N fine events (#39)."""
+        config = _tiny_config()
+        live = _holder(config, granularity="round")
+        seen: list[int] = []
+        while not live.finished:
+            helpers.advance_one_period(live, seen.append, progress_every=7)
+        fine = [
+            event
+            for event in engine.run(config, granularity="round")
+            if isinstance(event, RoundPlayed | MatchFinished)
+        ]
+        assert live.fine_events == len(fine) > 7
+        assert seen == list(range(7, len(fine) + 1, 7))
+        assert live.timeseries.final is not None
+
+    def test_recorder_is_fed_every_event(self, tmp_path: Path) -> None:
+        """A holder with a recorder folds the same stream into it; it finalises."""
+        config = _tiny_config()
+        live = _holder(config)
+        live.recorder = RunRecorder(config, out_dir=tmp_path, scenario="helper_test")
+        while not live.finished:
+            helpers.advance_one_period(live)
+        assert live.recorder.timeseries.periods == live.timeseries.periods == [0, 1, 2]
+        assert live.recorder.timeseries.final == live.timeseries.final
+        folder = live.recorder.finalize()
+        assert (folder / "timeseries.parquet").is_file()
+
+    def test_tournament_advances_by_cycle(self) -> None:
+        """A tournament holder yields one CycleFinished per call."""
+        live = _holder(_tiny_config(mode="tournament", tournament_cycles=2))
+        first = helpers.advance_one_period(live)
+        second = helpers.advance_one_period(live)
+        assert isinstance(first, CycleFinished) and first.index == 0
+        assert isinstance(second, CycleFinished) and second.index == 1
+        assert helpers.advance_one_period(live) is None
+        assert live.finished is True
+        assert live.timeseries.mode == "tournament"
+
+    def test_holder_defaults_are_per_instance(self) -> None:
+        """Counters start at zero and the figure cache is not shared."""
+        config = _tiny_config()
+        one, two = _holder(config), _holder(config)
+        assert (one.periods, one.fine_events, one.finished) == (0, 0, False)
+        assert one.view is None and one.last_redraw == 0.0 and one.delay == 0.0
+        one.figures["left"] = object()
+        assert two.figures == {}
+
+    @pytest.mark.parametrize(
+        ("displayed_mode", "greyed"),
+        [(None, False), ("evolution", False), ("tournament", True)],
+    )
+    def test_time_scope_greys_only_for_a_displayed_tournament(
+        self, displayed_mode: str | None, greyed: bool
+    ) -> None:
+        """#183 R4: keyed off the displayed run's mode; nothing displayed = live."""
+        assert helpers.time_scope_greyed(displayed_mode) is greyed

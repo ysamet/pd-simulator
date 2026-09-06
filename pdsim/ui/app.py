@@ -7,7 +7,8 @@ Launch from the repo root (with the venv active):
 This module is deliberately thin (DECISIONS #38): presentation and Streamlit
 calls only. It does exactly three things with the platform — builds an
 ``ExperimentConfig`` from widget state, consumes the
-``engine.run(config, granularity)`` event stream, and (the Sweep tab, M9.5b)
+``engine.run(config, granularity)`` event stream one period per script pass
+(M11b Phase E3), and (the Sweep tab, M9.5b)
 authors a ``SweepSpec`` and spawns the headless sweep CLI — via the testable
 logic in :mod:`pdsim.ui.helpers`, :mod:`pdsim.ui.sweep_helpers`,
 :mod:`pdsim.core.timeseries`, and :mod:`pdsim.viz.charts`.
@@ -22,12 +23,16 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 import streamlit as st
+from plotly.graph_objects import Figure
 from pydantic import ValidationError
 from streamlit.delta_generator import DeltaGenerator
+from streamlit.runtime.scriptrunner import StopException
 
 from pdsim.config.experiment import (
     ExperimentConfig,
@@ -39,7 +44,6 @@ from pdsim.config.experiment import (
 from pdsim.config.registry import ParameterSpec, ParamValue
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core import engine, layouts
-from pdsim.core.events import CycleFinished, GenerationFinished, MatchFinished, RoundPlayed
 from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, delete_run, load_run, rename_run, sync_index
@@ -57,7 +61,7 @@ from pdsim.ui.economy_helpers import (
     ECONOMY_HELP,
     expected_matches_per_agent,
 )
-from pdsim.ui.helpers import ADVANCED_FOLD_HELP, _spatial_sampling_active
+from pdsim.ui.helpers import ADVANCED_FOLD_HELP, LiveRun, _spatial_sampling_active
 from pdsim.viz import charts
 
 CUSTOM = "Custom"
@@ -166,19 +170,40 @@ PROGRESS_EVERY = 200
 """Fine-grained events between progress-line refreshes (DECISIONS #39)."""
 
 LIVE_REDRAW_MIN_SECONDS = 0.5
-"""Wall-clock floor between live chart redraws (DECISIONS #94).
+"""Wall-clock floor between live chart REBUILDS (DECISIONS #94, kept by #184).
 
-Each redraw replaces every chart element (a reused element key within one
-script run raises ``StreamlitDuplicateElementKey``, so each redraw carries
-a fresh key — and a fresh key means the browser tears the old chart down
-and builds the new one from scratch, blank until plotly finishes
-painting). Fast runs — async event time especially, where a small-N
-generation-equivalent computes in milliseconds — can emit periods far
-faster than the browser can paint them, leaving the charts mostly blank
-between flashes. So the live loop accumulates data on every period but
-redraws at most twice a second: between redraws nothing touches the
-screen and the previous frame stays fully visible.
+Streamlit 1.58 folds a plotly figure's spec into its element id
+(``plotly_chart`` registers with ``key_as_main_identity=False``), so a chart
+whose data changed is a NEW element to the browser whatever key it carries:
+the old component is torn down and the new one is blank until plotly has
+painted it. Fast runs — async event time especially — can complete periods
+faster than that paint, so the live loop rebuilds its figures at most once
+per ``max(playback_delay, LIVE_REDRAW_MIN_SECONDS)`` seconds. Since the
+per-pass loop (M11b Phase E3) every pass repaints, so between rebuilds a
+pass re-emits the figures it built last time UNCHANGED — an identical spec
+is an identical element, which the browser leaves exactly as it is. A
+finishing or stopped pass, and a pass on which a display toggle flipped,
+always rebuild.
 """
+
+LIVE_RUN_KEY = "_live_run"
+"""Session-state key of the :class:`~pdsim.ui.helpers.LiveRun` in progress.
+
+App state, not widget state (DECISIONS #184): it is never re-assigned by
+``_preserve_hidden_widget_state`` and no widget owns it. Present exactly
+while a run is in progress; the finishing or stopping pass moves the
+results into ``last_run`` (#44) and removes it.
+"""
+
+GRANULARITY_RUNNING_NOTE = (
+    "NOTE: greyed while a run is in progress — the engine binds the "
+    "granularity when a run starts (DECISIONS #35), so a new choice applies "
+    "from the next Run."
+)
+"""The granularity selectbox's mid-run greying note (#183 R1; #34's pattern)."""
+
+DISCARD_NOTE = "The interrupted run was not recorded — its partial folder was cleaned up."
+"""The one interrupted-recording sentence (DECISIONS #53/#55, kept by #184)."""
 
 RUNS_DIR = Path(os.environ.get("PDSIM_RUNS_DIR", "runs"))
 """Where recordings go; the env override exists for tests (DECISIONS #49)."""
@@ -1248,6 +1273,101 @@ def _economy_placeholders() -> tuple[DeltaGenerator, DeltaGenerator, DeltaGenera
     return col_pop.empty(), col_energy.empty(), st.empty()
 
 
+def _build_figures(
+    timeseries: RunTimeseries,
+    per_round: bool,
+    whole_game: bool,
+    carrying_capacity: float | None = None,
+    economy: bool = False,
+) -> dict[str, Figure]:
+    """Build the mode-appropriate chart figures, keyed by their role.
+
+    The pure half of the old ``_draw_charts`` (M11b Phase E3): building is
+    separated from painting so the live loop can cache what it built and
+    re-emit it unchanged on passes inside the #94 throttle window.
+
+    Args:
+        timeseries: The run's accumulated series.
+        per_round: Score view for the mean chart (DECISIONS #44).
+        whole_game: Time scope for the mean chart (DECISIONS #45).
+        carrying_capacity: K for the population chart's dashed reference
+            line (config-derived; ``None`` outside the energy economy).
+        economy: Whether to build the population / mean-energy / mean-age
+            trio (M10a) — only built when the run carries per-agent
+            snapshots (imitation runs and pre-schema-3 recordings have
+            none — DECISIONS #65 again).
+
+    Returns:
+        ``left`` (composition or tournament totals), ``right`` (the mean
+        chart), ``coop`` when the run has cooperation data, and the
+        ``population``/``energy``/``age`` trio when asked for and present;
+        empty before the first period.
+    """
+    figures: dict[str, Figure] = {}
+    if not timeseries.periods:
+        return figures
+    if timeseries.mode == "tournament":
+        figures["left"] = charts.total_score_chart(timeseries)
+    else:
+        figures["left"] = charts.composition_chart(timeseries)
+    figures["right"] = charts.mean_score_chart(
+        timeseries, per_round=per_round, whole_game=whole_game
+    )
+    if timeseries.cooperation_overall:
+        figures["coop"] = charts.cooperation_chart(timeseries)
+    if economy and any(timeseries.agent_snapshots):
+        figures["population"] = charts.population_chart(timeseries, carrying_capacity)
+        figures["energy"] = charts.mean_energy_chart(timeseries)
+        figures["age"] = charts.mean_age_chart(timeseries)
+    return figures
+
+
+def _paint_figures(
+    figures: Mapping[str, object],
+    left: DeltaGenerator,
+    right: DeltaGenerator,
+    cooperation: DeltaGenerator,
+    draw_id: int,
+    key_prefix: str = "chart",
+    economy: tuple[DeltaGenerator, DeltaGenerator, DeltaGenerator] | None = None,
+) -> None:
+    """Paint built figures into their placeholders (the Streamlit half).
+
+    Args:
+        figures: The figures by role, as :func:`_build_figures` returns
+            them (typed loosely because the live holder stores them as
+            plain objects).
+        left: Placeholder for composition (evolution) / totals (tournament).
+        right: Placeholder for the mean-score chart.
+        cooperation: Full-width placeholder for the cooperation-rate chart
+            (M9b); left untouched when the run carries no cooperation data.
+        draw_id: Distinguishes repeated paints WITHIN one script run
+            (Streamlit forbids duplicate element keys in a run); a pass of
+            the live loop paints once, so it uses 0.
+        key_prefix: Distinguishes chart elements rendered by different app
+            areas in the same script run (live view vs results browser).
+        economy: Placeholders for the population / mean-energy / mean-age
+            charts (M10a); left untouched when no such figures were built.
+    """
+    if "left" in figures:
+        left.plotly_chart(figures["left"], width="stretch", key=f"{key_prefix}_left_{draw_id}")
+    if "right" in figures:
+        right.plotly_chart(figures["right"], width="stretch", key=f"{key_prefix}_right_{draw_id}")
+    if "coop" in figures:
+        cooperation.plotly_chart(
+            figures["coop"], width="stretch", key=f"{key_prefix}_coop_{draw_id}"
+        )
+    if economy is not None and "population" in figures:
+        population, energy, age = economy
+        population.plotly_chart(
+            figures["population"], width="stretch", key=f"{key_prefix}_population_{draw_id}"
+        )
+        energy.plotly_chart(
+            figures["energy"], width="stretch", key=f"{key_prefix}_energy_{draw_id}"
+        )
+        age.plotly_chart(figures["age"], width="stretch", key=f"{key_prefix}_age_{draw_id}")
+
+
 def _draw_charts(
     timeseries: RunTimeseries,
     left: DeltaGenerator,
@@ -1260,62 +1380,33 @@ def _draw_charts(
     economy: tuple[DeltaGenerator, DeltaGenerator, DeltaGenerator] | None = None,
     carrying_capacity: float | None = None,
 ) -> None:
-    """Redraw the mode-appropriate charts into their placeholders.
+    """Build and paint the mode-appropriate charts in one step.
+
+    The post-run view and the results browser use this; the live loop
+    builds and paints separately so it can cache figures between passes.
 
     Args:
         timeseries: The run's accumulated series.
         left: Placeholder for composition (evolution) / totals (tournament).
         right: Placeholder for the mean-score chart.
-        cooperation: Full-width placeholder for the cooperation-rate chart
-            (M9b); left untouched when the run carries no cooperation data
-            (recordings from before schema 2 — DECISIONS #65).
-        draw_id: Monotonic counter — Streamlit requires a fresh element key
-            for each redraw within one script run.
+        cooperation: Full-width placeholder for the cooperation-rate chart.
+        draw_id: Element-key suffix — see :func:`_paint_figures`.
         per_round: Score view for the mean chart (DECISIONS #44).
         whole_game: Time scope for the mean chart (DECISIONS #45).
         key_prefix: Distinguishes chart elements rendered by different app
-            areas in the same script run (live view vs results browser).
-        economy: Placeholders for the population / mean-energy / mean-age
-            charts (M10a); left untouched when the run carries no per-agent
-            snapshots (imitation runs, pre-schema-3 recordings — #65 again).
-        carrying_capacity: K for the population chart's dashed reference
-            line (config-derived; ``None`` outside the energy economy).
+            areas in the same script run.
+        economy: Placeholders for the M10a economy trio, if any.
+        carrying_capacity: K for the population chart's reference line.
     """
-    if not timeseries.periods:
-        return
-    if timeseries.mode == "tournament":
-        left_figure = charts.total_score_chart(timeseries)
-    else:
-        left_figure = charts.composition_chart(timeseries)
-    left.plotly_chart(left_figure, width="stretch", key=f"{key_prefix}_left_{draw_id}")
-    right.plotly_chart(
-        charts.mean_score_chart(timeseries, per_round=per_round, whole_game=whole_game),
-        width="stretch",
-        key=f"{key_prefix}_right_{draw_id}",
+    _paint_figures(
+        _build_figures(timeseries, per_round, whole_game, carrying_capacity, economy is not None),
+        left,
+        right,
+        cooperation,
+        draw_id,
+        key_prefix,
+        economy,
     )
-    if timeseries.cooperation_overall:
-        cooperation.plotly_chart(
-            charts.cooperation_chart(timeseries),
-            width="stretch",
-            key=f"{key_prefix}_coop_{draw_id}",
-        )
-    if economy is not None and any(timeseries.agent_snapshots):
-        population, energy, age = economy
-        population.plotly_chart(
-            charts.population_chart(timeseries, carrying_capacity),
-            width="stretch",
-            key=f"{key_prefix}_population_{draw_id}",
-        )
-        energy.plotly_chart(
-            charts.mean_energy_chart(timeseries),
-            width="stretch",
-            key=f"{key_prefix}_energy_{draw_id}",
-        )
-        age.plotly_chart(
-            charts.mean_age_chart(timeseries),
-            width="stretch",
-            key=f"{key_prefix}_age_{draw_id}",
-        )
 
 
 def _final_summary_area(timeseries: RunTimeseries) -> None:
@@ -1336,201 +1427,278 @@ def _final_summary_area(timeseries: RunTimeseries) -> None:
         st.dataframe(pair_rows, width="stretch")
 
 
-def _run_live(
-    config: ExperimentConfig,
-    granularity: str,
-    delay: float,
-    per_round: bool,
-    whole_game: bool,
-    record: bool,
-    scenario: str | None,
-) -> None:
-    """Consume the event stream, updating charts as periods finish.
+def _start_live_run(
+    config: ExperimentConfig, granularity: str, record: bool, scenario: str | None
+) -> LiveRun:
+    """Open a run: the engine generator, the accumulator, and the recorder.
 
-    Batching (DECISIONS #39): charts are rebuilt only on period events —
-    fine-grained events advance a progress line at most every
-    ``PROGRESS_EVERY`` events, never a figure. Period redraws are further
-    wall-clock throttled (DECISIONS #94): at most one redraw per
-    ``max(delay, LIVE_REDRAW_MIN_SECONDS)``, with every period's data
-    still accumulated — fast runs would otherwise replace the charts
-    faster than the browser can paint them. The finished (or stopped)
-    run is kept in session state so the results survive later interactions
-    — e.g. flipping the score view re-renders without re-running (#44).
+    Nothing is computed yet — the generator runs its first period on the
+    first pass (:func:`_live_pass`). The config passed in is the one the
+    recorder writes (``config.yaml`` goes to disk right here, #47) and the
+    one the engine consumes: FROZEN at the Run click, whatever the panel
+    shows afterwards (#183 R4, hard rule 8).
 
     Args:
         config: The validated ExperimentConfig to run.
-        granularity: Finest event level to request from the engine.
-        delay: Playback pause (seconds) after each chart refresh.
-        per_round: Score view for the mean chart (DECISIONS #44).
-        whole_game: Time scope for the mean chart (DECISIONS #45).
+        granularity: Finest event level to request — bound NOW, for the
+            whole run (DECISIONS #35; #183 R1).
         record: Persist this run to a run folder as it streams (#49).
         scenario: Scenario name for the recording's index row, if any.
+
+    Returns:
+        The holder the passes advance, to be kept under ``LIVE_RUN_KEY``.
     """
     recorder = RunRecorder(config, out_dir=RUNS_DIR, scenario=scenario) if record else None
-    # The recording is "settled" once it was finalized or deliberately
-    # discarded. Anything else — and in live Streamlit that includes the
-    # Stop button and a mid-run Run click, both of which KILL this script
-    # at its next st.* call rather than setting our flag — lands in the
-    # finally block below, which discards the partial folder (#53/#54).
-    settled = recorder is None
-    if recorder is not None:
-        # Write-ahead note (#55): staged NOW, while this script surely
-        # runs, because a session-state write from the dying script's
-        # finally races the rerun the killing click triggers. Cleared on
-        # successful completion; a killed run leaves it for the next
-        # render to show.
-        st.session_state["_discard_note"] = (
-            "The interrupted run was not recorded — its partial folder was cleaned up."
+    return LiveRun(
+        events=engine.run(config, granularity),  # type: ignore[arg-type]
+        config=config,
+        mode=config.mode,
+        timeseries=RunTimeseries(mode=config.mode),
+        recorder=recorder,
+    )
+
+
+def _close_events(live: LiveRun) -> None:
+    """Close the paused engine generator so its frame is released.
+
+    Args:
+        live: The run whose stream is being abandoned or has ended.
+    """
+    close = getattr(live.events, "close", None)
+    if close is not None:
+        close()
+
+
+def _finish_live_run(live: LiveRun, note: str, capacity: float | None) -> None:
+    """Move a finished or stopped run's results into ``last_run``; clear the holder.
+
+    Post-run behaviour is then exactly what #44/#45 built: the next script
+    run renders ``last_run`` and any view combination re-renders it
+    without re-running.
+
+    Args:
+        live: The run that just finished or stopped.
+        note: The results caption ("Results of the last run (seed …)").
+        capacity: K for the population chart's reference line.
+    """
+    _close_events(live)
+    st.session_state["last_run"] = {
+        "timeseries": live.timeseries,
+        "note": note,
+        "carrying_capacity": capacity,
+    }
+    st.session_state.pop(LIVE_RUN_KEY, None)
+
+
+def _abandon_live_run(live: LiveRun) -> None:
+    """Abandon a run the script cannot continue: crash or Streamlit STOP.
+
+    The recorder's #53 rule preserved exactly (#183 R5): an abandoned
+    recording is DISCARDED, never ghosted, and the next render shows the
+    one interrupted-recording sentence (staged here, in a script that is
+    still alive — no dying-script write races a rerun, the #55 hazard).
+    Nothing is moved into ``last_run``: the charts on screen stay until
+    the next interaction, as an interrupted run's did before.
+
+    Args:
+        live: The run being abandoned.
+    """
+    _close_events(live)
+    if live.recorder is not None:
+        st.session_state["_discard_note"] = DISCARD_NOTE
+        _discard_recording(live.recorder)
+    st.session_state.pop(LIVE_RUN_KEY, None)
+
+
+def _live_grid_figure(config: ExperimentConfig, timeseries: RunTimeseries) -> Figure | None:
+    """Build the current-occupancy grid from the latest period snapshot.
+
+    The latest snapshot IS the render state (Design 10): a lattice run with
+    per-agent data redraws its occupancy as periods finish — what lets the
+    drifting frontier actually be watched. Imitation runs have empty
+    snapshots and keep the founding preview above instead (nothing moves,
+    #116).
+
+    Args:
+        config: The run's configuration.
+        timeseries: The live series (its last snapshot is drawn).
+
+    Returns:
+        The grid figure, or ``None`` when there is nothing to draw.
+    """
+    if config.structure.kind != "lattice" or not timeseries.agent_snapshots:
+        return None
+    placements = {
+        snapshot.site_id: snapshot.strategy
+        for snapshot in timeseries.agent_snapshots[-1]
+        if snapshot.site_id is not None
+    }
+    if not placements or config.structure.rows is None or config.structure.cols is None:
+        return None
+    return charts.grid_chart(config.structure.rows, config.structure.cols, placements)
+
+
+def _draw_blocked_metrics(
+    config: ExperimentConfig,
+    timeseries: RunTimeseries,
+    blocked_note: DeltaGenerator,
+    infeasible_note: DeltaGenerator,
+    moves_note: DeltaGenerator,
+) -> None:
+    """Refresh the blocked/infeasible-parents and blocked-moves metrics.
+
+    The blocked-parents readout (M11a Phase C, spec Design 4) is live only
+    where the local placement gate exists — a lattice economy. Beside it,
+    the infeasible-parents readout (M11b Phase A, #164) is live only under
+    the three-way gate, where the feasibility filter runs (the async clock
+    never populates it, so it stays hidden). Third, the blocked-moves
+    readout (M11b Phase B, #165/#172) is live only while movement is ACTIVE
+    (lattice + energy economy + a positive movement rate) — hidden, not a
+    permanent zero, otherwise.
+
+    Args:
+        config: The run's configuration (decides which readouts exist).
+        timeseries: The live series the counts are read from.
+        blocked_note: Placeholder for the blocked-parents metric.
+        infeasible_note: Placeholder for the infeasible-parents metric.
+        moves_note: Placeholder for the blocked-moves metric.
+    """
+    numbers = economy_helpers.blocked_parents_metric(timeseries.blocked_parents)
+    if economy_helpers.blocked_parents_visible(config) and numbers is not None:
+        latest, total = numbers
+        blocked_note.metric(
+            "Blocked parents this generation",
+            latest,
+            delta=f"run total {total}",
+            delta_color="off",
+            help=ECONOMY_HELP["blocked_parents"],
         )
-    try:
-        timeseries = RunTimeseries(mode=config.mode)
-        progress = st.empty()
-        col_left, col_right = st.columns(2)
-        chart_left, chart_right = col_left.empty(), col_right.empty()
-        chart_coop = st.empty()  # full-width, below the pair (M9b)
-        chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
-        # The blocked-parents readout (M11a Phase C, spec Design 4): live
-        # only where the local placement gate exists — a lattice economy.
-        # Beside it, the infeasible-parents readout (M11b Phase A, #164):
-        # live only under the three-way gate, where the feasibility filter
-        # runs (the async clock never populates it, so it stays hidden).
-        # Third, the blocked-moves readout (M11b Phase B, #165/#172): live
-        # only while movement is ACTIVE (lattice + energy economy + a
-        # positive movement rate) — hidden, not a permanent zero, otherwise.
-        blocked_col, infeasible_col, moves_col = st.columns(3)
-        blocked_note = blocked_col.empty()
-        infeasible_note = infeasible_col.empty()
-        moves_note = moves_col.empty()
-        show_blocked = economy_helpers.blocked_parents_visible(config)
-        show_infeasible = economy_helpers.infeasible_parents_visible(config)
-        show_moves = economy_helpers.blocked_moves_visible(config)
-        # The LIVE grid (Phase C): the latest snapshot IS the render state
-        # (Design 10), so a lattice run with per-agent data redraws its
-        # occupancy as periods finish — this is what lets V5's drifting
-        # frontier actually be watched. Imitation runs have empty snapshots
-        # and keep the founding preview above instead (nothing moves,
-        # #116).
-        grid_live = st.empty()
-
-        def _draw_blocked() -> None:
-            """Refresh the blocked/infeasible-parents and blocked-moves metrics."""
-            numbers = economy_helpers.blocked_parents_metric(timeseries.blocked_parents)
-            if show_blocked and numbers is not None:
-                latest, total = numbers
-                blocked_note.metric(
-                    "Blocked parents this generation",
-                    latest,
-                    delta=f"run total {total}",
-                    delta_color="off",
-                    help=ECONOMY_HELP["blocked_parents"],
-                )
-            infeasible = economy_helpers.infeasible_parents_metric(timeseries.infeasible_parents)
-            if show_infeasible and infeasible is not None:
-                latest, total = infeasible
-                infeasible_note.metric(
-                    "Infeasible parents this generation",
-                    latest,
-                    delta=f"run total {total}",
-                    delta_color="off",
-                    help=ECONOMY_HELP["infeasible_parents"],
-                )
-            moves = economy_helpers.blocked_moves_metric(timeseries.blocked_moves)
-            if show_moves and moves is not None:
-                latest, total = moves
-                moves_note.metric(
-                    "Blocked moves this generation",
-                    latest,
-                    delta=f"run total {total}",
-                    delta_color="off",
-                    help=ECONOMY_HELP["blocked_moves"],
-                )
-
-        def _draw_live_grid(draw_id: int) -> None:
-            """Redraw the current occupancy from the latest period snapshot."""
-            if config.structure.kind != "lattice" or not timeseries.agent_snapshots:
-                return
-            placements = {
-                snapshot.site_id: snapshot.strategy
-                for snapshot in timeseries.agent_snapshots[-1]
-                if snapshot.site_id is not None
-            }
-            if not placements or config.structure.rows is None or config.structure.cols is None:
-                return
-            grid_live.plotly_chart(
-                charts.grid_chart(config.structure.rows, config.structure.cols, placements),
-                width=_grid_width(config.structure.rows, config.structure.cols),
-                key=f"live_grid_{draw_id}",
-            )
-
-        if config.dynamics.time_model == "asynchronous":
-            st.caption(GEN_EQUIV_AXIS_NOTE)
-        capacity = economy_helpers.chart_carrying_capacity(config)
-        period_label = "cycle" if config.mode == "tournament" else "generation"
-        fine_events = 0
-        draws = 0
-        last_redraw = 0.0  # monotonic clock; 0.0 makes the first period draw
-        stopped = False
-        for event in engine.run(config, granularity):
-            if st.session_state.get("stop_requested"):
-                stopped = True
-                break
-            timeseries.add(event)
-            if recorder is not None:
-                recorder.add(event)
-            if isinstance(event, RoundPlayed | MatchFinished):
-                fine_events += 1
-                if fine_events % PROGRESS_EVERY == 0:
-                    progress.caption(f"... {fine_events} match/round events so far")
-            elif isinstance(event, GenerationFinished | CycleFinished):
-                # Redraws are wall-clock throttled (#94): every period's
-                # data lands in the timeseries above, but the screen is
-                # only touched when the browser has had time to paint the
-                # previous frame — which stays visible in between.
-                if not helpers.should_redraw(
-                    time.monotonic(), last_redraw, delay, LIVE_REDRAW_MIN_SECONDS
-                ):
-                    continue
-                draws += 1
-                _draw_charts(
-                    timeseries,
-                    chart_left,
-                    chart_right,
-                    chart_coop,
-                    draws,
-                    per_round,
-                    whole_game,
-                    economy=chart_economy,
-                    carrying_capacity=capacity,
-                )
-                _draw_blocked()
-                _draw_live_grid(draws)
-                progress.caption(f"{period_label} {event.index + 1} finished")
-                last_redraw = time.monotonic()
-                if delay > 0:
-                    time.sleep(delay)
-        _draw_charts(
-            timeseries,
-            chart_left,
-            chart_right,
-            chart_coop,
-            draws + 1,
-            per_round,
-            whole_game,
-            economy=chart_economy,
-            carrying_capacity=capacity,
+    infeasible = economy_helpers.infeasible_parents_metric(timeseries.infeasible_parents)
+    if economy_helpers.infeasible_parents_visible(config) and infeasible is not None:
+        latest, total = infeasible
+        infeasible_note.metric(
+            "Infeasible parents this generation",
+            latest,
+            delta=f"run total {total}",
+            delta_color="off",
+            help=ECONOMY_HELP["infeasible_parents"],
         )
-        _draw_blocked()
-        _draw_live_grid(draws + 1)
-        note = f"Results of the last run (seed {config.seed})"
-        if stopped:
-            st.warning("Run stopped — the charts show progress up to the stop.")
-            note += " — stopped early"
-            if recorder is not None:
-                _discard_recording(recorder)
-                settled = True
-                st.caption(st.session_state.pop("_discard_note", ""))
-        elif timeseries.final is not None:
-            final = timeseries.final
+    moves = economy_helpers.blocked_moves_metric(timeseries.blocked_moves)
+    if economy_helpers.blocked_moves_visible(config) and moves is not None:
+        latest, total = moves
+        moves_note.metric(
+            "Blocked moves this generation",
+            latest,
+            delta=f"run total {total}",
+            delta_color="off",
+            help=ECONOMY_HELP["blocked_moves"],
+        )
+
+
+def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
+    """One pass of the live loop: advance one period, repaint, finish or stop.
+
+    The run no longer lives inside one script run (M11b Phase E3, DECISIONS
+    #168/#183): each script pass consumes exactly one period's events
+    (#183 R3 — a generation, a cycle, or one async recording period), with
+    the #39 progress caption advancing every ``PROGRESS_EVERY`` fine events
+    inside the pass, then repaints every chart with the display toggles'
+    CURRENT values, and :func:`_schedule_next_pass` (at the end of
+    ``main``) sleeps the playback delay and reruns the script. A widget
+    interaction mid-pass simply ends the pass early — the generator is
+    paused, the holder is intact, and the next pass carries on — which is
+    what makes the toggles switchable mid-run.
+
+    Stop is checked ONCE per pass (#183 R4), before advancing: a stopped
+    run keeps its charts, discards its recording (#53, preserved per #183
+    R5), and moves into ``last_run`` flagged "stopped early". The
+    finishing pass (``RunFinished`` seen) renders the summary table and the
+    periods-elapsed message, finalises the recorder, and moves the results
+    into ``last_run`` exactly as the in-script loop did.
+
+    Chart rebuilds stay wall-clock throttled (#94): a pass inside the
+    throttle window re-emits the figures it built last time, unchanged,
+    so the browser keeps the previous frame; a toggle flip, the finishing
+    pass, and the stopping pass always rebuild.
+
+    Args:
+        live: The run in progress (under ``LIVE_RUN_KEY``).
+        per_round: Score view for the mean chart, as read THIS pass (#44).
+        whole_game: Time scope for the mean chart, as read THIS pass (#45).
+    """
+    config = live.config
+    timeseries = live.timeseries
+    recorder = live.recorder
+    period_label = "cycle" if config.mode == "tournament" else "generation"
+    progress = st.empty()
+    col_left, col_right = st.columns(2)
+    chart_left, chart_right = col_left.empty(), col_right.empty()
+    chart_coop = st.empty()  # full-width, below the pair (M9b)
+    chart_economy = _economy_placeholders()  # blank outside the economy (M10a)
+    blocked_col, infeasible_col, moves_col = st.columns(3)
+    blocked_note = blocked_col.empty()
+    infeasible_note = infeasible_col.empty()
+    moves_note = moves_col.empty()
+    grid_live = st.empty()
+    if config.dynamics.time_model == "asynchronous":
+        st.caption(GEN_EQUIV_AXIS_NOTE)
+    capacity = economy_helpers.chart_carrying_capacity(config)
+
+    stopped = bool(st.session_state.get("stop_requested"))
+    period = None
+    if not stopped and not live.finished:
+
+        def _on_progress(count: int) -> None:
+            """The #39 progress line, every PROGRESS_EVERY fine events."""
+            progress.caption(f"... {count} match/round events so far")
+
+        try:
+            period = helpers.advance_one_period(live, _on_progress, PROGRESS_EVERY)
+        except Exception:
+            # A crash inside the engine or the recorder: discard the
+            # partial recording (#53/#54) and let the error surface.
+            _abandon_live_run(live)
+            raise
+
+    final_pass = stopped or live.finished
+    view = (per_round, whole_game)
+    now = time.monotonic()
+    if (
+        final_pass
+        or view != live.view
+        or helpers.should_redraw(now, live.last_redraw, live.delay, LIVE_REDRAW_MIN_SECONDS)
+    ):
+        live.figures = dict(_build_figures(timeseries, per_round, whole_game, capacity, True))
+        grid = _live_grid_figure(config, timeseries)
+        if grid is not None:
+            live.figures["grid"] = grid
+        live.view = view
+        live.last_redraw = now
+    _paint_figures(live.figures, chart_left, chart_right, chart_coop, 0, economy=chart_economy)
+    grid_figure = live.figures.get("grid")
+    if grid_figure is not None and config.structure.rows and config.structure.cols:
+        grid_live.plotly_chart(
+            grid_figure,
+            width=_grid_width(config.structure.rows, config.structure.cols),
+            key="live_grid_0",
+        )
+    _draw_blocked_metrics(config, timeseries, blocked_note, infeasible_note, moves_note)
+
+    note = f"Results of the last run (seed {config.seed})"
+    if stopped:
+        st.warning("Run stopped — the charts show progress up to the stop.")
+        note += " — stopped early"
+        if recorder is not None:
+            # Stop's recorder behaviour, preserved exactly (#53; #183 R5):
+            # the partial folder is discarded and the sentence shown —
+            # the failure rewrite in _discard_recording still lands here.
+            st.session_state["_discard_note"] = DISCARD_NOTE
+            _discard_recording(recorder)
+            st.caption(st.session_state.pop("_discard_note", ""))
+        _finish_live_run(live, note, capacity)
+    elif live.finished:
+        final = timeseries.final
+        if final is not None:
             st.success(
                 f"Run complete: {final.completed} {period_label}s, seed {config.seed} "
                 "(same seed + same settings = same charts)."
@@ -1538,18 +1706,33 @@ def _run_live(
             _final_summary_area(timeseries)
             if recorder is not None:
                 folder = recorder.finalize()
-                settled = True
-                st.session_state.pop("_discard_note", None)  # clean end: no banner
                 charts.export_run_charts(recorder.timeseries, folder, carrying_capacity=capacity)
                 st.caption(f"Recorded to {folder} — see the Results browser tab.")
-        st.session_state["last_run"] = {
-            "timeseries": timeseries,
-            "note": note,
-            "carrying_capacity": capacity,
-        }
-    finally:
-        if recorder is not None and not settled:
+        elif recorder is not None:
+            # Unreachable with the engine (every stream closes with
+            # RunFinished); a recording without one must not ghost.
             _discard_recording(recorder)
+        _finish_live_run(live, note, capacity)
+    elif period is not None:
+        progress.caption(f"{period_label} {period.index + 1} finished")
+
+
+def _schedule_next_pass() -> None:
+    """Sleep the playback delay, then rerun the script for the next pass.
+
+    Called LAST in ``main`` so every tab has rendered before the pass
+    ends — which is also why the Results browser and Sweep tabs keep a run
+    advancing while viewed (#183 R4, accepted). A full-script rerun, not a
+    fragment: the E3 probe (DECISIONS #184) found stock AppTest cannot
+    request a fragment-scoped run and a fragment cannot reschedule itself
+    from the full-script passes the mid-run contract requires.
+    """
+    live: LiveRun | None = st.session_state.get(LIVE_RUN_KEY)
+    if live is None or live.finished:
+        return
+    if live.delay > 0:
+        time.sleep(live.delay)
+    st.rerun()
 
 
 def _discard_recording(recorder: RunRecorder) -> None:
@@ -1797,40 +1980,87 @@ def _results_browser() -> None:
     _final_summary_area(loaded.timeseries)
 
 
-def _run_lab() -> None:
-    """Lay out the live-run experience: scenario, panel, controls, charts."""
-    _scenario_area()
-    load_note = st.session_state.pop("_load_note", None)
-    if load_note:
-        st.success(load_note)
-    discard_note = st.session_state.pop("_discard_note", None)
-    if discard_note:
-        st.info(discard_note)  # staged by a run Streamlit killed mid-loop (#53)
-    values, composition, strategy_params = _parameter_panel()
+class _RunControls(NamedTuple):
+    """What the run-controls row returned this script run.
 
-    mix_total = sum(composition.values())
-    size = int(values["population.size"])  # type: ignore[arg-type]
-    if mix_total == size:
-        st.caption(f"Population mix OK: {mix_total} agents.")
-    else:
-        st.warning(
-            f"The population mix sums to {mix_total}, but the population size is "
-            f"{size}. Adjust the counts (or the size) to enable Run."
-        )
+    Attributes:
+        granularity: The finest event level the NEXT run will request.
+        delay: The playback-delay slider (seconds).
+        per_round: Score view — per-round when True (DECISIONS #44).
+        whole_game: Time scope — whole-game when True and not greyed (#45).
+        record: The "Record this run" checkbox.
+        run_clicked: Whether Run was pressed this script run.
+    """
 
-    tournament = values["run.mode"] == "tournament"
+    granularity: str
+    delay: float
+    per_round: bool
+    whole_game: bool
+    record: bool
+    run_clicked: bool
+
+
+def _toggle_values_from_state(displayed_mode: str | None) -> tuple[bool, bool, float]:
+    """Read the display toggles from session state BEFORE their widgets render.
+
+    A pass advances the engine before the run-controls row is painted, so
+    the row can show the state AFTER the pass — Run re-enabled and
+    granularity live the moment a run finishes or stops, with no extra
+    script run. The pass therefore reads the toggles' values from session
+    state, which Streamlit fills from the browser's widget states before
+    the script runs (a flipped radio is already there), using the same
+    defaults the widgets carry. Reading a widget's key before it renders is
+    legal; only writing is not.
+
+    Args:
+        displayed_mode: The mode of the run on screen (the live run's) —
+            decides whether the time scope is greyed (#183 R4).
+
+    Returns:
+        ``(per_round, whole_game, delay)`` for this pass.
+    """
+    per_round = st.session_state.get("score_view", "total") == "per_round"
+    scope = st.session_state.get("time_scope", "generation")
+    whole_game = scope == "whole_game" and not helpers.time_scope_greyed(displayed_mode)
+    delay = float(st.session_state.get("playback_delay", 0.05))
+    return per_round, whole_game, delay
+
+
+def _run_controls(
+    *, running: bool, tournament_next: bool, mix_ok: bool, displayed_mode: str | None
+) -> _RunControls:
+    """Render the run-controls row: the four display toggles, Record, Run, Stop.
+
+    Args:
+        running: Whether a run is in progress AFTER this pass — greys
+            granularity (#183 R1) and disables Run (#183 R4).
+        tournament_next: Whether the mode strip says tournament — labels
+            the coarse granularity level "cycle" for the NEXT run.
+        mix_ok: Whether the population mix sums to the size (the Run gate).
+        displayed_mode: The mode of the run on screen, if any — the
+            time-scope greying's only input (#183 R4).
+
+    Returns:
+        The row's values, including whether Run was clicked.
+    """
     col_gran, col_speed, col_view, col_scope, col_run, col_stop = st.columns([2, 2, 2, 2, 1, 1])
+    granularity_help = (
+        "The finest event level the engine reports while running. Charts always "
+        "update per generation/cycle; finer levels drive the progress line. "
+        "Fine granularity is meant for small populations (DESIGN §4). "
+        "Granularity never changes results — only what you watch."
+    )
+    if running:
+        # Bound at run start (#35), so greyed mid-run with the note — the
+        # #34 grey-never-hide pattern (#183 R1).
+        granularity_help = f"{granularity_help}\n\n{GRANULARITY_RUNNING_NOTE}"
     granularity = col_gran.selectbox(
         "Update granularity",
         options=["generation", "match", "round"],
         key="granularity",
-        format_func=lambda g: "cycle" if g == "generation" and tournament else g,
-        help=(
-            "The finest event level the engine reports while running. Charts always "
-            "update per generation/cycle; finer levels drive the progress line. "
-            "Fine granularity is meant for small populations (DESIGN §4). "
-            "Granularity never changes results — only what you watch."
-        ),
+        format_func=lambda g: "cycle" if g == "generation" and tournament_next else g,
+        disabled=running,
+        help=granularity_help,
     )
     delay = col_speed.slider(
         "Playback delay (s)",
@@ -1839,7 +2069,10 @@ def _run_lab() -> None:
         value=0.05,
         step=0.05,
         key="playback_delay",
-        help="Pause after each chart refresh, so you can watch the run unfold.",
+        help=(
+            "Pause after each chart refresh, so you can watch the run unfold. "
+            "Changing it mid-run takes effect from the next refresh."
+        ),
     )
     score_view = col_view.radio(
         "Score view",
@@ -1852,11 +2085,11 @@ def _run_lab() -> None:
             "population size and match length (roughly payoff x (N-1) x rounds). "
             "'Per round' divides by the rounds actually played, landing on the "
             "payoff-matrix scale (0-5 with the default payoffs) so different "
-            "setups compare directly. Switching after a run re-renders the last "
-            "results without re-running."
+            "setups compare directly. Switching mid-run re-renders the live "
+            "chart as the run continues; switching after a run re-renders the "
+            "last results without re-running."
         ),
     )
-    per_round = score_view == "per_round"
     record = st.checkbox(
         "Record this run",
         value=True,
@@ -1868,28 +2101,102 @@ def _run_lab() -> None:
             "reproducibility is the platform's ethos, and the folders are small."
         ),
     )
+    scope_greyed = helpers.time_scope_greyed(displayed_mode)
     scope = col_scope.radio(
         "Time scope",
         options=["generation", "whole_game"],
         key="time_scope",
         horizontal=True,
-        disabled=tournament,
+        disabled=scope_greyed,
         format_func=lambda s: "This generation" if s == "generation" else "Whole game",
         help=(
             "'This generation' plots each generation's own scores — jumpy but "
             "immediate. 'Whole game' plots the running average over the entire run "
-            "so far, so lines move gradually as evidence accumulates. In tournament "
-            "mode this is greyed out: tournament scores never reset, so they are "
-            "already whole-game figures."
+            "so far, so lines move gradually as evidence accumulates. Greyed out "
+            "while a tournament run is displayed: tournament scores never reset, "
+            "so they are already whole-game figures."
         ),
     )
-    whole_game = scope == "whole_game" and not tournament
+    # Run is disabled while a run is in progress (#183 R4) — the same idiom
+    # as the composition-sum gate; parameters stay editable but inert until
+    # the next Run, because the running engine consumed a config frozen at
+    # the click. Stop sets a flag the NEXT pass honours.
     run_clicked = col_run.button(
-        "Run", type="primary", key="run_button", disabled=mix_total != size
+        "Run", type="primary", key="run_button", disabled=not mix_ok or running
     )
     col_stop.button("Stop", key="stop_button", on_click=_request_stop)
+    return _RunControls(
+        granularity=str(granularity),
+        delay=float(delay),
+        per_round=score_view == "per_round",
+        whole_game=scope == "whole_game" and not scope_greyed,
+        record=bool(record),
+        run_clicked=bool(run_clicked),
+    )
 
-    if run_clicked:
+
+def _run_lab() -> None:
+    """Lay out the live-run experience: scenario, panel, controls, charts.
+
+    Order of work on a pass (M11b Phase E3): the panel renders; then, if a
+    run is in progress, the pass advances it and paints its charts BEFORE
+    the run-controls row is painted — the row lives in a container created
+    above the charts and filled afterwards, so it shows the state after the
+    pass (Run re-enabled the moment a run finishes). Only the click's own
+    script run paints the row before its run exists; the next pass, scheduled
+    immediately, greys it (#184 f3).
+    """
+    _scenario_area()
+    load_note = st.session_state.pop("_load_note", None)
+    if load_note:
+        st.success(load_note)
+    discard_note = st.session_state.pop("_discard_note", None)
+    if discard_note:
+        st.info(discard_note)  # staged by an abandoned recorded run (#53/#184)
+    values, composition, strategy_params = _parameter_panel()
+
+    mix_total = sum(composition.values())
+    size = int(values["population.size"])  # type: ignore[arg-type]
+    if mix_total == size:
+        st.caption(f"Population mix OK: {mix_total} agents.")
+    else:
+        st.warning(
+            f"The population mix sums to {mix_total}, but the population size is "
+            f"{size}. Adjust the counts (or the size) to enable Run."
+        )
+
+    controls_area = st.container()  # the row's position; filled after the pass
+    live: LiveRun | None = st.session_state.get(LIVE_RUN_KEY)
+    pass_ran = live is not None  # a finishing/stopping pass paints its own charts
+    if live is not None:
+        # Every pass reads the toggles fresh (#168) — from session state,
+        # because the row has not rendered yet this pass.
+        per_round, whole_game, delay = _toggle_values_from_state(live.mode)
+        live.delay = delay
+        _live_pass(live, per_round, whole_game)
+        live = st.session_state.get(LIVE_RUN_KEY)  # cleared by a finishing/stopping pass
+
+    # The run being DISPLAYED (#183 R4): the live run while one is in
+    # progress, else the persisted last run, else nothing. The time-scope
+    # greying keys off THIS, never off the panel's run.mode — the mode
+    # strip says what the next run will be, not what is on screen.
+    last = st.session_state.get("last_run")
+    running = live is not None
+    if live is not None:
+        displayed_mode: str | None = live.mode
+    elif last is not None:
+        displayed_mode = last["timeseries"].mode
+    else:
+        displayed_mode = None
+    with controls_area:
+        controls = _run_controls(
+            running=running,
+            tournament_next=values["run.mode"] == "tournament",
+            mix_ok=mix_total == size,
+            displayed_mode=displayed_mode,
+        )
+
+    if controls.run_clicked and not running:
         st.session_state["stop_requested"] = False
         try:
             config = helpers.build_config(values, composition, strategy_params)
@@ -1901,27 +2208,28 @@ def _run_lab() -> None:
             # scenario cell in the browser table read as missing data (#52).
             choice = st.session_state.get("_loaded_scenario")
             scenario = str(choice) if choice else CUSTOM
-            _run_live(config, granularity, delay, per_round, whole_game, record, scenario)
-    else:
-        last = st.session_state.get("last_run")
-        if last is not None:
-            timeseries = last["timeseries"]
-            st.caption(f"{last['note']} — switch the score views to re-render, or press Run.")
-            if any(t is not None for t in timeseries.gen_equiv_times):
-                st.caption(GEN_EQUIV_AXIS_NOTE)
-            col_left, col_right = st.columns(2)
-            _draw_charts(
-                timeseries,
-                col_left.empty(),
-                col_right.empty(),
-                st.empty(),
-                0,
-                per_round,
-                whole_game,
-                economy=_economy_placeholders(),
-                carrying_capacity=last.get("carrying_capacity"),
-            )
-            _final_summary_area(timeseries)
+            live = _start_live_run(config, controls.granularity, controls.record, scenario)
+            st.session_state[LIVE_RUN_KEY] = live
+            live.delay = controls.delay
+            _live_pass(live, controls.per_round, controls.whole_game)
+    elif not running and not pass_ran and last is not None and not controls.run_clicked:
+        timeseries = last["timeseries"]
+        st.caption(f"{last['note']} — switch the score views to re-render, or press Run.")
+        if any(t is not None for t in timeseries.gen_equiv_times):
+            st.caption(GEN_EQUIV_AXIS_NOTE)
+        col_left, col_right = st.columns(2)
+        _draw_charts(
+            timeseries,
+            col_left.empty(),
+            col_right.empty(),
+            st.empty(),
+            0,
+            controls.per_round,
+            controls.whole_game,
+            economy=_economy_placeholders(),
+            carrying_capacity=last.get("carrying_capacity"),
+        )
+        _final_summary_area(timeseries)
 
 
 def _fill_range_field(target_key: str, start: int, stop: int, step: int) -> None:
@@ -2544,16 +2852,33 @@ def _sweep_tab() -> None:
 
 
 def main() -> None:
-    """Lay out the app: the Run lab, Results browser, and Sweep tabs."""
-    st.title("Evolutionary Prisoner's Dilemma Simulator")
-    _apply_pending_load()
-    tab_lab, tab_browser, tab_sweep = st.tabs(["Run lab", "Results browser", "Sweep"])
-    with tab_lab:
-        _run_lab()
-    with tab_browser:
-        _results_browser()
-    with tab_sweep:
-        _sweep_tab()
+    """Lay out the app: the Run lab, Results browser, and Sweep tabs.
+
+    A live run's next pass is scheduled LAST, after every tab has rendered.
+    Streamlit's own STOP — the header's Stop button, or the session
+    shutting down — reaches the script as ``StopException`` at its next
+    element call; a run in progress is then abandoned the way an
+    interrupted script's was (recording discarded, #53/#54), instead of
+    leaving an open recorder behind in session memory. A user interaction
+    mid-pass is a ``RerunException`` and is deliberately NOT caught: the
+    holder survives it and the next pass continues the run (#183 R4).
+    """
+    try:
+        st.title("Evolutionary Prisoner's Dilemma Simulator")
+        _apply_pending_load()
+        tab_lab, tab_browser, tab_sweep = st.tabs(["Run lab", "Results browser", "Sweep"])
+        with tab_lab:
+            _run_lab()
+        with tab_browser:
+            _results_browser()
+        with tab_sweep:
+            _sweep_tab()
+        _schedule_next_pass()
+    except StopException:
+        live: LiveRun | None = st.session_state.get(LIVE_RUN_KEY)
+        if live is not None:
+            _abandon_live_run(live)
+        raise
 
 
 main()
