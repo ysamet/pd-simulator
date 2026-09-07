@@ -395,6 +395,16 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     the #94 throttle kept as cached-figure re-emission. Real app
     measured at ≈ 0.17–0.23 s per pass. Zero re-recordings, zero new
     goldens; 1255 tests passing.
+    ✏️ **M11b Phase E4 SCOPED 2026-09-05** (DECISIONS #185): the mouse
+    layout painter's draft prompt is in
+    `docs/design-notes/M11b-E4-painter-prompt-draft.md` awaiting
+    design-layer ratification (rulings → #186; build → #187). The
+    verified constraints: a mouse stroke is not headlessly drivable
+    (Streamlit selection state cannot be set programmatically; AppTest
+    has no plotly element), the heatmap renderer cannot be the click
+    surface (no selection support), so the canvas is a second,
+    scatter-based input figure gated on the existing pixel-array
+    predicate; zero re-recordings, zero new goldens.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

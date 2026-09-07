@@ -6185,3 +6185,73 @@ for E5 per #182(f4)); CLAUDE.md's current-phase paragraph (E3 landed;
 next E4) — the validation-precision paragraph untouched because the
 run controls did not move; ROADMAP's E3 status line; the spec's status
 line only.
+
+**#185 — 2026-09-05 — Phase E4 SCOPED (implementation layer): the
+mouse layout painter's scoping findings, logged as OPEN design state,
+and the draft prompt written for design-layer ratification
+(`docs/design-notes/M11b-E4-painter-prompt-draft.md`; spec Phase E
+bullet E4 / V5, #109, #145, #180, #183/#184). Nothing contradicts the
+scoping brief; 1,255 tests collected.** The findings, each verified
+against the installed Streamlit 1.58.0 and plotly 6.8.0 (the Python
+source AND the frontend bundle), with the ruling each one forces:
+(F1) Streamlit's own `PlotlySelectionState` docstring says selection
+states "cannot be programmatically changed or set through Session
+State", and AppTest's element tree models no plotly element (it lands
+as `UnknownElement`) — so a mouse stroke is NOT headlessly drivable;
+the stroke → cells translation becomes a pure function pinned on
+synthetic selection dictionaries, the pipeline pins drive the painter
+through its buttons, and the stroke itself is owner-validated (the
+#180 precedent). (F2) `go.Heatmap(selectedpoints=…)` raises
+`ValueError` while `go.Scatter` accepts it — plotly's heatmap and image
+traces have no selection support — so `grid_chart` cannot be the click
+surface: the canvas is a SECOND figure kind, one scatter of square
+markers in row-major site order (point index = site id), a recorded
+departure from #145(d)'s one-renderer discipline, justified because
+the canvas is an INPUT widget while every read-only view stays on
+`grid_chart` and the Run lab's founding preview of the SAVED file is
+the truth the validation reads. (F3) The 1.58 frontend bundle: with
+selection on, `clickmode` is `event+select` only when the points mode
+is enabled, `dragmode` defaults to `pan` unless the figure sets its
+own, and an active select/lasso drag tool forces `clickmode` to
+`event` — a plain click does not select under a drag tool; the canvas
+therefore sets `dragmode="select"` (drag paints a rectangle; single
+cells by a small drag, or the pan tool plus a click), owner-validated.
+(F4) The callback form `on_select=<callable>` fires once per selection
+change in the pre-render window (`SessionState._call_callbacks`, the
+#124 window); the `"rerun"` form would re-return the same selection
+every later pass and needs a de-duplication signature — kept only as
+the reported fallback. (F5) `plotly_chart` hashes the figure spec into
+its element id (#184(a)(vii)), so every effective stroke remounts the
+canvas and clears the highlight; unselected opacity is set to 1 so a
+no-op stroke dims nothing. (F6) ADJACENT, pre-existing: `pyproject.
+toml` still declares `streamlit>=1.30` while E1/E2 rely on 1.58 APIs
+and `on_select` needs ≥ 1.35 — a floor bump to `>=1.58` is proposed.
+(F7) ADJACENT: `grid_templates/Grid_Layout_Template.md`, an
+owner-authored 20 × 20 sample committed with the Phase B fix
+(aa94eee) under an `.md` suffix, parses as a valid layout but is
+referenced nowhere; the painter's file list is proposed as `.txt`
+only, the file left alone. (F8) Every tab renders every pass,
+live-run passes included (#183 R4), so the canvas is serialised per
+pass; the draft prompt measures it and pre-authorises a rebuild cache.
+(F9) No registry parameter, no greying row, no engine/config/io change
+beyond a pure `format_layout_file` in `layouts.py` that no engine path
+calls (pinned); zero re-recordings, zero new goldens. THE PROPOSED
+RULINGS (R1–R14 in the draft, each with alternatives): a fourth
+top-level tab "Layout painter" second in the strip, the parameter
+panel byte-untouched but for factoring its lookahead block into
+`_panel_lookahead`; `charts.paint_canvas` + `paint_cell_side` gated on
+the EXISTING `pixel_array_active` predicate (no second threshold);
+`pdsim/ui/painter_helpers.py` with a mutable `LayoutDraft` under
+`_layout_draft` (app state, never in the keep-alive); the formatter
+in `layouts.py` as the format's single home; saves into
+`grid_templates/` under bare names (the #122 home), shipped examples
+and separators refused, overwrite behind a checkbox, no `.gitignore`
+change; the hand-off as a button callback reusing
+`_populate_from_layout_file` and leaving the A2 baseline alone; three
+seeds (blank, an existing file, the Run lab's founding preview);
+brush = registry display names plus the eraser; single-level undo;
+two registry help sentences (gendocs); tests as listed; docs
+obligations as listed. Numbering: the ratified rulings are #186 (the
+build session appends them verbatim), the build record #187. Nothing
+in code changed this session; ROADMAP gained the scoping line.
+
