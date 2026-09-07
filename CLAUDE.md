@@ -135,6 +135,21 @@ files in `docs/` are the ONLY shared memory between these environments.** The ch
 side never sees this conversation, the code, or the commit history — it sees only
 the `docs/` files the user uploads to it.
 
+**Scoping briefs are design-layer input (owner request 2026-09-06, after the
+Phase E4 brief reached this layer by mistake and produced DECISIONS #185).** A
+message that asks to "scope", "read fresh before drafting", "report anything
+contradicting this message before drafting begins", or otherwise to produce
+rulings, a findings report, or a draft prompt is addressed to the design layer,
+not to this one. If such a message arrives here, do not scope, do not propose
+rulings, do not draft a prompt, and do not append to DECISIONS.md or
+ROADMAP.md. Instead, run read-only reconnaissance limited to what only this
+layer can verify — the installed library versions and their behaviour, source
+lines that establish a binding, the test harness's reach — and hand back a
+findings-only report with the sources quoted, stating in its first line that
+the brief appears to be design-layer input and that no rulings or drafts were
+produced. The design layer turns findings into rulings; this layer turns
+rulings into builds.
+
 **The standard every `docs/` file must meet:** an external advisor (human or AI)
 who reads ONLY `docs/DESIGN.md`, `docs/DECISIONS.md`, `docs/ROADMAP.md`, and
 `docs/specs/*` must be able to give correct, current advice about this project —
