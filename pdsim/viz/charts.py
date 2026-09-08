@@ -70,6 +70,18 @@ the extra room.
 """
 
 
+EMPTY_CELL_COLOR = "#dcdcdc"
+"""The painter canvas's colour for an EMPTY site (M11b Phase E4, DECISIONS #186 R2).
+
+The read-only grid shows an empty site as plot background; the painter
+cannot, because every site must be a clickable POINT — a light grey square
+that a drag can select and a hover can name.
+"""
+
+PAINT_LEGEND_ROOM_PX = 70
+"""Vertical room the painter canvas keeps below its grid for the horizontal legend."""
+
+
 def strategy_colors() -> dict[str, str]:
     """Map every registered strategy to a stable color.
 
@@ -335,6 +347,195 @@ def grid_chart(
     if canvas is not None:
         width, height = canvas
         figure.update_layout(width=width, height=height)
+    return figure
+
+
+def paint_cell_side(rows: int, cols: int) -> int | None:
+    """The painter canvas's cell side in pixels, or ``None`` when it cannot paint.
+
+    ONE predicate, ONE documented threshold (§12's one-source rule; #145(c);
+    #186 R3): the canvas renders exactly when :func:`pixel_array_active` is
+    False — at most :data:`PIXEL_ARRAY_THRESHOLD` sites AND a naive cell side
+    of at least :data:`BORDER_MIN_SIDE_PX` — so "too fine to paint" and
+    "drawn as a pixel array" are the same fact read from the same function.
+    The side is the naive side truncated to whole pixels, so it is ≥ 6 by
+    construction wherever a side is returned.
+
+    Args:
+        rows: Grid row count.
+        cols: Grid column count.
+
+    Returns:
+        The whole-pixel cell side, or ``None`` when the grid is too fine to
+        paint by mouse (the app then shows a sentence instead of a canvas).
+    """
+    if pixel_array_active(rows, cols):
+        return None
+    return int(_naive_cell_side(rows, cols))
+
+
+PAINT_DRAG_MODES: frozenset[str] = frozenset({"select", "lasso"})
+"""The drag modes the painter canvas accepts: a box or a freehand path (#188).
+
+Never ``pan`` or ``zoom``: a painter has no zoom, so pan has nothing to move
+(the owner's ruling, DECISIONS #188) — and plotly hides the zoom/pan
+toolbar group under fixed-range axes anyway.
+"""
+
+
+def paint_canvas(
+    rows: int,
+    cols: int,
+    cells: list[str | None] | tuple[str | None, ...],
+    *,
+    side_px: int,
+    dragmode: str = "select",
+    title: str = "Layout painter",
+) -> go.Figure:
+    """Draw the Layout painter's click surface: one square marker per site.
+
+    The project's first INPUT figure (M11b Phase E4, DECISIONS #186 R2) and a
+    recorded departure from the one-renderer discipline of #145(d) — it is
+    NOT :func:`grid_chart` because plotly's heatmap and image traces have no
+    selection support at all (``go.Heatmap(selectedpoints=…)`` raises; the
+    E4 scoping finding F2), so the read-only renderer cannot report a
+    stroke. Every read-only view (panel preview, live run, results browser)
+    stays on :func:`grid_chart`; this canvas exists only to be painted on,
+    and the Run lab's founding preview of the SAVED file is the truth.
+
+    The contract the app relies on: the cells are ONE ``go.Scatter`` of
+    square markers — trace 0 — with its points in row-major site order, so a
+    selection's ``point_index`` IS the site id (pinned by tests). Empty sites
+    take :data:`EMPTY_CELL_COLOR` so every site is a clickable point; the
+    legend is a set of legend-only traces appended AFTER the cells trace, in
+    the one :func:`strategy_colors` palette. The figure carries its own
+    ``dragmode`` — ``"select"`` for a box, ``"lasso"`` for a freehand path —
+    which Streamlit's frontend keeps (and under either it turns
+    click-to-select off, so every stroke is a drag; DECISIONS #188 reads
+    the lasso path back as a brush stroke for the Draw tool); both axes are
+    ``fixedrange`` (a painter has no zoom, hence no pan); selected and
+    unselected marker opacity is 1 so a no-op stroke dims nothing.
+
+    Width and height are explicit — the marker size is in PIXELS, so the
+    figure must not be stretched to the container (the #145 reasoning behind
+    rendering with ``width="content"``). The width never falls below
+    :data:`_MIN_CANVAS_WIDTH` (#149; #186 amendment a): the title and the
+    modebar need the room, and on the painter the modebar carries the pan
+    and lasso tools, so it matters more here than on any read-only view; the
+    square-cell constraint simply centres a narrow grid in the extra width.
+
+    Hover text numbers rows and columns from 1, the way the layout parser's
+    own error messages number file lines and cells (#122(d)), so a hover and
+    an error never disagree about which cell is which.
+
+    Args:
+        rows: Grid row count.
+        cols: Grid column count.
+        cells: One entry per site in row-major order — a strategy machine
+            name or ``None`` for an empty site.
+        side_px: The cell side from :func:`paint_cell_side` (the marker is
+            one pixel smaller, mirroring the heatmap's 1 px ``xgap``/``ygap``).
+        dragmode: One of :data:`PAINT_DRAG_MODES` — what a drag on the
+            canvas does in the browser.
+        title: Figure title.
+
+    Returns:
+        The canvas figure, sized to its grid.
+
+    Raises:
+        ValueError: If ``dragmode`` is not a painter drag mode.
+    """
+    if dragmode not in PAINT_DRAG_MODES:
+        raise ValueError(
+            f"The painter canvas takes dragmode {sorted(PAINT_DRAG_MODES)}, not {dragmode!r}."
+        )
+    colors = strategy_colors()
+    # One display-name lookup for the whole grid rather than a registry walk
+    # per cell: at 2,500 sites the per-cell walk dominated the build.
+    display_names = {info.name: info.display_name for info in all_strategies()}
+    site_count = rows * cols
+    xs = [site_id % cols for site_id in range(site_count)]
+    ys = [site_id // cols for site_id in range(site_count)]
+    marker_colors = [
+        EMPTY_CELL_COLOR if cell is None else colors.get(cell, _FALLBACK_COLOR) for cell in cells
+    ]
+    hover = [
+        f"row {site_id // cols + 1}, col {site_id % cols + 1} — "
+        f"{'empty' if cell is None else display_names.get(cell, cell)}"
+        for site_id, cell in enumerate(cells)
+    ]
+    figure = go.Figure(
+        go.Scatter(
+            x=xs,
+            y=ys,
+            mode="markers",
+            marker={
+                "symbol": "square",
+                "size": max(side_px - 1, 1),
+                "color": marker_colors,
+                "line": {"width": 0},
+                "opacity": 1,
+            },
+            selected={"marker": {"opacity": 1}},
+            unselected={"marker": {"opacity": 1}},
+            text=hover,
+            hovertemplate="%{text}<extra></extra>",
+            showlegend=False,
+            name="cells",
+        )
+    )
+    # The colour key: legend-only traces (no data points), one per registered
+    # strategy plus the empty cell, AFTER the cells trace so trace 0 stays the
+    # cells trace and only curve 0 counts as a stroke.
+    legend_entries = [(info.display_name, colors[info.name]) for info in all_strategies()]
+    legend_entries.append(("Empty", EMPTY_CELL_COLOR))
+    for label, color in legend_entries:
+        figure.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker={"symbol": "square", "size": 12, "color": color},
+                name=label,
+                hoverinfo="skip",
+                showlegend=True,
+            )
+        )
+    width = max(cols * side_px + 40, _MIN_CANVAS_WIDTH)
+    height = rows * side_px + 60 + PAINT_LEGEND_ROOM_PX
+    figure.update_layout(
+        title=title,
+        width=width,
+        height=height,
+        # l=20 + r=20 horizontally; t=40 + b=20 vertically as on grid_chart,
+        # plus the legend's room below the grid.
+        margin={"l": 20, "r": 20, "t": 40, "b": 20 + PAINT_LEGEND_ROOM_PX},
+        plot_bgcolor="rgba(0,0,0,0.06)",
+        dragmode=dragmode,
+        hovermode="closest",
+        showlegend=True,
+        legend={"orientation": "h", "yanchor": "top", "y": -0.02, "xanchor": "left", "x": 0},
+    )
+    figure.update_xaxes(
+        range=[-0.5, cols - 0.5],
+        fixedrange=True,
+        showticklabels=False,
+        showgrid=False,
+        zeroline=False,
+    )
+    # Explicit REVERSED range so row 0 renders at the top, as a layout file
+    # is written and read; scaleanchor keeps the cells exactly square, and
+    # the explicit ranges (rather than autorange) keep the cell pitch equal
+    # to side_px so the pixel-sized markers tile the grid without overlap.
+    figure.update_yaxes(
+        range=[rows - 0.5, -0.5],
+        fixedrange=True,
+        showticklabels=False,
+        showgrid=False,
+        zeroline=False,
+        scaleanchor="x",
+        scaleratio=1,
+    )
     return figure
 
 

@@ -6255,3 +6255,494 @@ obligations as listed. Numbering: the ratified rulings are #186 (the
 build session appends them verbatim), the build record #187. Nothing
 in code changed this session; ROADMAP gained the scoping line.
 
+**#186 — 2026-09-06 — Phase E4 pre-drafting rulings (design layer):
+the painter is a fourth top-level tab "Layout painter", second in the
+strip, the parameter panel byte-untouched but for factoring its
+lookahead block (R1, OC1); the canvas is a second, INPUT-only figure
+kind — one scatter of square markers in row-major site order — with
+the #149 minimum canvas width enforced and hover numbering matching
+the parser's messages (R2, amendment a); paintability is the existing
+`pixel_array_active` predicate negated, no second threshold, with a
+forward note reserving a large-grid editing surface for M19 (R3);
+a Streamlit-free `painter_helpers.py` with a mutable `LayoutDraft` in
+app state and a completeness pin on the protected shipped-examples
+tuple (R4, amendment b); `format_layout_file` as the format's write
+side in `layouts.py`, saves into `grid_templates/` under bare names,
+overwrite behind a checkbox, no `.gitignore` change, the comment line
+CONDITIONAL on the parser already skipping `#` lines (R5, amendment
+c); the hand-off is a callback reusing `_populate_from_layout_file`,
+enabled only for a saved, unchanged draft placing at least two agents
+(R6, amendment d); three seeds (R7); brush from the registry (R8);
+overwrite-on-paint, one-level undo, §12-style readouts (R9); two
+registry help sentences, gendocs (R10); the Streamlit floor raised to
+1.58 (R11); tests as adjusted (R12); docs as listed plus the ROADMAP
+forward note (R13); zero re-recordings, zero new goldens (R14); the
+stray `Grid_Layout_Template.md` becomes a third protected example
+(OC2) (M11b Phase E4; spec Phase E bullet E4 / V5, #109, #120(d),
+#122, #123, #126, #143, #145, #149, #180, #183–#185).**
+Process note: the scoping brief reached the implementation layer by
+mistake and produced #185 (findings) and the draft prompt; CLAUDE.md
+now says scoping briefs are design-layer input. The design layer
+re-verified every proposal against #185, the draft, and the entries
+above; the fourteen proposals are ratified as follows, with four
+amendments and two owner calls.
+R1 PLACEMENT: a fourth `st.tabs` entry "Layout painter" — the Sweep
+tab is the precedent for a tool that writes something the run then
+consumes, and the painter depends on the panel only through its
+explicit "start from the founding preview" seed. Rejected: a block
+inside the Structure section (an input canvas inside a mode-gated
+two-column expander, still needing its own state). OC1: SECOND in the
+strip — `["Run lab", "Layout painter", "Results browser", "Sweep"]` —
+because the painter feeds the Run lab; no test indexes tab positions.
+`_parameter_panel`, `_structure_panel`, the #141 table, `SECTION_GATES`
+and the keep-alive list stay byte-untouched except for the one
+factoring in R7 (the #178 R10 discipline).
+R2 THE CLICK SURFACE: plotly's heatmap and image traces have no
+selection support (`go.Heatmap(selectedpoints=…)` raises; F2), so
+`grid_chart` cannot be the canvas. `charts.paint_canvas` is ONE
+`go.Scatter` of square markers, points in row-major site order so
+`point_index` IS the site id (pinned); empty sites in a new module
+constant `EMPTY_CELL_COLOR` so every site is a clickable point; colours
+from the one `strategy_colors()` palette; legend-only dummy traces
+appended AFTER the cells trace (trace 0, pinned); `dragmode="select"`;
+both axes `fixedrange`; y reversed with `scaleanchor`; selected and
+unselected marker opacity 1 (F5); explicit width and height; rendered
+with `width="content"` (a stretched canvas would break pixel-sized
+markers, the #145 reasoning). A recorded departure from #145(d)'s
+one-renderer discipline, justified because the canvas is an INPUT
+widget: every read-only view stays on `grid_chart`, and the Run lab's
+founding preview of the SAVED file is the truth the validation reads.
+AMENDMENT (a): the canvas width never falls below the existing
+`_MIN_CANVAS_WIDTH = 320` of #149 (the room the title and modebar
+need — and on the painter the modebar carries the pan and lasso tools,
+so it matters more than on any read-only view); the square-cell
+constraint centres a narrow grid in the extra width. The design
+layer's re-verification corrected the pin grid: 1 × 3 gets side
+min(700/3, 450/1) = 233 px and width 739 px, already above 320; the
+width falls below 320 only on tall narrow grids — 60 × 5 gets side
+min(700/5, 450/60) = 7.5 → 7 px and width 5 × 7 + 40 = 75 px — so the
+pin is `paint_canvas(60, 5, …)` at width exactly 320, the grid #149
+already uses as its "keeps its heatmap" case. Also: the hover text's
+row and column numbers follow the layout parser's own error-message
+convention (#122(d): file line and cell number), so a hover and an
+error never disagree about which cell is which.
+R3 PAINTABLE SIZE: the canvas renders exactly when
+`charts.pixel_array_active(rows, cols)` is False (≤ 2,500 sites AND
+naive side ≥ 6 px); the side is `int(_naive_cell_side(rows, cols))`,
+≥ 6 by construction; otherwise the tab shows a sentence: the grid is
+too fine to paint by mouse — shrink it or write the file by hand. One
+predicate, one documented threshold (§12's one-source rule; #145(c)).
+Rejected: a painter-only minimum; a WebGL scatter. FORWARD NOTE (owner
+ruling 2026-09-06): the larger the grid and population, the harder a
+layout file is to write by hand and the stronger the need for a
+graphical editor — the owner's stated destination is real state and
+country maps with large populations (M19). This ruling keeps the
+mouse canvas within the paintable regime but must not foreclose that
+surface: `LayoutDraft` and every helper are grid-size-agnostic (rows,
+cols, cells — nothing about pixels), the canvas is ONE renderer over
+the draft, and a future large-grid editor (a zoomed viewport with
+region tools over the pixel-array regime, or a map-shaped site set)
+is a SECOND renderer over the same draft and the same save path, with
+no engine implication. Recorded on ROADMAP's M19 line.
+R4 STATE AND HELPERS: `pdsim/ui/painter_helpers.py` (Streamlit-free,
+the `sweep_helpers.py` precedent) holds `LayoutDraft` — a mutable
+`@dataclass` like `LiveRun` (rows, cols, `cells: list[str | None]`,
+`saved_as: str | None`, `dirty: bool`, `undo_cells` for one level) —
+and pure functions: `blank_draft`, `draft_from_layout(LayoutFile)`,
+`draft_from_placements(rows, cols, placements)`, `resize_draft`
+(top-left overlap kept, growth padded empty), `cells_from_selection(
+selection, site_count)`, `apply_brush(draft, cells, brush) -> int`
+(changed count; the undo snapshot recorded only when something
+changed; sets dirty), `undo_stroke`, `fill_all`, `clear_all`,
+`draft_layout_file(draft) -> LayoutFile` (so `occupied_count` and
+`strategy_counts` are REUSED), `template_names()` (sorted `.txt`
+names in `layouts.GRID_TEMPLATES_DIR`, read at call time),
+`normalise_template_name`, `template_name_problem(name, *, exists,
+replace) -> str | None`, `save_draft(draft, directory, name) -> Path`,
+and the protected tuple `SHIPPED_TEMPLATES`. The draft lives under
+`PAINTER_DRAFT_KEY = "_layout_draft"` beside `LIVE_RUN_KEY` — app
+state, never in `_preserve_hidden_widget_state`. The brush is `str |
+None` (None = eraser). AMENDMENT (b): a test pins that every
+`example_*.txt` actually present in `grid_templates/` appears in
+`SHIPPED_TEMPLATES`, so a later shipped example cannot be overwritten
+silently because nobody added it to the tuple.
+R5 THE FILE: `layouts.format_layout_file(layout: LayoutFile, ...) ->
+str` — the three header lines, a blank line, one whitespace-separated
+line per row, `.` for empty, trailing newline, round trip pinned; the
+core module owns the FORMAT in both directions and touches no
+filesystem; only the app writes files; a test pins that no engine
+module references the formatter (hard rules 4 and 8). Save target:
+`layouts.GRID_TEMPLATES_DIR / name` (#122's home, read at call time);
+refused: a blank name, a name with a path separator or absolute (#122
+bare-name rule), and any protected example; an existing file needs the
+"Replace the existing file" checkbox. No `.gitignore` change: a
+painting worth keeping is committed by the owner; a recorded run is
+self-contained regardless (#120(d)). Rejected: an ignored `layouts/`
+folder (a bare name would not resolve there; a path with a separator
+is working-directory-relative — the #122 smell). AMENDMENT (c): the
+draft's optional `#` comment line presupposed that the parser skips
+`#` lines, which no layout-file entry (#122, #123) establishes;
+extending the parser is a change to the READ path that config
+validation runs (#126) — a core format change this display-side phase
+must not make. So Task 0 verifies the installed parser: if it already
+skips `#` lines, the formatter writes ONE fixed comment line with no
+timestamp (a timestamp would make identical paintings differ byte for
+byte); if it does not, the formatter writes no comment line and takes
+no comment argument. Either outcome is a Rule 7 report.
+R6 HAND-OFF: "Use this layout in the Run lab", a button CALLBACK (the
+#124 pre-render window) writing `run.mode = "evolution"`,
+`structure.kind = "lattice"`, the row and column limit widgets to the
+draft's dimensions, `structure.initial_layout = "from_file"`,
+`structure.layout_file = <bare name>`, and the population through the
+EXISTING `_populate_from_layout_file(size, counts)` (#143's write
+path — one path, not two; a callback may write greyed widgets).
+`_loaded_values` (the A2 baseline) is NOT touched: an A2 caution after
+handing off from a well-mixed economy scenario is correct. The
+callback stages the Run lab's `_load_note`. Rejected: handing off an
+unsaved draft (the config must reference a FILE, hard rule 8).
+AMENDMENT (d): the button is enabled only while the draft is saved AND
+unchanged since (`saved_as` set, not `dirty`) AND places at least two
+agents, with the reason shown beside it when disabled — the config
+validator refuses fewer than two (#126) and #124's offer already
+refuses such files; saving stays allowed for any draft. Task 0
+verifies the exact session-state keys of the row/column limit widgets
+before the callback is written.
+R7 SEEDING: "New blank grid" (from the painter's Rows/Columns number
+inputs, default 10 × 10, each in [1, 500] — R3 refuses what cannot be
+painted); "Load into painter" (an "Existing layout file" selectbox over
+`template_names()`, tokens validated via `validate_layout_file`; an
+unknown token shows the #122 sentence and loads nothing); "Start from
+the Run lab's founding preview" — the lookahead-building block of
+`_parameter_panel` is FACTORED into `_panel_lookahead(specs)` and
+called unchanged (behaviour byte-identical, pinned by the existing
+suite), the composition read from the `composition.*` keys, then
+`helpers.grid_visible` → `helpers.grid_preview_config` →
+`layouts.founding_view` → `draft_from_placements`; any failure
+(tournament, well-mixed, a validation message, a missing file) is
+staged as `_painter_note` for the next pass. Changing Rows/Columns
+with a draft present shows a caption and a "Resize grid" button; never
+an implicit resize that discards painted cells.
+R8 BRUSH: `st.radio("Brush", horizontal=True)` over the registered
+strategies' DISPLAY names in registry order plus "Empty (eraser)",
+mapped back through `all_strategies()`; the colour key is the canvas
+legend — one palette.
+R9 STROKES AND READOUTS: every selected cell takes the brush, occupied
+cells included; "Undo last stroke" (one level), "Fill all", "Clear
+all"; readouts with (?) from a `PAINTER_HELP` dict (the
+`STRUCTURE_HELP` precedent): "Sites", "Painted agents" (the population
+size the hand-off sets), "Empty cells", a per-strategy counts caption,
+"Saved as".
+R10 REGISTRY: no new parameter — the painter is a tool. Two help-text
+sentences point at the tab (the `from_file` value of
+`structure.initial_layout`; the end of `structure.layout_file`);
+`python -m pdsim.gendocs` regenerates `PARAMETERS.md`; the drift test
+guards it. Stated plainly: a help-text edit inside the config package,
+the class of edit #122(d) made — no default, validation, or draw
+changes.
+R11 DEPENDENCY FLOOR: `streamlit>=1.30` → `streamlit>=1.58` in
+`pyproject.toml`, with a comment naming `segmented_control(
+required=True)`, keyed expanders, `plotly_chart(on_select=…)`. The
+floor was already false (E1/E2 rely on 1.58); packaging metadata, not
+engine.
+R12 TESTS: all headless. Streamlit's `PlotlySelectionState` docstring
+says selection state cannot be set through session state and AppTest
+models no plotly element (F1), so the stroke → cells translation is a
+pure function pinned on synthetic selection dictionaries, the pipeline
+pins drive the painter through its BUTTONS, and the stroke itself is
+owner-validated (the #180 precedent). The validation pin is the spec's
+V5 chain: hand off → run recorded → `layout.txt` equals the saved text
+byte for byte → `python -m pdsim.run` on the recorded config yields
+identical period tables. Adjusted for the amendments: the 60 × 5
+width pin (a); the protected-tuple completeness pin (b); the comment-
+line test conditional on Task 0's parser finding (c); a hand-off-
+disabled pin for a saved one-agent draft (d). Per-pass cost measured
+with the tab present; a rebuild cache on the draft pre-authorised
+above ≈ 20 ms per pass at 50 × 50.
+R13 DOCS: this entry and #187; DESIGN §2.12 and §6.3 marked shipped,
+the painter removed from §2.12's still-out-of-scope list, §4.1 gains
+an item for the tab while item 3's stale "radio" stays held for E5
+(#182(f4)); CLAUDE.md's validation-precision paragraph (four tabs; the
+painter's widgets sit directly on the tab, no expander) and current-
+phase paragraph; ROADMAP's E4 status line AND the M19 forward note of
+R3; the spec's status line only; `PARAMETERS.md` regenerated;
+`grid_templates/README.md` gains "Painting a layout in the app" and the
+`.txt`-only listing rule; ADVISORIES.md untouched.
+R14 BUDGET: zero re-recordings, zero new goldens; the 31 golden
+masters and every counting pin pass untouched; `layout_consumes_rng`
+untouched; ruff clean. Nothing here touches a draw, so a golden
+failure is a stop, never a re-record.
+OC2 THE STRAY SAMPLE: `grid_templates/Grid_Layout_Template.md` — the
+owner's 20 × 20 sample committed with the Phase B fix (aa94eee), a
+valid layout referenced nowhere — is RENAMED on disk to
+`grid_templates/example_template_20x20.txt`, content untouched, added
+to `SHIPPED_TEMPLATES` and to the existing test that parses shipped
+examples against the strategy registry, so it becomes a third loadable,
+protected example rather than an invisible file that rots. Rejected:
+leaving it (invisible to the `.txt`-only list and unguarded); deleting
+it (the owner wants it).
+
+**#187 — 2026-09-06 — M11b Phase E4 BUILT: the mouse layout painter —
+the fourth top-level "Layout painter" tab (second in the strip), the
+scatter-of-square-markers INPUT canvas gated on the existing
+pixel-array predicate, the Streamlit-free `painter_helpers.py` with the
+grid-size-agnostic `LayoutDraft` in app state, `layouts.
+format_layout_file` as the format's write side (the comment BRANCH of
+amendment c — the parser skips `#` lines), bare-name saves into
+`grid_templates/` with the three protected examples (OC2 renamed), the
+gated hand-off through the existing populate path, three seeds through
+the factored `_panel_lookahead`, the rebuild cache ADOPTED on
+measurement — #186 as ruled, with findings f1–f8.**
+(a) TASK 0 FINDINGS (installed source, never memory). (i) Streamlit
+1.58.0, plotly 6.8.0. (ii) `PlotlySelectionState`'s docstring:
+"Selection states cannot be programmatically changed or set through
+Session State."; `streamlit/testing/v1/element_tree.py` mentions no
+plotly element — a plotly chart lands as `UnknownElement`, which still
+carries the PlotlyChart proto (`spec`, `id`, `selection_mode`,
+`config`, `theme`), so the CANVAS's figure spec IS inspectable
+headlessly and the app pins read it; the element id ends in the user
+key, which is how the tests tell the canvas from the app's other
+charts. (iii) `go.Heatmap(selectedpoints=[1])` raises `ValueError:
+Invalid property specified for object of type
+plotly.graph_objs.Heatmap: 'selectedpoints'`; `go.Image` raises too;
+`go.Scatter` accepts. (iv) The bundle `PlotlyChart.DE72Bh5O.js`, two
+effects: at mount, `clickmode` becomes `event+select` when the points
+mode is enabled (else `none`), `hovermode` `closest`, and — ONLY when
+the figure's own layout sets no `dragmode` — `dragmode` becomes `pan`
+if points are enabled, else `select` (box) or `lasso`; a second
+effect keyed on the figure's `dragmode` forces `clickmode` to `event`
+under `select` or `lasso` (quoted: ``e=S.layout?.dragmode===`select`
+||S.layout?.dragmode===`lasso`?`event`:O?`event+select`:`none` ``) —
+so under the canvas's `dragmode="select"` a plain click never selects,
+and the modebar keeps `select2d`/`lasso2d` only for the enabled modes.
+(v) `register_widget(plotly_chart_proto.id, on_change_handler=
+on_select if callable(on_select) else None, deserializer=serde.
+deserialize, serializer=serde.serialize, ctx=ctx, value_type=
+"string_value")`; `SessionState._call_callbacks` Path 1 calls the
+single callback of every widget whose value changed, before the
+script (the #124 window); `check_widget_policies(…, writes_allowed=
+False)` forbids writing the canvas key through session state — the
+app never does. (vi) `pyproject.toml` declared `streamlit>=1.30`.
+(vii) Seven strategies; display names Always Cooperate, Always
+Defect, Generous Tit for Tat, Grim Trigger, Pavlov (Win-Stay-Lose-
+Shift), Random, Tit for Tat. (viii) No file under `pdsim/tests`
+mentions `tabs`. (ix) THE PARSER SKIPS `#` LINES: `parse_layout_file`
+reads ``if not line or line.startswith("#"): continue`` and its
+docstring says "``#`` begins a comment line" — so the COMMENT BRANCH
+of amendment (c) was built: `format_layout_file(layout, *, comment=
+False)` writes the fixed `# written by the pdsim layout painter` when
+true, and the app's save passes `comment=True`. (x) THE LIMIT-WIDGET
+KEYS: the nullable-int dispatcher renders `st.checkbox(f"Limit {label.
+lower()}?", key=f"{spec.key}#limit")` (bool) and `st.number_input(
+label, min_value=int(spec.minimum or 0), step=1, key=f"{spec.key}#
+value")` (int) — `structure.rows#limit` / `structure.rows#value` and
+the columns pair, exactly as the draft assumed; a number input REFUSES
+an out-of-range session-state value at render (`StreamlitValueAbove
+MaxError`), which is why the painter's own Rows/Columns boxes are
+written by callbacks only within [1, 500]. (xi) `_MIN_CANVAS_WIDTH =
+320`; `_naive_cell_side = min(700 / cols, 450 / rows)`;
+`pixel_array_active = rows × cols > 2,500 or side < 6`; `_grid_width`
+returns "content" exactly when `floored_canvas` binds. (xii)
+`Grid_Layout_Template.md` parses (20 × 20, 400 agents: 200
+always_defect + 200 tit_for_tat, `kind:lattice_grid` without a space)
+and validates against the registry; on disk CRLF, in the index LF
+(autocrlf), so the rename is content-identical to git. (xiii) BASELINE
+per-pass cost before the tab (the #184(a)(viii) method: AppTest, tiny
+Custom 4-agent evolution, 20 generations): chain 99 ms/pass (21
+passes, 2.09 s); pass by pass, median 191 ms.
+(b) AS-BUILT DECISIONS. Layouts: `format_layout_file` + the constant
+`PAINTER_COMMENT_LINE`, both exported; header, blank line, single-
+space-joined rows, trailing newline; a cell-count mismatch raises.
+Charts: `EMPTY_CELL_COLOR = "#dcdcdc"`, `PAINT_LEGEND_ROOM_PX = 70`,
+`paint_cell_side`, `paint_canvas` — EXPLICIT axis ranges ([-0.5, cols
+− 0.5]; y [rows − 0.5, −0.5], reversed) rather than autorange, so the
+cell pitch equals `side_px` and the pixel-sized markers tile without
+overlap; height = rows × side + 60 + legend room, a horizontal legend
+below the grid with an eighth entry "Empty"; hover "row r, col c —
+<display name | empty>", 1-based; one display-name dict per build
+(the per-cell registry walk dominated the 50 × 50 build). Helpers:
+`LayoutDraft` gains `figure_cache: object | None` (repr/compare
+excluded; typed loosely so the module imports no plotting), reset by
+`apply_brush` on a real change, `undo_stroke`, and `resize_draft`
+(fill/clear route through `apply_brush`); `stroke(cells, targets,
+brush)` is the pure core (the FP thread, stated in the module
+docstring); `resized_cells` the pure core of resize; `counts_caption`
+in REGISTRY order (the display convention of the brush, legend and
+Population section — not #67's ascending machine name, which the
+underlying `strategy_counts()` keeps); `brush_options` /
+`brush_from_label` (an unknown label raises rather than silently
+erasing); `template_name_problem` protects the shipped names CASE-
+INSENSITIVELY (Windows file systems are); `save_draft(…, comment=True)`
+writes UTF-8 with `newline="\n"`; `handoff_problem(draft | None)`.
+Loading a file sets `saved_as` to its name and leaves `dirty` False —
+the canvas matches the file exactly, so a loaded, unedited shipped
+example hands off directly. App: `PAINTER_DRAFT_KEY`, `PAINTER_NOTE_KEY
+= "_painter_note"`, `PAINTER_TOO_FINE_NOTE`, `PAINTER_HELP` (22
+entries); `_panel_lookahead(specs)` factored out of `_parameter_panel`
+with its comments, the panel's call site a one-liner; EVERY editing
+control renders on every pass — greyed without a draft, never hidden
+(#34) — so the cold start shows every painter widget; the canvas
+appears once a draft exists and `paint_cell_side` is not None, else
+the R3 sentence as `st.info`; the Rows/Columns defaults travel through
+`st.session_state.setdefault` (not `value=`) so a seeding callback may
+point the boxes at a loaded grid without Streamlit's duplicate-default
+warning; the readouts live in a container created BEFORE the save row
+and filled AFTER it (the #184 controls-row idiom), so the saving pass
+already shows the file under "Saved as" and the hand-off button reads
+the fresh state; the hand-off's callback args are always the draft's
+REAL values (even while disabled), never placeholders; `main` renders
+the four tabs. OC2 done with a plain filesystem rename. `pyproject`
+floor with the R11 comment. The two registry sentences; PARAMETERS.md
+regenerated (two lines).
+(c) RULE 7 FINDINGS. f1 — THE MEASUREMENT AND THE CACHE: with the tab
+present and NO cache, a blank 10 × 10 draft cost chain 150 ms/pass
+(+51 on the baseline) and pass-by-pass median 260 ms (+69); a filled
+50 × 50 draft 206 ms (+107) / 306 ms (+115) — far above the ≈ 20 ms
+mark, so the pre-authorised rebuild cache was built (see (b)).
+Profiling located the cost in the BUILD (15 ms at 10 × 10, 72 ms at
+50 × 50: plotly's per-element list validation plus the per-cell
+display-name walk), not in serialisation (1–5 ms). WITH the cache,
+measured in one session against a same-session tab-less rerun: no
+tab 124 / 238 ms, blank 10 × 10 123 / 230 ms, filled 50 × 50 123 /
+231 ms (chain / median) — the tab's delta is inside run-to-run noise
+(the two tab-less runs themselves differed by 25–47 ms), well under
+the ≈ 50 ms tripwire. f2 — THE RECORDED COPY'S LINE ENDINGS (pre-
+existing io behaviour, NOT changed: R14/F9 exclude io changes):
+`RunRecorder._copy_layout_file` copies with `destination.write_text(
+source.read_text(encoding="utf-8"), encoding="utf-8")`, and
+`Path.write_text` translates LF to CRLF on Windows — so the run
+folder's `layout.txt` is NOT byte-identical to the saved painting on
+Windows (the parser reads both identically; the re-run is unaffected,
+and the CLI twin's period tables are equal). Pin (vii) therefore
+compares the recorded copy after normalising CRLF → LF; the SAVED
+file's byte-identity to the formatter holds and is pinned as ruled.
+HELD for the design layer: a byte copy (`shutil.copyfile`) is a one-
+line io change that would make the ruled byte-for-byte pin literal.
+f3 — `width="content"` IS NOT INSPECTABLE headlessly: the layout
+config travels on the outer Element proto, which `UnknownElement`
+does not expose; the canvas's EXPLICIT width and height in the figure
+spec are pinned instead (640 × 580 for 6 × 8) and stretch-versus-
+content is browser behaviour routed to the walkthrough (step 9). f4 —
+`load_run` RESOLVES the recorded bare `layout.txt` to an absolute path
+beside the config (the #122 rule; the walkthrough's step 7 shows it),
+so pin (vii) reads the raw `config.yaml` for the bare name and checks
+the loaded path equals `<folder>/layout.txt`. f5 — the "Existing
+layout file" list renders ABOVE the save row, so a just-saved file
+joins it one pass later; the success sentence says so. f6 — the
+hand-off leaves the Scenario dropdown (and `_loaded_scenario`)
+untouched, exactly as R6 lists — so a run recorded straight after a
+hand-off carries the previously loaded scenario's label in the index
+(the #52 rule as it stands; a recorded-config load sets "Custom", a
+hand-off does not). HELD: whether the hand-off should also set the
+dropdown to "Custom". f7 — HEADLESSLY UNPINNABLE, routed to the
+walkthrough (F1): whether a plain click paints (F3 says not under the
+select tool), the tiny-drag single cell, the pan tool plus a click,
+the lasso, legend wrapping on the 320 px canvas, remount flicker per
+stroke, and that `on_select` delivers the selection under
+`painter_canvas` at all (verified by source reading only — the
+callback tolerates a missing or empty selection). f8 — the
+`test_layouts.py` shipped-examples test is parametrised over the
+three examples with per-file dimensions (the old 4 × 6 loop could not
+hold the 20 × 20 sample).
+(d) TESTS AND BUDGET: 1,255 → 1,323 (+68): `test_layouts.py` +9 (the
+formatter class — three round trips, the hand-built layout, the
+comment line, the mismatch, the rule-4 pin over dynamics,
+async_dynamics, engine, structure, experiment and results — and the
+parametrised examples test), `test_painter_helpers.py` +34 (new),
+`test_charts.py` +15 (`TestPaintCanvas`, the 60 × 5 width pin
+included), `test_app.py` +10 (`TestLayoutPainter`, pins (i)–(ix)
+including the V5 validation pin (vii) with the CLI twin; pin (x) is
+the panel's existing suite). Zero re-recordings, zero new goldens;
+the 31 golden masters and every counting pin pass untouched; ruff
+clean; the full suite green at 1,323.
+(e) DOCS: this entry (#186 verbatim, #187); DESIGN §2.12 (the painter
+shipped; removed from the still-out-of-scope list with the M19
+forward note), §4.1 item 6 (item 3's "radio" untouched, held for E5),
+§6.3 (shipped); CLAUDE.md (validation-precision: four tabs, painter
+widgets directly on the tab; current-phase: E4 landed, E5 next with
+f2/f6 added to its held items); ROADMAP (the E4 status line replacing
+the SCOPED line; the M19 forward-note sentence); the spec's status
+line; `PARAMETERS.md` regenerated; `grid_templates/README.md`
+("Painting a layout in the app", the `.txt`-only rule, the third
+example); the scoping draft's one status line; ADVISORIES.md
+untouched.
+
+**#188 — 2026-09-07 — E4 validation feedback: the pan tool does not
+exist under fixed-range axes and a plain click on a cell paints nothing,
+so the "pan tool, then click" single-cell path of #186 R2/R7 was
+unreachable; the owner's in-session ruling replaces it with a "Tool"
+radio — "Draw (drag to paint)" reads the lasso PATH back as a brush
+stroke, "Rectangle (drag a box)" and "Lasso (enclose an area)" take the
+enclosed cells — and no pan tool at all.**
+FINDINGS (walkthrough step 2; the owner's screenshot showed the chart
+toolbar with only download, box select, lasso, and fullscreen), each
+verified in the installed Streamlit 1.58.0 frontend bundle
+(`PlotlyChart.DE72Bh5O.js`, which embeds plotly.js): (1) plotly's
+`getButtonGroups` adds the zoom/pan group only when NOT every axis is
+fixed-range — ``g&&!D||x ? F=[`zoom2d`,`pan2d`] : …`` with D the
+all-axes-fixed flag (the helper collects axes whose `fixedrange` is
+false) — and #186 R2 requires both axes `fixedrange`; two requirements
+of one ruling that plotly cannot satisfy together. (2) A plain click on
+a scatter marker reaches no handler in any drag mode but pan:
+Streamlit's `onClick` handler (`q`) sets a selection only for points
+carrying `id` and `parent` (sunburst-style hierarchical charts) and
+returns for a scatter point; under the select and lasso drag modes
+Streamlit forces `clickmode` to `event`, so plotly's own click-to-
+select never runs; only the pan drag mode has `event+select`, and pan
+is what (1) hides. (3) plotly sets `minDrag = 1` for the select and
+lasso drag modes, so a press with a one-pixel nudge already counts as a
+drag; a perfectly still click is a click, which nothing consumes. (4)
+Streamlit's selection handler (`G`) forwards the lasso shape's SVG path
+parsed into vertex lists (`selection.lasso[0].x` / `.y`, data
+coordinates: a fractional column and row per vertex) alongside the
+enclosed `points` — the drawn PATH itself reaches Python. (5) A plotly
+chart in Streamlit reports a COMPLETED drag only, never mouse motion:
+freehand painting cannot be continuous; it paints on release, one
+round trip per stroke. Plotly's full toolbar override
+(`config.modeBarButtons`, resolving button names) was verified reachable
+through Streamlit's `config=` and could have restored the pan button —
+rejected by the owner's ruling below.
+OWNER RULING (in-session, 2026-09-07): no pan tool — "we would need a
+pan capability only if there is also a zoom capability", and a painter
+has none; instead a "draw" mode: press on a cell and drag, and every
+cell the pointer passes over takes the brush until the button is
+released, with no two-click combination.
+AS BUILT. `painter_helpers`: `TOOL_DRAW` / `TOOL_RECTANGLE` /
+`TOOL_LASSO`, `TOOL_OPTIONS` (Draw first = default), `STROKE_STEP =
+0.25` cell units, `dragmode_for_tool` (lasso / select / lasso; unknown
+raises), `cells_along_path(xs, ys, rows, cols)` — the pure rasteriser:
+each segment sampled every quarter cell, every sample rounded to its
+cell (floor(v + 0.5), ties up), off-grid samples dropped, and the
+lasso's closing segment deliberately NOT walked (a stroke is the path
+the pointer took, not the shape it enclosed), `lasso_paths(selection)`,
+`cells_for_tool(tool, selection, rows, cols)` — Draw rasterises every
+lasso path (falling back to the enclosed points if no path arrived),
+Rectangle and Lasso take `cells_from_selection`. `charts.paint_canvas`
+gains `dragmode` (`PAINT_DRAG_MODES = {"select", "lasso"}`; anything
+else raises — never pan or zoom); `fixedrange` on both axes stays. App:
+the "Tool" radio `painter_tool` above "Brush"; `_apply_stroke` routes
+through `cells_for_tool`; the cached figure gets the tool's drag mode
+each pass (`update_layout(dragmode=…)`, a no-op when unchanged — not a
+cache key), so the chosen tool survives the remount after every stroke
+(the F5 remount is now harmless for tool choice); `PAINTER_HELP["tool"]`
+states the one limitation — a perfectly still click paints nothing, a
+nudge as you press paints one cell. The `#186 R2` sentence "the modebar
+carries the pan and lasso tools" and R7's / the #187 walkthrough's
+"pan tool then click" are superseded by this entry; everything else in
+#186 stands. Rule 7: this is a deviation from a ratified ruling decided
+by the owner in-session and recorded here; the design layer may re-open
+it. Held with it, for the design layer: a TRUE continuous brush (cells
+painted while the button is held) needs a bidirectional custom
+component (an HTML canvas with real mouse tracking) — a different
+frontend technology from the plotly chart, and the same surface M19's
+large-grid editor will want (#186 R3).
+TESTS +11 (1,323 → 1,334): `test_painter_helpers.py` `TestTools` (9 —
+drag modes, a horizontal stroke, the exact diagonal, far-apart vertices
+leave no gaps, a dab paints one cell, the closing segment is not
+walked, off-grid samples, the lasso schema, the per-tool dispatch);
+`test_charts.py` (the drag-mode parameter and its refusal of pan);
+`test_app.py` (the Tool radio present with the Draw default, and the
+canvas spec's drag mode following the radio). The browser gestures
+themselves stay owner-validated (walkthrough step 2 rewritten). DOCS:
+this entry; DESIGN §4.1 item 6; CLAUDE.md current-phase; ROADMAP's E4
+line; `grid_templates/README.md`; zero re-recordings, zero new goldens.
+

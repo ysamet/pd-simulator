@@ -19,7 +19,10 @@ dependencies = [
     # UI layer (M6). The engine never imports these (hard rule 4); they are
     # main dependencies because the v1 product ships with its web UI.
     "plotly>=5.18",
-    "streamlit>=1.30",
+    # The UI relies on 1.58 APIs: segmented_control(required=True) (M11b E1),
+    # keyed expanders (E1/E2), and plotly_chart(on_select=...) for the Layout
+    # painter's canvas (E4) — DECISIONS #186 R11.
+    "streamlit>=1.58",
     # Persistence layer (M7): parquet time series (DESIGN §8).
     "pandas>=2.0",
     "pyarrow>=14.0",

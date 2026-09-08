@@ -52,6 +52,7 @@ __all__ = [
     "LayoutFile",
     "build_lattice",
     "deal_layout",
+    "format_layout_file",
     "found_occupancy",
     "found_population",
     "founding_view",
@@ -252,6 +253,63 @@ def parse_layout_file(text: str) -> LayoutFile:
     return LayoutFile(
         kind=header["kind"], rows=rows, cols=cols, cells=cells, positions=tuple(positions)
     )
+
+
+PAINTER_COMMENT_LINE = "# written by the pdsim layout painter"
+"""The ONE fixed comment line :func:`format_layout_file` can open a file with.
+
+Fixed on purpose — no timestamp, no user name: two identical paintings must
+be identical bytes, so a saved layout can be compared and versioned like
+any other text file (DECISIONS #186 R5, amendment c).
+"""
+
+
+def format_layout_file(layout: LayoutFile, *, comment: bool = False) -> str:
+    """Render a :class:`LayoutFile` as layout-file text (pure — no filesystem).
+
+    The WRITE side of the format whose read side is :func:`parse_layout_file`:
+    this module owns the layout-file format in both directions, so a painting
+    saved by the app's Layout painter and a file typed by hand are the same
+    kind of thing, read by the same parser (M11b Phase E4, DECISIONS #186 R5).
+    It touches no filesystem — only the app writes files — and no engine path
+    calls it: the engine still only ever READS layout data (hard rules 4 and
+    8), which the test suite pins by checking that no engine module mentions
+    this function.
+
+    The text is the three header lines (``kind:``, ``rows:``, ``cols:``), a
+    blank line, then one whitespace-separated line per grid row with
+    :data:`EMPTY_TOKEN` for an empty site, ending in a newline. With
+    ``comment`` true the text opens with :data:`PAINTER_COMMENT_LINE` — the
+    parser skips ``#`` lines (its ``if not line or line.startswith("#")``
+    branch), verified before this option existed.
+
+    Args:
+        layout: The layout to render; ``cells`` in row-major order.
+        comment: Whether to open the text with the fixed comment line.
+
+    Returns:
+        The file text, which :func:`parse_layout_file` reads back to a
+        layout equal in kind, rows, cols, and cells.
+
+    Raises:
+        ValueError: If ``layout.cells`` does not hold exactly ``rows × cols``
+            entries — the text would then declare a grid its body cannot fill.
+    """
+    expected = layout.rows * layout.cols
+    if len(layout.cells) != expected:
+        raise ValueError(
+            f"Layout declares {layout.rows}x{layout.cols} = {expected} cells but holds "
+            f"{len(layout.cells)}; every cell needs an entry (None for an empty site)."
+        )
+    lines: list[str] = []
+    if comment:
+        lines.append(PAINTER_COMMENT_LINE)
+    lines.extend((f"kind: {layout.kind}", f"rows: {layout.rows}", f"cols: {layout.cols}", ""))
+    for row in range(layout.rows):
+        start = row * layout.cols
+        row_cells = layout.cells[start : start + layout.cols]
+        lines.append(" ".join(EMPTY_TOKEN if cell is None else cell for cell in row_cells))
+    return "\n".join(lines) + "\n"
 
 
 def read_layout_file(path: str | Path) -> LayoutFile:

@@ -395,16 +395,32 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     the #94 throttle kept as cached-figure re-emission. Real app
     measured at ≈ 0.17–0.23 s per pass. Zero re-recordings, zero new
     goldens; 1255 tests passing.
-    ✏️ **M11b Phase E4 SCOPED 2026-09-05** (DECISIONS #185): the mouse
-    layout painter's draft prompt is in
-    `docs/design-notes/M11b-E4-painter-prompt-draft.md` awaiting
-    design-layer ratification (rulings → #186; build → #187). The
-    verified constraints: a mouse stroke is not headlessly drivable
-    (Streamlit selection state cannot be set programmatically; AppTest
-    has no plotly element), the heatmap renderer cannot be the click
-    surface (no selection support), so the canvas is a second,
-    scatter-based input figure gated on the existing pixel-array
-    predicate; zero re-recordings, zero new goldens.
+    ✅ **M11b Phase E4 landed 2026-09-06** (DECISIONS #186 rulings, #187
+    build; scoped 2026-09-05 as #185): the mouse layout painter — a
+    fourth top-level "Layout painter" tab, second in the strip, whose
+    canvas is a second, INPUT-only figure (`charts.paint_canvas`: one
+    scatter of square markers in row-major site order, so a selection's
+    point index IS the site id) rendered exactly where the existing
+    pixel-array predicate is false; a Streamlit-free
+    `ui/painter_helpers.py` with a mutable, grid-size-agnostic
+    `LayoutDraft` in app state (stroke as a pure transformation, one-level
+    undo, fill, clear, resize); `layouts.format_layout_file` as the
+    format's write side (the parser skips `#` lines, so ONE fixed comment
+    line, no timestamp); saves into `grid_templates/` under bare names
+    with the three shipped examples protected (the stray
+    `Grid_Layout_Template.md` renamed to `example_template_20x20.txt`);
+    the hand-off callback reusing the existing populate path, enabled
+    only for a saved, unchanged draft placing at least two agents; three
+    seeds (blank, an existing file, the Run lab's founding preview via
+    the factored `_panel_lookahead`); two registry help sentences;
+    `streamlit>=1.58`. Per-pass cost with the rebuild cache: within
+    noise of the tab-less baseline at 50 × 50. Zero re-recordings, zero
+    new goldens; 1323 tests passing. Validation-feedback fix 2026-09-07
+    (DECISIONS #188): the pan-tool single-cell path was unreachable
+    (plotly hides pan under fixed axes; a plain click reaches no
+    handler), replaced by a "Tool" radio — Draw (the lasso path
+    rasterised as a brush stroke), Rectangle, Lasso — with no pan tool;
+    1334 tests.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
@@ -490,7 +506,12 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
   blended and a dominant-strategy view, §6.3); centroid/Euclidean
   distance as a structure-supplied metric. Purely additive after M18 and
   needs nothing from M12-M18, so it can be pulled forward without
-  renumbering pain provided M11a honours the forward-guards.
+  renumbering pain provided M11a honours the forward-guards. The
+  large-grid editing surface — a zoomed viewport with region tools over
+  the pixel-array regime, or map-shaped site sets — joins M19 as a second
+  renderer over the E4 `LayoutDraft` and its save path (#186 R3): the
+  larger the grid and population, the harder a layout file is to write by
+  hand, and the owner's stated destination is real state and country maps.
   **TASK (spec Design 12, #135): register `site_capacity` as a tunable
   registry parameter and remove M11a's pinned-at-1 validator** —
   answering the three deferred questions #135 records (the

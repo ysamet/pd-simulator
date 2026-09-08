@@ -1,0 +1,9 @@
+# written by the pdsim layout painter
+kind: lattice_grid
+rows: 4
+cols: 6
+
+. . . . . .
+. . tit_for_tat . . .
+. . . . . .
+. . . . . .

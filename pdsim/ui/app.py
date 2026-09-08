@@ -44,7 +44,7 @@ from pdsim.config.experiment import (
 from pdsim.config.registry import ParameterSpec, ParamValue
 from pdsim.config.scenarios import all_scenarios
 from pdsim.core import engine, layouts
-from pdsim.core.strategies import all_strategies
+from pdsim.core.strategies import all_strategies, all_strategy_names
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, delete_run, load_run, rename_run, sync_index
 from pdsim.sweep.metrics import all_metrics
@@ -55,13 +55,14 @@ from pdsim.sweep.spec import (
     sweep_spec_yaml,
     sweep_validation_messages,
 )
-from pdsim.ui import advisories, economy_helpers, helpers, sweep_helpers
+from pdsim.ui import advisories, economy_helpers, helpers, painter_helpers, sweep_helpers
 from pdsim.ui.economy_helpers import (
     ASYNC_EXPECTED_MATCHES_NOTE,
     ECONOMY_HELP,
     expected_matches_per_agent,
 )
 from pdsim.ui.helpers import ADVANCED_FOLD_HELP, LiveRun, _spatial_sampling_active
+from pdsim.ui.painter_helpers import LayoutDraft
 from pdsim.viz import charts
 
 CUSTOM = "Custom"
@@ -194,6 +195,139 @@ App state, not widget state (DECISIONS #184): it is never re-assigned by
 while a run is in progress; the finishing or stopping pass moves the
 results into ``last_run`` (#44) and removes it.
 """
+
+PAINTER_DRAFT_KEY = "_layout_draft"
+"""Session-state key of the Layout painter's :class:`~pdsim.ui.painter_helpers.LayoutDraft`.
+
+App state beside :data:`LIVE_RUN_KEY` (M11b Phase E4, DECISIONS #186 R4):
+never re-assigned by ``_preserve_hidden_widget_state`` and owned by no
+widget. Absent until the owner starts a grid; kept for the session after.
+"""
+
+PAINTER_NOTE_KEY = "_painter_note"
+"""Session-state key of a sentence a painter callback stages for the next pass.
+
+A button callback cannot render (it runs before the script), so a failed
+seed — a tournament panel, a well-mixed world, an unreadable file — leaves
+its explanation here and the painter tab shows it once (#186 R7).
+"""
+
+PAINTER_TOO_FINE_NOTE = (
+    "This grid is too fine to paint by mouse — its cells would be under 6 pixels "
+    "wide, or it has more than 2,500 sites, the same point at which the Run lab "
+    "switches the grid to pixel-array rendering. Shrink the grid (fewer rows or "
+    "columns), or write the layout file by hand: the grid_templates folder's "
+    "README states the format."
+)
+"""The #186 R3 sentence shown instead of the canvas when `paint_cell_side` is None."""
+
+PAINTER_HELP = {
+    "rows": (
+        "How many rows the new grid has. Only 'New blank grid' and 'Resize grid' "
+        "read this box; loading a file or the Run lab's preview sets it to that "
+        "grid's size."
+    ),
+    "cols": (
+        "How many columns the new grid has. Only 'New blank grid' and 'Resize "
+        "grid' read this box; loading a file or the Run lab's preview sets it to "
+        "that grid's size."
+    ),
+    "new": (
+        "Start an empty grid of the size in the Rows and Columns boxes. Any "
+        "unsaved painting on the canvas is replaced — save it first if you want "
+        "to keep it."
+    ),
+    "source": (
+        "The layout files currently in the project's grid_templates folder — the "
+        "same folder a bare name in the Run lab's 'Layout file' box is looked up "
+        "in. Only .txt files are listed; the README there is not a layout."
+    ),
+    "load": (
+        "Read the chosen file onto the canvas so you can edit it. Its strategy "
+        "names are checked against the registry first; a file naming an unknown "
+        "strategy is refused with the same message the Run lab would give."
+    ),
+    "from_preview": (
+        "Copy the Run lab's founding preview onto the canvas: the arrangement the "
+        "current panel settings would found at generation 0 (their seed included), "
+        "ready to edit. It needs an evolution run on a lattice — a tournament or a "
+        "well-mixed world has no grid to copy."
+    ),
+    "resize": (
+        "Apply the Rows and Columns boxes to the grid on the canvas. The top-left "
+        "part of the painting is kept cell for cell, new cells start empty, and "
+        "cells outside the new size are dropped — which is why this never happens "
+        "on its own when the boxes change."
+    ),
+    "tool": (
+        "How a mouse gesture on the canvas chooses cells. 'Draw (drag to paint)': "
+        "press the mouse button on a cell and move — every cell the pointer passes "
+        "over takes the brush, and the cells are painted all at once when you "
+        "release. A perfectly still click paints nothing (the chart treats it as a "
+        "click, not a stroke), so nudge the mouse a little as you press to paint a "
+        "single cell. 'Rectangle (drag a box)': the cells inside the box you drag. "
+        "'Lasso (enclose an area)': the cells inside the shape you draw. The tool "
+        "stays selected from stroke to stroke. There is no zoom on a painter, so "
+        "there is no pan tool either."
+    ),
+    "brush": (
+        "What a stroke paints: one of the registered strategies, or the eraser, "
+        "which empties cells. The colours match the key under the canvas and the "
+        "Run lab's charts — one palette everywhere."
+    ),
+    "canvas": (
+        "Paint with the mouse (painted cells are overwritten, not skipped): with "
+        "'Draw' press and move over the cells — a tiny nudge paints one cell; with "
+        "'Rectangle' drag a box; with 'Lasso' draw around an area. Hover any cell "
+        "to read its row, column, and content."
+    ),
+    "undo": (
+        "Restore the cells as they were before the last stroke, fill, or clear. "
+        "One level only: the change before that cannot be recovered."
+    ),
+    "fill": "Paint EVERY cell with the current brush (with the eraser this empties the grid).",
+    "clear": "Empty every cell. Undoable like any stroke.",
+    "sites": (
+        "How many cells the grid has — rows × columns — and so the largest "
+        "population this layout could ever hold."
+    ),
+    "painted": (
+        "How many cells currently name a strategy. This IS the population size "
+        "the hand-off writes into the Run lab, because a layout file decides both "
+        "the arrangement and the mixture (the file wins on composition)."
+    ),
+    "empty": "How many cells are left empty — room the population can grow into during a run.",
+    "saved_as": (
+        "The file the canvas currently matches. 'not saved yet' before the first "
+        "save; 'unsaved changes' once the painting differs from its file; the file "
+        "name while the two agree — the state the hand-off button needs."
+    ),
+    "file_name": (
+        "A bare file name for the painting, saved into the grid_templates folder "
+        "('.txt' is added when you give no extension). The two shipped examples "
+        "and the shipped 20 × 20 sample cannot be overwritten; anything else "
+        "needs the 'Replace the existing file' box to be replaced."
+    ),
+    "replace": (
+        "Allow 'Save layout' to overwrite a file of the same name that already "
+        "exists in the grid_templates folder."
+    ),
+    "save": (
+        "Write the painting as a layout file — the header, then one line per grid "
+        "row, a strategy machine name or '.' per cell — exactly the format the "
+        "Run lab reads and the grid_templates README describes."
+    ),
+    "handoff": (
+        "Make this saved painting the Run lab's founding layout: the run mode is "
+        "set to evolution, the world to a lattice of this grid's size, the Initial "
+        "layout to 'from_file' naming this file, and the Population section is "
+        "filled in from the painting's counts — the same one-click populate the "
+        "Structure section offers. Available only while the canvas matches a saved "
+        "file with at least two agents, because a run's config must reference a "
+        "file and a run needs at least two agents."
+    ),
+}
+"""Inline (?) explanations for the Layout painter's widgets and readouts (the §12 rule)."""
 
 GRANULARITY_RUNNING_NOTE = (
     "NOTE: greyed while a run is in progress — the engine binds the "
@@ -510,6 +644,54 @@ def _panel_widget(
     _advisory_captions(spec.key, {**lookahead, **values})
 
 
+def _panel_lookahead(specs: Mapping[str, ParameterSpec]) -> dict[str, ParamValue]:
+    """Map EVERY panel key to what its widget WILL return this script run.
+
+    Forward-looking greying (M10b): some dependencies point at widgets that
+    render LATER in registry order (reproduction_mode greys off time_model;
+    β greys off the imitation overlay). The lookahead reads each widget's
+    session-state value, or the registry default before the first
+    interaction; complete coverage since E1, because the tournament tab
+    gathers its hidden sections from it (#178 R2). Values actually gathered
+    in a run always win over it (``{**lookahead, **values}``).
+
+    Factored out of :func:`_parameter_panel` in M11b Phase E4 (#186 R7) so
+    the Layout painter's "Start from the Run lab's founding preview" reads
+    the panel's forward values through the SAME function — one lookahead,
+    behaviour byte-identical, pinned by the existing suite.
+
+    Args:
+        specs: The panel's specs by registry key.
+
+    Returns:
+        Registry key → the value its widget will return this run.
+    """
+    lookahead: dict[str, ParamValue] = {
+        key: st.session_state.get(key, spec.default)
+        for key, spec in specs.items()
+        if not spec.nullable
+    }
+    # Nullable numbers render as a checkbox/value widget PAIR, so their
+    # forward value is reconstructed from that pair's session state (blank
+    # until the box is ticked). The Structure readouts need one of them —
+    # carrying capacity — before the Dynamics section renders (#106's
+    # both-numbers guard, M11a Phase E).
+    for key, spec in specs.items():
+        if spec.nullable and spec.kind in ("int", "float"):
+            limited = st.session_state.get(f"{key}#limit", spec.default is not None)
+            lookahead[key] = st.session_state.get(f"{key}#value", spec.default) if limited else None
+        elif spec.nullable and spec.kind == "str":
+            # A nullable text box holds "" for unset (never None), so its
+            # forward value is reconstructed the way the widget returns it
+            # — blank means None. Completing the lookahead over EVERY
+            # panel key is what lets the tournament tab gather hidden
+            # sections from it (#178 R2).
+            raw = st.session_state.get(key, spec.default)
+            text = str(raw).strip() if raw is not None else ""
+            lookahead[key] = text if text else None
+    return lookahead
+
+
 def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str, dict]]:
     """Render the whole generated panel; return everything a run needs.
 
@@ -553,37 +735,11 @@ def _parameter_panel() -> tuple[dict[str, ParamValue], dict[str, int], dict[str,
         if not spec.key.startswith("run."):
             sections.setdefault(spec.section, []).append(spec)
 
-    # Forward-looking greying (M10b): some dependencies point at widgets
-    # that render LATER in registry order (reproduction_mode greys off
-    # time_model; β greys off the imitation overlay). The lookahead maps
-    # EVERY panel key to what its widget WILL return this run — its
-    # session-state value, or the registry default before the first
-    # interaction; complete coverage since E1, because the tournament tab
-    # gathers its hidden sections from it (#178 R2). Values actually
-    # gathered this run always win.
-    lookahead: dict[str, ParamValue] = {
-        key: st.session_state.get(key, spec.default)
-        for key, spec in specs.items()
-        if not spec.nullable
-    }
-    # Nullable numbers render as a checkbox/value widget PAIR, so their
-    # forward value is reconstructed from that pair's session state (blank
-    # until the box is ticked). The Structure readouts need one of them —
-    # carrying capacity — before the Dynamics section renders (#106's
-    # both-numbers guard, M11a Phase E).
-    for key, spec in specs.items():
-        if spec.nullable and spec.kind in ("int", "float"):
-            limited = st.session_state.get(f"{key}#limit", spec.default is not None)
-            lookahead[key] = st.session_state.get(f"{key}#value", spec.default) if limited else None
-        elif spec.nullable and spec.kind == "str":
-            # A nullable text box holds "" for unset (never None), so its
-            # forward value is reconstructed the way the widget returns it
-            # — blank means None. Completing the lookahead over EVERY
-            # panel key is what lets the tournament tab gather hidden
-            # sections from it (#178 R2).
-            raw = st.session_state.get(key, spec.default)
-            text = str(raw).strip() if raw is not None else ""
-            lookahead[key] = text if text else None
+    # Forward-looking greying (M10b): the lookahead maps EVERY panel key to
+    # what its widget WILL return this run (see _panel_lookahead — factored
+    # out in M11b Phase E4 so the Layout painter reads the same forward
+    # values). Values actually gathered this run always win.
+    lookahead = _panel_lookahead(specs)
 
     tournament = mode == "tournament"
     composition: dict[str, int] = {}
@@ -2851,8 +3007,543 @@ def _sweep_tab() -> None:
     _sweep_monitor_area()
 
 
+# ---------------------------------------------------------------------------
+# The Layout painter tab (M11b Phase E4, DECISIONS #186/#187).
+#
+# A UI TOOL that writes the layout files a config's `structure.layout_file`
+# references (#109): the engine only ever reads data (hard rule 4) and a
+# recorded run re-runs from its config alone (hard rule 8). Presentation only
+# (#38): every branch worth testing lives in the Streamlit-free
+# `pdsim.ui.painter_helpers`; the canvas figure is `charts.paint_canvas`. The
+# draft is app state under PAINTER_DRAFT_KEY; every mutation is a button or
+# selection CALLBACK, which Streamlit runs before the script (the #124
+# pre-render window), so the pass that follows paints the changed draft.
+# ---------------------------------------------------------------------------
+
+
+def _stage_painter_note(text: str) -> None:
+    """Leave a sentence for the painter tab to show on the next pass.
+
+    Args:
+        text: The sentence (a callback cannot render, so it stages instead).
+    """
+    st.session_state[PAINTER_NOTE_KEY] = text
+
+
+def _painter_boxes() -> tuple[int, int]:
+    """Read the painter's Rows / Columns boxes from session state.
+
+    Returns:
+        ``(rows, cols)`` as the boxes hold them (10 × 10 before first use).
+    """
+    return (
+        int(st.session_state.get("painter_rows", 10)),
+        int(st.session_state.get("painter_cols", 10)),
+    )
+
+
+def _set_painter_boxes(rows: int, cols: int) -> None:
+    """Point the Rows / Columns boxes at a grid that was just loaded.
+
+    Written only inside a callback (the pre-render window), and only when the
+    value fits the boxes' bounds — a number input refuses an out-of-range
+    session-state value at render time, and a grid above the bound cannot be
+    painted anyway (#186 R3 shows its sentence instead).
+
+    Args:
+        rows: The loaded grid's rows.
+        cols: The loaded grid's columns.
+    """
+    for key, value in (("painter_rows", rows), ("painter_cols", cols)):
+        if 1 <= value <= painter_helpers.MAX_PAINTER_DIMENSION:
+            st.session_state[key] = int(value)
+
+
+def _new_blank_draft() -> None:
+    """Start an empty grid from the Rows / Columns boxes (button callback)."""
+    rows, cols = _painter_boxes()
+    st.session_state[PAINTER_DRAFT_KEY] = painter_helpers.blank_draft(rows, cols)
+
+
+def _load_draft_from_file() -> None:
+    """Load the chosen template onto the canvas (button callback).
+
+    Tokens are validated against the strategy registry through the SAME
+    validator the Run lab and the config use, so an unknown name is refused
+    with the #122 sentence (line and cell named) and nothing loads. The
+    loaded draft counts as saved under its own name — the canvas matches the
+    file exactly — so a shipped example can be handed off unedited.
+    """
+    name = st.session_state.get("painter_source")
+    if not name:
+        _stage_painter_note("Choose a layout file to load first.")
+        return
+    try:
+        layout = layouts.read_layout_file(layouts.GRID_TEMPLATES_DIR / str(name))
+        layouts.validate_layout_file(
+            layout,
+            rows=layout.rows,
+            cols=layout.cols,
+            known_strategies=frozenset(all_strategy_names()),
+            population_size=layout.occupied_count,
+        )
+    except (FileNotFoundError, ValueError) as error:
+        _stage_painter_note(f"Could not load {name}: {error}")
+        return
+    draft = painter_helpers.draft_from_layout(layout)
+    draft.saved_as = str(name)
+    st.session_state[PAINTER_DRAFT_KEY] = draft
+    _set_painter_boxes(draft.rows, draft.cols)
+
+
+def _draft_from_preview() -> None:
+    """Copy the Run lab's founding preview onto the canvas (button callback).
+
+    The panel's forward values come from :func:`_panel_lookahead` — the ONE
+    lookahead the panel itself uses (#186 R7) — and the composition from the
+    ``composition.*`` keys; then the same chain the Structure section's
+    preview runs: ``grid_visible`` → ``grid_preview_config`` →
+    ``founding_view``. Any failure (a tournament, a well-mixed world, a
+    validation message, a missing layout file) is staged as a note for the
+    next pass and the canvas is left as it was.
+    """
+    specs = {spec.key: spec for spec in helpers.panel_specs()}
+    lookahead = _panel_lookahead(specs)
+    if not helpers.grid_visible(lookahead):
+        _stage_painter_note(
+            "The Run lab has no founding preview to copy: a grid exists only for an "
+            "evolution run on a lattice. Switch the Run lab's mode strip to evolution "
+            "and its World structure to 'lattice', or start a blank grid here instead."
+        )
+        return
+    composition = {
+        info.name: int(st.session_state.get(f"composition.{info.name}", 0))
+        for info in all_strategies()
+    }
+    try:
+        config = helpers.grid_preview_config(lookahead, composition)
+        view = layouts.founding_view(config)
+    except ValidationError as error:
+        _stage_painter_note(
+            f"The Run lab's founding preview is waiting on: {helpers.validation_messages(error)[0]}"
+        )
+        return
+    except (FileNotFoundError, ValueError) as error:
+        _stage_painter_note(f"The Run lab's founding preview cannot be drawn: {error}")
+        return
+    if view is None:
+        _stage_painter_note("The Run lab has no founding preview to copy right now.")
+        return
+    draft = painter_helpers.draft_from_placements(view.rows, view.cols, view.placements)
+    st.session_state[PAINTER_DRAFT_KEY] = draft
+    _set_painter_boxes(draft.rows, draft.cols)
+
+
+def _resize_draft() -> None:
+    """Apply the Rows / Columns boxes to the current grid (button callback)."""
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    if draft is None:
+        return
+    rows, cols = _painter_boxes()
+    painter_helpers.resize_draft(draft, rows, cols)
+
+
+def _current_brush() -> str | None:
+    """The brush the radio currently selects, as a machine name (None = eraser).
+
+    Returns:
+        The strategy machine name, or ``None`` for the eraser.
+    """
+    return painter_helpers.brush_from_label(st.session_state.get("painter_brush"))
+
+
+def _canvas_selection(state: object) -> Mapping[str, object] | None:
+    """Pull the ``selection`` mapping out of the canvas widget's state.
+
+    Streamlit hands the canvas's state back as a ``PlotlyState`` — a
+    dictionary-like object with a ``selection`` entry that supports both key
+    and attribute access; a canvas that has never been touched holds an
+    empty selection.
+
+    Args:
+        state: ``st.session_state["painter_canvas"]`` as found, or ``None``.
+
+    Returns:
+        The selection mapping, or ``None`` when there is none.
+    """
+    if state is None:
+        return None
+    if isinstance(state, Mapping):
+        selection = state.get("selection")
+    else:
+        selection = getattr(state, "selection", None)
+    return selection if isinstance(selection, Mapping) else None
+
+
+def _current_tool() -> str:
+    """The tool the "Tool" radio currently selects (the Draw tool before it renders).
+
+    Returns:
+        One of :data:`painter_helpers.TOOL_OPTIONS`.
+    """
+    return str(st.session_state.get("painter_tool", painter_helpers.TOOL_DRAW))
+
+
+def _apply_stroke() -> None:
+    """Paint the cells one completed drag chose (the canvas's selection callback).
+
+    Fires once per selection change, before the script (the #124 pre-render
+    window), reading the selection under ``painter_canvas``, the tool under
+    ``painter_tool``, the brush under ``painter_brush``, and the draft under
+    :data:`PAINTER_DRAFT_KEY`. The translation from the drag to site ids is
+    the pure :func:`painter_helpers.cells_for_tool` — the Draw tool
+    rasterises the lasso PATH as a brush stroke, the Rectangle and Lasso
+    tools take the enclosed points (#188); the stroke itself is the pure
+    :func:`painter_helpers.apply_brush`. An effective stroke changes the
+    figure, so the canvas remounts with a clear selection on the pass that
+    follows (the figure spec is part of the element's identity, #184(a)(vii)).
+    """
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    if draft is None:
+        return
+    selection = _canvas_selection(st.session_state.get("painter_canvas"))
+    cells = painter_helpers.cells_for_tool(_current_tool(), selection, draft.rows, draft.cols)
+    painter_helpers.apply_brush(draft, cells, _current_brush())
+
+
+def _undo_stroke() -> None:
+    """Undo the last effective stroke, fill, or clear (button callback)."""
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    if draft is not None:
+        painter_helpers.undo_stroke(draft)
+
+
+def _fill_all() -> None:
+    """Paint every cell with the current brush (button callback)."""
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    if draft is not None:
+        painter_helpers.fill_all(draft, _current_brush())
+
+
+def _clear_all() -> None:
+    """Empty every cell (button callback)."""
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    if draft is not None:
+        painter_helpers.clear_all(draft)
+
+
+def _painter_handoff(name: str, rows: int, cols: int, size: int, counts: dict[str, int]) -> None:
+    """Make a saved painting the Run lab's founding layout (button callback).
+
+    Runs in the #124 pre-render window, where widget session state may be
+    written — greyed widgets included (greying blocks USER edits only).
+    Writes the mode strip, the world structure, the two limit pairs under the
+    keys the nullable-int widget dispatcher uses (``structure.rows#limit`` /
+    ``#value`` and the columns pair — verified in this phase's Task 0), the
+    initial layout and its file, then the population through the EXISTING
+    :func:`_populate_from_layout_file` — #143's one write path, not a second.
+    ``_loaded_values`` (the advisory baseline, #176 R5) is deliberately NOT
+    touched: an A2 caution after handing off from a well-mixed economy
+    scenario is correct — incomes rescale on a lattice.
+
+    Args:
+        name: The saved file's bare name (what the Layout file box looks up).
+        rows: The painting's rows → "Lattice rows".
+        cols: The painting's columns → "Lattice columns".
+        size: The painted-agent count → "Population size (N)".
+        counts: Machine name → count → the mix widgets.
+    """
+    st.session_state["run.mode"] = "evolution"
+    st.session_state["structure.kind"] = "lattice"
+    st.session_state["structure.rows#limit"] = True
+    st.session_state["structure.rows#value"] = int(rows)
+    st.session_state["structure.cols#limit"] = True
+    st.session_state["structure.cols#value"] = int(cols)
+    st.session_state["structure.initial_layout"] = "from_file"
+    st.session_state["structure.layout_file"] = name
+    _populate_from_layout_file(size, counts)
+    st.session_state["_load_note"] = (
+        f"The painting '{name}' is now the founding layout: evolution mode on a "
+        f"{rows} × {cols} lattice, Initial layout 'from_file', and the Population "
+        f"section filled in from the file ({size} agents). Press Run to found the run "
+        "from it, or edit anything first — the painting is a starting point."
+    )
+
+
+def _painter_readouts(draft: LayoutDraft) -> None:
+    """Render the painter's §12-style readouts with their (?) texts.
+
+    Counts come through :func:`painter_helpers.draft_layout_file`, so
+    ``occupied_count`` and ``strategy_counts`` are the layout file's own —
+    the number shown as "Painted agents" IS the population size the hand-off
+    writes (#186 R9).
+
+    Args:
+        draft: The current draft.
+    """
+    layout = painter_helpers.draft_layout_file(draft)
+    if draft.dirty:
+        saved_as = "unsaved changes"
+    elif draft.saved_as is None:
+        saved_as = "not saved yet"
+    else:
+        saved_as = draft.saved_as
+    col_sites, col_painted, col_empty, col_saved = st.columns(4)
+    col_sites.metric("Sites", f"{draft.site_count}", help=PAINTER_HELP["sites"])
+    col_painted.metric("Painted agents", f"{layout.occupied_count}", help=PAINTER_HELP["painted"])
+    col_empty.metric(
+        "Empty cells", f"{draft.site_count - layout.occupied_count}", help=PAINTER_HELP["empty"]
+    )
+    col_saved.metric("Saved as", saved_as, help=PAINTER_HELP["saved_as"])
+    caption = painter_helpers.counts_caption(draft)
+    st.caption(f"Per strategy: {caption}." if caption else "No agents painted yet.")
+
+
+def _painter_tab() -> None:
+    """Lay out the Layout painter: seeds, brush and tools, canvas, readouts, save, hand-off.
+
+    Every editing control renders whether or not a grid exists — greyed,
+    never hidden (#34's pattern) — so the tab reads the same at every visit;
+    the canvas itself appears once a draft exists and is small enough to
+    paint (#186 R3). The readouts live in a container created BEFORE the
+    save row and filled AFTER it (the #184 controls-row idiom), so the pass
+    that saves already shows the file name under "Saved as".
+    """
+    st.markdown(
+        "Paint a **starting layout** with the mouse: pick a tool and a brush, then "
+        "press and drag over the canvas. The painter writes an ordinary layout file "
+        "into the `grid_templates/` folder — the same file you could type by hand — "
+        "and hands its name to the Run lab, whose config then references the FILE: a "
+        "recorded run re-runs from its config alone, and the engine never knows a "
+        "mouse was involved."
+    )
+    note = st.session_state.pop(PAINTER_NOTE_KEY, None)
+    if note:
+        st.warning(note)
+    draft: LayoutDraft | None = st.session_state.get(PAINTER_DRAFT_KEY)
+    has_draft = draft is not None
+
+    # --- Seeds: a blank grid, an existing file, or the Run lab's preview.
+    # The boxes' defaults travel through session state (not `value=`), so a
+    # callback may point them at a loaded grid without a duplicate-default
+    # warning.
+    st.session_state.setdefault("painter_rows", 10)
+    st.session_state.setdefault("painter_cols", 10)
+    col_rows, col_cols, col_new = st.columns([1, 1, 2])
+    col_rows.number_input(
+        "Rows",
+        min_value=1,
+        max_value=painter_helpers.MAX_PAINTER_DIMENSION,
+        step=1,
+        key="painter_rows",
+        help=PAINTER_HELP["rows"],
+    )
+    col_cols.number_input(
+        "Columns",
+        min_value=1,
+        max_value=painter_helpers.MAX_PAINTER_DIMENSION,
+        step=1,
+        key="painter_cols",
+        help=PAINTER_HELP["cols"],
+    )
+    col_new.button(
+        "New blank grid", key="painter_new", on_click=_new_blank_draft, help=PAINTER_HELP["new"]
+    )
+    names = painter_helpers.template_names()
+    col_source, col_load, col_preview = st.columns([2, 1, 2])
+    col_source.selectbox(
+        "Existing layout file",
+        options=names,
+        key="painter_source",
+        help=PAINTER_HELP["source"],
+        disabled=not names,
+    )
+    col_load.button(
+        "Load into painter",
+        key="painter_load",
+        on_click=_load_draft_from_file,
+        disabled=not names,
+        help=PAINTER_HELP["load"],
+    )
+    col_preview.button(
+        "Start from the Run lab's founding preview",
+        key="painter_from_preview",
+        on_click=_draft_from_preview,
+        help=PAINTER_HELP["from_preview"],
+    )
+    if draft is None:
+        st.caption(
+            "No grid yet — press 'New blank grid', 'Load into painter', or 'Start from "
+            "the Run lab's founding preview' to begin."
+        )
+    else:
+        rows_box, cols_box = _painter_boxes()
+        if (rows_box, cols_box) != (draft.rows, draft.cols):
+            # Never an implicit resize (#186 R7): the boxes may differ from
+            # the grid; the owner applies them deliberately, or sets them back.
+            st.caption(
+                f"The boxes say {rows_box} × {cols_box} but the grid on the canvas is "
+                f"{draft.rows} × {draft.cols}. Press 'Resize grid' to apply the boxes "
+                "(the top-left part of the painting is kept; cells outside the new size "
+                "are dropped), or set the boxes back."
+            )
+            st.button(
+                "Resize grid",
+                key="painter_resize",
+                on_click=_resize_draft,
+                help=PAINTER_HELP["resize"],
+            )
+
+    # --- Tool, brush, and the three buttons. The tool lives in the figure's
+    # own drag mode, so it survives the canvas remount after every stroke.
+    tool = st.radio(
+        "Tool",
+        options=list(painter_helpers.TOOL_OPTIONS),
+        key="painter_tool",
+        horizontal=True,
+        disabled=not has_draft,
+        help=PAINTER_HELP["tool"],
+    )
+    st.radio(
+        "Brush",
+        options=painter_helpers.brush_options(),
+        key="painter_brush",
+        horizontal=True,
+        disabled=not has_draft,
+        help=PAINTER_HELP["brush"],
+    )
+    col_undo, col_fill, col_clear = st.columns(3)
+    col_undo.button(
+        "Undo last stroke",
+        key="painter_undo",
+        on_click=_undo_stroke,
+        disabled=draft is None or draft.undo_cells is None,
+        help=PAINTER_HELP["undo"],
+    )
+    col_fill.button(
+        "Fill all",
+        key="painter_fill",
+        on_click=_fill_all,
+        disabled=not has_draft,
+        help=PAINTER_HELP["fill"],
+    )
+    col_clear.button(
+        "Clear all",
+        key="painter_clear",
+        on_click=_clear_all,
+        disabled=not has_draft,
+        help=PAINTER_HELP["clear"],
+    )
+
+    # --- The canvas (or the #186 R3 sentence).
+    if draft is not None:
+        side = charts.paint_cell_side(draft.rows, draft.cols)
+        if side is None:
+            st.info(PAINTER_TOO_FINE_NOTE)
+        else:
+            # A chart carries no help=, so the canvas's explanation — the
+            # three tools — is the caption above it.
+            st.caption(PAINTER_HELP["canvas"])
+            # The rebuild cache (#186 R12, adopted in #187): every tab renders
+            # on every pass, live-run passes included, and building the
+            # 2,500-marker figure cost ≈ 70 ms per pass; the draft resets the
+            # cache on every mutation, so the figure is rebuilt exactly when
+            # the cells changed and re-serialised otherwise. The tool's drag
+            # mode is one layout attribute, set on the cached figure each
+            # pass (a no-op when unchanged) rather than a cache key (#188).
+            if draft.figure_cache is None:
+                draft.figure_cache = charts.paint_canvas(
+                    draft.rows, draft.cols, draft.cells, side_px=side
+                )
+            figure: Figure = draft.figure_cache  # type: ignore[assignment]
+            figure.update_layout(dragmode=painter_helpers.dragmode_for_tool(str(tool)))
+            st.plotly_chart(
+                figure,
+                width="content",
+                key="painter_canvas",
+                on_select=_apply_stroke,
+                selection_mode=("points", "box", "lasso"),
+            )
+
+    readouts_area = st.container()  # filled after the save row (see the docstring)
+
+    # --- Save. Handled in the script body: the write happens here, then the
+    # sentence — success naming the path, or the problem — renders at once.
+    col_name, col_replace, col_save = st.columns([2, 1, 1])
+    file_name = str(
+        col_name.text_input(
+            "Layout file name",
+            key="painter_file_name",
+            disabled=not has_draft,
+            help=PAINTER_HELP["file_name"],
+        )
+    )
+    replace = bool(
+        col_replace.checkbox(
+            "Replace the existing file",
+            key="painter_replace",
+            disabled=not has_draft,
+            help=PAINTER_HELP["replace"],
+        )
+    )
+    if (
+        col_save.button(
+            "Save layout", key="painter_save", disabled=not has_draft, help=PAINTER_HELP["save"]
+        )
+        and draft is not None
+    ):
+        directory = layouts.GRID_TEMPLATES_DIR  # read at call time (#122's home)
+        typed = file_name.strip()
+        exists = (
+            bool(typed) and (directory / painter_helpers.normalise_template_name(typed)).is_file()
+        )
+        problem = painter_helpers.template_name_problem(typed, exists=exists, replace=replace)
+        if problem:
+            st.error(problem)
+        else:
+            path = painter_helpers.save_draft(draft, directory, typed)
+            painted = painter_helpers.draft_layout_file(draft).occupied_count
+            st.success(
+                f"Saved the layout to {path}: {painted} agents on a {draft.rows} × {draft.cols} "
+                "grid. 'Use this layout in the Run lab' is now live; the file joins the "
+                "'Existing layout file' list from the next interaction on."
+            )
+
+    # --- Hand-off, gated per #186 R6 (amendment d); the reason sits beside it.
+    problem = painter_helpers.handoff_problem(draft)
+    if draft is not None:
+        # Always the draft's real values, even while the button is disabled,
+        # so nothing inconsistent could ever reach the panel.
+        layout = painter_helpers.draft_layout_file(draft)
+        handoff_args: tuple[object, ...] = (
+            str(draft.saved_as or ""),
+            draft.rows,
+            draft.cols,
+            layout.occupied_count,
+            layout.strategy_counts(),
+        )
+    else:
+        handoff_args = ("", 1, 1, 0, {})  # never called: the button is disabled
+    col_handoff, col_reason = st.columns([1, 3])
+    col_handoff.button(
+        "Use this layout in the Run lab",
+        key="painter_handoff",
+        type="primary",
+        disabled=problem is not None,
+        on_click=_painter_handoff,
+        args=handoff_args,
+        help=PAINTER_HELP["handoff"],
+    )
+    if problem is not None:
+        col_reason.caption(problem)
+
+    with readouts_area:
+        if draft is not None:
+            _painter_readouts(draft)
+
+
 def main() -> None:
-    """Lay out the app: the Run lab, Results browser, and Sweep tabs.
+    """Lay out the app: the Run lab, Layout painter, Results browser, and Sweep tabs.
 
     A live run's next pass is scheduled LAST, after every tab has rendered.
     Streamlit's own STOP — the header's Stop button, or the session
@@ -2866,9 +3557,15 @@ def main() -> None:
     try:
         st.title("Evolutionary Prisoner's Dilemma Simulator")
         _apply_pending_load()
-        tab_lab, tab_browser, tab_sweep = st.tabs(["Run lab", "Results browser", "Sweep"])
+        # The Layout painter sits SECOND because it feeds the Run lab (#186
+        # OC1); no test indexes tab positions.
+        tab_lab, tab_painter, tab_browser, tab_sweep = st.tabs(
+            ["Run lab", "Layout painter", "Results browser", "Sweep"]
+        )
         with tab_lab:
             _run_lab()
+        with tab_painter:
+            _painter_tab()
         with tab_browser:
             _results_browser()
         with tab_sweep:

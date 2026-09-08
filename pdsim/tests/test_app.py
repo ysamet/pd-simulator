@@ -9,6 +9,7 @@ lives in the plain helpers and is tested without Streamlit.
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,15 +17,18 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import streamlit
+import yaml
 from streamlit.testing.v1 import AppTest
 
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import all_scenarios
-from pdsim.core import engine
+from pdsim.core import engine, layouts
+from pdsim.core.layouts import format_layout_file
 from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, list_runs, load_run
 from pdsim.run import main as cli_main
+from pdsim.ui import painter_helpers
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "ui" / "app.py")
 
@@ -1105,3 +1109,430 @@ class TestLiveRunContinuity:
         assert LIVE_RUN_KEY not in app.session_state
         assert "3 cycles" in app.success[0].value
         assert app.session_state["last_run"]["timeseries"].mode == "tournament"
+
+
+PAINTER_DRAFT_KEY = "_layout_draft"
+"""The app's session-state key for the Layout painter's draft (M11b Phase E4)."""
+
+PAINTER_WIDGET_KEYS = {
+    "number_input": ("painter_rows", "painter_cols"),
+    "button": (
+        "painter_new",
+        "painter_load",
+        "painter_from_preview",
+        "painter_undo",
+        "painter_fill",
+        "painter_clear",
+        "painter_save",
+        "painter_handoff",
+    ),
+    "selectbox": ("painter_source",),
+    "radio": ("painter_tool", "painter_brush"),
+    "text_input": ("painter_file_name",),
+    "checkbox": ("painter_replace",),
+}
+"""Every painter widget that renders on EVERY pass, by AppTest accessor.
+
+"Resize grid" (`painter_resize`) is conditional — it appears only while the
+Rows / Columns boxes differ from the grid on the canvas — and the canvas
+itself is a plotly element AppTest models only as an unknown element.
+"""
+
+
+@pytest.fixture
+def painter_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the app at a per-test runs folder AND a per-test templates folder.
+
+    ``PDSIM_RUNS_DIR`` is the browser tests' idiom; the templates folder is
+    redirected by patching ``pdsim.core.layouts.GRID_TEMPLATES_DIR`` — every
+    painter path, the config validator, and the recorder read that attribute
+    at call time, so the redirect holds inside AppTest's in-process script
+    run. The three protected examples are copied in.
+
+    Args:
+        tmp_path: pytest's per-test directory.
+        monkeypatch: pytest's patcher.
+
+    Returns:
+        The redirected templates folder.
+    """
+    monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path / "runs"))
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    for name in painter_helpers.SHIPPED_TEMPLATES:
+        shutil.copy(Path("grid_templates") / name, templates / name)
+    monkeypatch.setattr(layouts, "GRID_TEMPLATES_DIR", templates)
+    return templates
+
+
+def _painter_metric(app: AppTest, label: str) -> str | None:
+    """A painter readout's value, or ``None`` when it is not rendered.
+
+    Args:
+        app: The AppTest handle after a script run.
+        label: The metric label ("Sites", "Painted agents", ...).
+
+    Returns:
+        The metric's body text.
+    """
+    values = [item.value for item in app.metric if item.label == label]
+    assert len(values) <= 1, label
+    return values[0] if values else None
+
+
+def _canvases(app: AppTest) -> list[object]:
+    """The painter canvas elements currently rendered (zero or one).
+
+    AppTest models a plotly chart as an unknown element carrying the
+    PlotlyChart proto; the canvas is told apart from the app's other charts
+    by its user key, which Streamlit folds into the element id.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        The matching elements.
+    """
+    return [element for element in app.get("plotly_chart") if "painter_canvas" in element.proto.id]
+
+
+def _canvas_spec(app: AppTest) -> dict[str, object]:
+    """The one canvas's figure spec as a dictionary.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        The parsed plotly JSON spec.
+    """
+    canvases = _canvases(app)
+    assert len(canvases) == 1
+    return json.loads(canvases[0].proto.spec)  # type: ignore[attr-defined]
+
+
+def _new_grid(app: AppTest, rows: int, cols: int) -> None:
+    """Press "New blank grid" at the given size.
+
+    Args:
+        app: The AppTest handle after a script run.
+        rows: The "Rows" value to set.
+        cols: The "Columns" value to set.
+    """
+    app.number_input(key="painter_rows").set_value(rows)
+    app.number_input(key="painter_cols").set_value(cols)
+    app.button(key="painter_new").click()
+    app.run()
+    assert not app.exception
+
+
+def _load_template(app: AppTest, name: str) -> None:
+    """Choose a file under "Existing layout file" and press "Load into painter".
+
+    Args:
+        app: The AppTest handle after a script run.
+        name: The bare file name to load.
+    """
+    app.selectbox(key="painter_source").select(name)
+    app.run()
+    app.button(key="painter_load").click()
+    app.run()
+    assert not app.exception
+
+
+def _save_as(app: AppTest, name: str, replace: bool = False) -> None:
+    """Type a name, set the replace box, press "Save layout".
+
+    Args:
+        app: The AppTest handle after a script run.
+        name: The "Layout file name" text.
+        replace: The "Replace the existing file" checkbox value.
+    """
+    app.text_input(key="painter_file_name").set_value(name)
+    app.checkbox(key="painter_replace").set_value(replace)
+    app.run()
+    app.button(key="painter_save").click()
+    app.run()
+    assert not app.exception
+
+
+class TestLayoutPainter:
+    """The Layout painter tab (M11b Phase E4; DECISIONS #186 rulings, #187 build).
+
+    Every pin drives the painter through its BUTTONS (#186 R12): the mouse
+    stroke itself is owner-validated, its translation to cells is pinned in
+    ``test_painter_helpers.py``. Where a test needs a painted cell without a
+    stroke, it paints the session-state draft through the same pure
+    ``apply_brush`` the stroke callback calls. Pin (x) — that factoring the
+    lookahead out of the panel changed nothing — is the panel's existing
+    suite, which runs unchanged.
+    """
+
+    def test_cold_start_renders_the_tab_with_every_widget(self, painter_env: Path) -> None:
+        """(i) The four tabs in OC1's order; every painter widget by key; no canvas yet."""
+        app = _fresh_app()
+        assert not app.exception
+        assert [tab.label for tab in app.tabs] == [
+            "Run lab",
+            "Layout painter",
+            "Results browser",
+            "Sweep",
+        ]
+        for accessor, keys in PAINTER_WIDGET_KEYS.items():
+            for key in keys:
+                assert getattr(app, accessor)(key=key) is not None, key
+        assert app.number_input(key="painter_rows").value == 10
+        assert app.number_input(key="painter_cols").value == 10
+        assert app.selectbox(key="painter_source").options == sorted(
+            painter_helpers.SHIPPED_TEMPLATES
+        )
+        assert app.radio(key="painter_brush").options == painter_helpers.brush_options()
+        assert app.radio(key="painter_tool").options == list(painter_helpers.TOOL_OPTIONS)
+        assert app.radio(key="painter_tool").value == painter_helpers.TOOL_DRAW
+        # Without a grid the editing controls are greyed, never hidden.
+        for key in ("painter_fill", "painter_clear", "painter_undo", "painter_save"):
+            assert app.button(key=key).disabled is True, key
+        assert app.button(key="painter_handoff").disabled is True
+        assert app.button(key="painter_new").disabled is False
+        with pytest.raises(KeyError):
+            app.button(key="painter_resize")
+        assert _canvases(app) == []
+        assert PAINTER_DRAFT_KEY not in app.session_state
+
+    def test_new_blank_grid_readouts_canvas_and_unsaved_handoff(self, painter_env: Path) -> None:
+        """(ii) 6 x 8: Sites 48, Painted agents 0; canvas sized to the grid; hand-off greyed."""
+        app = _fresh_app()
+        _new_grid(app, 6, 8)
+        assert _painter_metric(app, "Sites") == "48"
+        assert _painter_metric(app, "Painted agents") == "0"
+        assert _painter_metric(app, "Empty cells") == "48"
+        assert _painter_metric(app, "Saved as") == "not saved yet"
+        assert app.button(key="painter_handoff").disabled is True
+        assert any("Save the layout first" in text for text in _captions(app))
+        spec = _canvas_spec(app)
+        layout = spec["layout"]
+        assert layout["dragmode"] == "lasso"  # type: ignore[index]  # the Draw tool (#188)
+        assert (layout["width"], layout["height"]) == (640, 580)  # type: ignore[index]
+        assert len(spec["data"][0]["x"]) == 48  # type: ignore[index]
+        # Changing a box never resizes implicitly: the "Resize grid" button appears.
+        app.number_input(key="painter_rows").set_value(7)
+        app.run()
+        assert _painter_metric(app, "Sites") == "48"
+        assert any("Resize grid" in text for text in _captions(app))
+        app.button(key="painter_resize").click()
+        app.run()
+        assert not app.exception
+        assert _painter_metric(app, "Sites") == "56"
+        with pytest.raises(KeyError):
+            app.button(key="painter_resize")
+
+    def test_tool_radio_sets_the_canvas_drag_mode(self, painter_env: Path) -> None:
+        """(#188) Draw and Lasso put the canvas in lasso mode, Rectangle in box mode.
+
+        The drag mode lives in the figure's own layout, so it survives the
+        canvas remount after every stroke; the cached figure carries it.
+        """
+        app = _fresh_app()
+        _new_grid(app, 6, 8)
+        assert _canvas_spec(app)["layout"]["dragmode"] == "lasso"  # type: ignore[index]
+        app.radio(key="painter_tool").set_value(painter_helpers.TOOL_RECTANGLE)
+        app.run()
+        assert not app.exception
+        assert _canvas_spec(app)["layout"]["dragmode"] == "select"  # type: ignore[index]
+        app.radio(key="painter_tool").set_value(painter_helpers.TOOL_LASSO)
+        app.run()
+        assert _canvas_spec(app)["layout"]["dragmode"] == "lasso"  # type: ignore[index]
+        app.radio(key="painter_tool").set_value(painter_helpers.TOOL_DRAW)
+        app.run()
+        assert _canvas_spec(app)["layout"]["dragmode"] == "lasso"  # type: ignore[index]
+
+    def test_load_into_painter_reads_the_island(self, painter_env: Path) -> None:
+        """(iii) example_island.txt: 24 painted, the counts caption, the boxes follow."""
+        app = _fresh_app()
+        _load_template(app, "example_island.txt")
+        assert _painter_metric(app, "Painted agents") == "24"
+        assert _painter_metric(app, "Sites") == "24"
+        assert any("Always Defect 18, Tit for Tat 6" in text for text in _captions(app))
+        assert app.number_input(key="painter_rows").value == 4
+        assert app.number_input(key="painter_cols").value == 6
+        # A loaded file IS saved and unchanged, so a shipped example hands off as it is.
+        assert _painter_metric(app, "Saved as") == "example_island.txt"
+        assert app.button(key="painter_handoff").disabled is False
+
+    def test_fill_clear_undo(self, painter_env: Path) -> None:
+        """(iv) Fill all 48, Clear all 0, Undo last stroke 48; one level only."""
+        app = _fresh_app()
+        _new_grid(app, 6, 8)
+        assert app.button(key="painter_undo").disabled is True
+        app.radio(key="painter_brush").set_value("Tit for Tat")
+        app.run()
+        app.button(key="painter_fill").click()
+        app.run()
+        assert _painter_metric(app, "Painted agents") == "48"
+        assert _painter_metric(app, "Saved as") == "unsaved changes"
+        assert any("Tit for Tat 48" in text for text in _captions(app))
+        app.button(key="painter_clear").click()
+        app.run()
+        assert _painter_metric(app, "Painted agents") == "0"
+        app.button(key="painter_undo").click()
+        app.run()
+        assert not app.exception
+        assert _painter_metric(app, "Painted agents") == "48"
+        assert app.button(key="painter_undo").disabled is True  # the one level is spent
+
+    def test_save_refusals_and_acceptance(self, painter_env: Path) -> None:
+        """(v) Blank, protected, and existing-without-replace refused; the text byte-exact."""
+        app = _fresh_app()
+        _load_template(app, "example_island.txt")
+        _save_as(app, "")
+        assert any("Give the layout a file name" in item.value for item in app.error)
+        for shipped in painter_helpers.SHIPPED_TEMPLATES:
+            _save_as(app, shipped, replace=True)
+            assert any("shipped examples" in item.value for item in app.error), shipped
+            assert not app.success
+        _save_as(app, "island_copy")
+        assert not app.error
+        assert any("island_copy.txt" in item.value for item in app.success)
+        path = painter_env / "island_copy.txt"
+        assert path.is_file()
+        draft = app.session_state[PAINTER_DRAFT_KEY]
+        expected = format_layout_file(painter_helpers.draft_layout_file(draft), comment=True)
+        assert path.read_bytes() == expected.encode("utf-8")
+        assert _painter_metric(app, "Saved as") == "island_copy.txt"
+        app.run()  # the file list renders before the save row, so it catches up next pass
+        assert "island_copy.txt" in app.selectbox(key="painter_source").options
+        _save_as(app, "island_copy")
+        assert any("already exists" in item.value for item in app.error)
+        _save_as(app, "island_copy", replace=True)
+        assert not app.error
+        assert any("island_copy.txt" in item.value for item in app.success)
+
+    def test_handoff_fills_the_run_lab(self, painter_env: Path) -> None:
+        """(vi) The island saved as island_copy.txt hands off every panel key."""
+        app = _fresh_app()
+        assert app.session_state["run.mode"] == "tournament"  # the cold-start scenario
+        _load_template(app, "example_island.txt")
+        _save_as(app, "island_copy")
+        app.button(key="painter_handoff").click()
+        app.run()
+        assert not app.exception
+        assert app.session_state["run.mode"] == "evolution"
+        assert app.selectbox(key="structure.kind").value == "lattice"
+        assert app.checkbox(key="structure.rows#limit").value is True
+        assert app.number_input(key="structure.rows#value").value == 4
+        assert app.checkbox(key="structure.cols#limit").value is True
+        assert app.number_input(key="structure.cols#value").value == 6
+        assert app.selectbox(key="structure.initial_layout").value == "from_file"
+        assert app.text_input(key="structure.layout_file").value == "island_copy.txt"
+        assert app.number_input(key="population.size").value == 24
+        assert app.number_input(key="composition.always_defect").value == 18
+        assert app.number_input(key="composition.tit_for_tat").value == 6
+        assert "Population mix OK: 24 agents." in _captions(app)
+        assert [item.value for item in app.metric if item.label == "Occupied"] == ["24 (100%)"]
+        assert any("island_copy.txt" in item.value for item in app.success)  # the load note
+
+    def test_a_one_agent_draft_saves_but_cannot_hand_off(self, painter_env: Path) -> None:
+        """(vi-b) Amendment (d): saving is allowed; the hand-off stays greyed with its reason."""
+        app = _fresh_app()
+        _new_grid(app, 4, 6)
+        # One cell, through the same pure function the stroke callback calls.
+        painter_helpers.apply_brush(app.session_state[PAINTER_DRAFT_KEY], [0], "tit_for_tat")
+        app.run()
+        assert _painter_metric(app, "Painted agents") == "1"
+        panel_keys = ("run.mode", "structure.kind", "structure.initial_layout", "population.size")
+        panel_before = {key: app.session_state[key] for key in panel_keys}
+        _save_as(app, "lonely")
+        assert not app.error
+        assert (painter_env / "lonely.txt").is_file()
+        assert _painter_metric(app, "Saved as") == "lonely.txt"
+        assert app.button(key="painter_handoff").disabled is True
+        assert any("at least two agents" in text for text in _captions(app))
+        panel_after = {key: app.session_state[key] for key in panel_keys}
+        assert panel_after == panel_before
+
+    def test_validation_pin_recorded_layout_and_cli_rerun(
+        self, painter_env: Path, tmp_path: Path
+    ) -> None:
+        """(vii) Hand off, record a run: layout.txt is the saved text; the CLI re-run is identical.
+
+        The spec's V5 chain for E4. The recorded copy is compared after
+        normalising line endings: the recorder writes its copy with
+        ``Path.write_text``, which on Windows translates LF to CRLF — a
+        pre-existing io-layer behaviour reported in #187, not changed here
+        (the parser reads both identically, so the re-run is unaffected).
+        """
+        app = _fresh_app()
+        _load_template(app, "example_island.txt")
+        _save_as(app, "island_copy")
+        saved = (painter_env / "island_copy.txt").read_bytes()
+        app.button(key="painter_handoff").click()
+        app.run()
+        app.number_input(key="dynamics.generations").set_value(2)
+        app.number_input(key="match.rounds_per_match").set_value(5)
+        app.slider(key="playback_delay").set_value(0.0)
+        app.checkbox(key="record_run").set_value(True)
+        app.run()
+        assert not app.exception
+        app.button(key="run_button").click()
+        app.run()  # the one run() follows the pass chain to the end (#184(e))
+        assert not app.exception
+        assert any("2 generations" in item.value for item in app.success)
+        runs_dir = tmp_path / "runs"
+        cards = list_runs(runs_dir)
+        assert len(cards) == 1
+        folder = runs_dir / str(cards[0]["run_id"])
+        recorded = (folder / "layout.txt").read_bytes().replace(b"\r\n", b"\n")
+        assert recorded == saved
+        # The recorded config names the local copy by its bare name; loading
+        # it back resolves that name beside the config (the #122 rule), so
+        # the raw YAML is what carries "layout.txt".
+        recorded_config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8"))
+        assert recorded_config["structure"]["layout_file"] == "layout.txt"
+        loaded = load_run(folder)
+        assert Path(str(loaded.config.structure.layout_file)) == folder / "layout.txt"
+        assert loaded.config.structure.initial_layout == "from_file"
+        assert (loaded.config.structure.rows, loaded.config.structure.cols) == (4, 6)
+        cli_out = str(tmp_path / "cli")
+        assert cli_main([str(folder / "config.yaml"), "--out", cli_out, "--quiet"]) == 0
+        cli_folders = [p for p in (tmp_path / "cli").iterdir() if p.is_dir()]
+        assert len(cli_folders) == 1
+        for name in ("timeseries.parquet", "cooperation.parquet"):
+            pd.testing.assert_frame_equal(
+                pd.read_parquet(folder / name), pd.read_parquet(cli_folders[0] / name)
+            )
+
+    def test_start_from_the_run_labs_founding_preview(self, painter_env: Path) -> None:
+        """(viii) The clusters scenario seeds a 20 x 20 draft; the tournament tab refuses."""
+        app = _fresh_app()
+        app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+        app.run()
+        app.button(key="painter_from_preview").click()
+        app.run()
+        assert not app.exception
+        draft = app.session_state[PAINTER_DRAFT_KEY]
+        assert (draft.rows, draft.cols) == (20, 20)
+        counts = painter_helpers.draft_layout_file(draft).strategy_counts()
+        assert counts == {"always_cooperate": 100, "always_defect": 100}
+        assert app.number_input(key="painter_rows").value == 20
+        assert app.number_input(key="painter_cols").value == 20
+        assert _painter_metric(app, "Painted agents") == "200"
+        assert len(_canvases(app)) == 1
+        assert not app.warning
+        # The converse on a fresh session: the cold start is the tournament.
+        app = _fresh_app()
+        assert app.session_state["run.mode"] == "tournament"
+        app.button(key="painter_from_preview").click()
+        app.run()
+        assert not app.exception
+        assert any("no founding preview" in item.value for item in app.warning)
+        assert PAINTER_DRAFT_KEY not in app.session_state
+        assert _canvases(app) == []
+
+    def test_a_grid_too_fine_to_paint_shows_the_sentence_and_no_canvas(
+        self, painter_env: Path
+    ) -> None:
+        """(ix) 200 x 10 is the pixel-array regime: the R3 sentence replaces the canvas."""
+        app = _fresh_app()
+        _new_grid(app, 200, 10)
+        assert any("too fine to paint" in item.value for item in app.info)
+        assert _canvases(app) == []
+        assert _painter_metric(app, "Sites") == "2000"  # the readouts still render

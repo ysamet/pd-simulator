@@ -1,5 +1,7 @@
 # M11b Phase E — sub-prompt E4: the mouse layout painter (DRAFT)
 
+**RATIFIED as DECISIONS #186 on 2026-09-06; built as #187.**
+
 **Status: DRAFT — scoped 2026-09-05 by the implementation layer, for
 design-layer ratification.** DECISIONS #185 records the scoping findings
 below as open design state. The design layer confirms or amends Part 2's

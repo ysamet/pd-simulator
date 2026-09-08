@@ -1,0 +1,15 @@
+# written by the pdsim layout painter
+kind: lattice_grid
+rows: 10
+cols: 10
+
+. . . . . . . . . .
+. always_cooperate always_cooperate always_cooperate tit_for_tat tit_for_tat always_defect always_defect grim_trigger .
+. always_cooperate always_cooperate always_defect always_defect always_defect tit_for_tat always_defect grim_trigger .
+. always_cooperate tit_for_tat always_defect pavlov random tit_for_tat always_defect grim_trigger .
+. always_cooperate tit_for_tat always_defect always_defect generous_tit_for_tat grim_trigger grim_trigger grim_trigger .
+. always_cooperate always_defect tit_for_tat tit_for_tat generous_tit_for_tat always_defect always_cooperate grim_trigger .
+. always_cooperate always_defect always_defect always_defect always_defect always_defect always_cooperate grim_trigger .
+. always_cooperate always_cooperate always_cooperate always_cooperate always_cooperate always_cooperate always_cooperate grim_trigger .
+. grim_trigger grim_trigger grim_trigger grim_trigger grim_trigger grim_trigger grim_trigger grim_trigger .
+. . . . . . . . . .

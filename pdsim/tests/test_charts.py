@@ -373,6 +373,115 @@ class TestGridRenderer:
             assert figure.layout.yaxis.scaleratio == 1
 
 
+class TestPaintCanvas:
+    """The Layout painter's click surface (M11b Phase E4, DECISIONS #186 R2/R3).
+
+    One scatter of square markers in row-major site order over the EXISTING
+    pixel-array predicate; the width floor of #149 (amendment a).
+    """
+
+    @pytest.mark.parametrize(
+        ("rows", "cols"), [(49, 49), (51, 51), (200, 10), (60, 5), (10, 10), (1, 3), (6, 8)]
+    )
+    def test_cell_side_is_none_exactly_when_the_pixel_array_is_active(
+        self, rows: int, cols: int
+    ) -> None:
+        """One predicate, one threshold: paintable ⇔ not pixel-array."""
+        side = charts.paint_cell_side(rows, cols)
+        assert (side is None) == charts.pixel_array_active(rows, cols)
+        if side is not None:
+            assert side >= charts.BORDER_MIN_SIDE_PX
+            assert side == int(charts._naive_cell_side(rows, cols))
+
+    def test_the_known_sides(self) -> None:
+        """49×49 paints at 9 px, 60×5 keeps 7 px, 51×51 and 200×10 cannot paint."""
+        assert charts.paint_cell_side(49, 49) == 9
+        assert charts.paint_cell_side(60, 5) == 7
+        assert charts.paint_cell_side(10, 10) == 45
+        assert charts.paint_cell_side(51, 51) is None
+        assert charts.paint_cell_side(200, 10) is None
+
+    def test_trace_zero_is_the_cells_trace_in_row_major_order(self) -> None:
+        """Point i sits at (i % cols, i // cols), so point_index IS the site id."""
+        figure = charts.paint_canvas(3, 4, [None] * 12, side_px=40)
+        cells = figure.data[0]
+        assert cells.type == "scatter"
+        assert cells.mode == "markers"
+        assert cells.showlegend is False
+        assert len(cells.x) == 12
+        assert tuple(cells.x) == tuple(i % 4 for i in range(12))
+        assert tuple(cells.y) == tuple(i // 4 for i in range(12))
+        assert cells.marker.symbol == "square"
+        assert cells.marker.size == 39  # side − 1: the 1 px gap
+
+    def test_marker_colours_follow_the_one_palette(self) -> None:
+        """Occupied cells take strategy_colors(); empty ones EMPTY_CELL_COLOR."""
+        colors = charts.strategy_colors()
+        figure = charts.paint_canvas(1, 3, ["always_defect", None, "tit_for_tat"], side_px=40)
+        marker_colors = tuple(figure.data[0].marker.color)
+        assert marker_colors == (
+            colors["always_defect"],
+            charts.EMPTY_CELL_COLOR,
+            colors["tit_for_tat"],
+        )
+
+    def test_the_layout_contract(self) -> None:
+        """Select drag mode, explicit width and height, reversed y, fixed ranges, square cells."""
+        figure = charts.paint_canvas(6, 8, [None] * 48, side_px=75)
+        layout = figure.layout
+        assert layout.dragmode == "select"
+        assert (layout.width, layout.height) == (
+            8 * 75 + 40,
+            6 * 75 + 60 + charts.PAINT_LEGEND_ROOM_PX,
+        )
+        assert layout.yaxis.range[0] > layout.yaxis.range[1]  # reversed: row 0 on top
+        assert layout.xaxis.fixedrange is True
+        assert layout.yaxis.fixedrange is True
+        assert layout.yaxis.scaleanchor == "x"
+        assert layout.yaxis.scaleratio == 1
+
+    def test_the_width_floor_binds_on_the_tall_narrow_grid(self) -> None:
+        """Amendment (a): 60×5 sits at exactly _MIN_CANVAS_WIDTH; 10×10 exceeds it."""
+        narrow = charts.paint_canvas(60, 5, [None] * 300, side_px=charts.paint_cell_side(60, 5))
+        assert narrow.layout.width == charts._MIN_CANVAS_WIDTH == 320
+        square = charts.paint_canvas(10, 10, [None] * 100, side_px=charts.paint_cell_side(10, 10))
+        assert square.layout.width > charts._MIN_CANVAS_WIDTH
+
+    def test_legend_traces_carry_every_display_name_and_no_data(self) -> None:
+        """The colour key: one legend-only trace per registered strategy (plus Empty)."""
+        figure = charts.paint_canvas(2, 2, [None] * 4, side_px=40)
+        legend = figure.data[1:]
+        names = {trace.name for trace in legend}
+        for name in all_strategy_names():
+            assert charts._display_name(name) in names
+        assert "Empty" in names
+        for trace in legend:
+            assert trace.showlegend is True
+            assert all(value is None for value in trace.x)
+            assert all(value is None for value in trace.y)
+
+    def test_hover_numbers_rows_and_columns_from_one(self) -> None:
+        """The parser's convention (#122(d)): 1-based, like its line and cell numbers."""
+        figure = charts.paint_canvas(2, 4, ["always_defect", *([None] * 7)], side_px=40)
+        text = figure.data[0].text
+        assert text[0] == "row 1, col 1 — Always Defect"
+        assert text[5] == "row 2, col 2 — empty"
+
+    def test_the_drag_mode_follows_the_tool(self) -> None:
+        """#188: a box or a freehand path; never pan or zoom on a painter."""
+        lasso = charts.paint_canvas(2, 2, [None] * 4, side_px=40, dragmode="lasso")
+        assert lasso.layout.dragmode == "lasso"
+        with pytest.raises(ValueError, match="dragmode"):
+            charts.paint_canvas(2, 2, [None] * 4, side_px=40, dragmode="pan")
+
+    def test_selected_and_unselected_markers_never_dim(self) -> None:
+        """Opacity 1 both ways, so a no-op stroke dims nothing (finding F5)."""
+        figure = charts.paint_canvas(2, 2, [None] * 4, side_px=40)
+        cells = figure.data[0]
+        assert cells.selected.marker.opacity == 1
+        assert cells.unselected.marker.opacity == 1
+
+
 class TestEventTimeAxis:
     """M10b: async runs plot against the generation-equivalent clock."""
 

@@ -21,8 +21,12 @@ from pdsim.core.dynamics import build_initial_population
 from pdsim.core.events import GenerationFinished
 from pdsim.core.layouts import (
     LAYOUT_CHOICES,
+    LAYOUT_FILE_KIND,
+    PAINTER_COMMENT_LINE,
     STOCHASTIC_LAYOUTS,
+    LayoutFile,
     deal_layout,
+    format_layout_file,
     found_occupancy,
     found_population,
     founding_view,
@@ -812,20 +816,90 @@ class TestCommaSeparator:
         assert "tit_for_tat" in message  # the valid names are listed
 
 
+SHIPPED_EXAMPLES = (
+    ("example_quadrants.txt", 4, 6, 18),
+    ("example_island.txt", 4, 6, 24),
+    ("example_template_20x20.txt", 20, 20, 400),
+)
+"""The three protected shipped examples: name, rows, cols, agents (#186 OC2)."""
+
+
+class TestLayoutFileFormatter:
+    """The format's WRITE side (M11b Phase E4, DECISIONS #186 R5 / amendment c).
+
+    `format_layout_file` lives beside the parser so the format has one home;
+    it touches no filesystem and no engine path calls it.
+    """
+
+    @pytest.mark.parametrize(("name", "rows", "cols", "agents"), SHIPPED_EXAMPLES)
+    def test_round_trip_on_every_protected_example(
+        self, name: str, rows: int, cols: int, agents: int
+    ) -> None:
+        """parse(format(read(path))) equals the file in kind, rows, cols, cells."""
+        original = read_layout_file(Path("grid_templates") / name)
+        reread = parse_layout_file(format_layout_file(original))
+        assert (reread.kind, reread.rows, reread.cols) == (original.kind, rows, cols)
+        assert reread.cells == original.cells
+        assert reread.occupied_count == agents
+
+    def test_a_hand_built_layout_with_empty_cells(self) -> None:
+        """Header, blank line, one line per row, '.' for empty, trailing newline."""
+        layout = LayoutFile(
+            kind=LAYOUT_FILE_KIND, rows=2, cols=3, cells=(AD, AD, None, AC, None, AC)
+        )
+        text = format_layout_file(layout)
+        assert text == (f"kind: lattice_grid\nrows: 2\ncols: 3\n\n{AD} {AD} .\n{AC} . {AC}\n")
+        assert text.endswith("\n") and not text.endswith("\n\n")
+        assert parse_layout_file(text).cells == layout.cells
+
+    def test_the_comment_line_is_fixed_and_skipped_by_the_parser(self) -> None:
+        """Amendment (c), parser-skips branch: ONE fixed line, no timestamp."""
+        layout = LayoutFile(kind=LAYOUT_FILE_KIND, rows=1, cols=2, cells=(AD, None))
+        with_comment = format_layout_file(layout, comment=True)
+        assert with_comment.startswith(PAINTER_COMMENT_LINE + "\n")
+        assert "\n" + PAINTER_COMMENT_LINE not in with_comment  # once, at the top
+        assert format_layout_file(layout) == with_comment.removeprefix(PAINTER_COMMENT_LINE + "\n")
+        assert parse_layout_file(with_comment).cells == layout.cells
+        # Identical paintings are identical bytes: no clock anywhere.
+        assert format_layout_file(layout, comment=True) == with_comment
+
+    def test_a_cell_count_mismatch_is_refused(self) -> None:
+        """A layout whose cells do not fill rows × cols cannot be written."""
+        layout = LayoutFile(kind=LAYOUT_FILE_KIND, rows=2, cols=2, cells=(AD, None, AC))
+        with pytest.raises(ValueError, match="holds 3"):
+            format_layout_file(layout)
+
+    def test_no_engine_module_mentions_the_formatter(self) -> None:
+        """Hard rules 4 and 8: the engine only ever READS layout data."""
+        from pdsim.config import experiment
+        from pdsim.core import async_dynamics, dynamics, engine, structure
+        from pdsim.io import results
+
+        for module in (dynamics, async_dynamics, engine, structure, experiment, results):
+            source = Path(module.__file__).read_text(encoding="utf-8")  # type: ignore[arg-type]
+            assert "format_layout_file" not in source, module.__name__
+
+
 class TestGridTemplates:
     """The shipped templates and the bare-name resolution rule (#122)."""
 
-    def test_both_shipped_examples_parse_and_use_registered_names(self) -> None:
-        """The README's examples must never rot against the registry."""
+    @pytest.mark.parametrize(("name", "rows", "cols", "agents"), SHIPPED_EXAMPLES)
+    def test_shipped_examples_parse_and_use_registered_names(
+        self, name: str, rows: int, cols: int, agents: int
+    ) -> None:
+        """The README's examples must never rot against the registry.
+
+        Three since Phase E4 (#186 OC2): the owner's 20 × 20 sample, renamed
+        from ``Grid_Layout_Template.md``, is a protected example too.
+        """
         from pdsim.core.strategies import all_strategy_names
 
         known = frozenset(all_strategy_names())
-        for name, agents in (("example_quadrants.txt", 18), ("example_island.txt", 24)):
-            layout = read_layout_file(Path("grid_templates") / name)
-            validate_layout_file(
-                layout, rows=4, cols=6, known_strategies=known, population_size=agents
-            )
-            assert layout.occupied_count == agents
+        layout = read_layout_file(Path("grid_templates") / name)
+        validate_layout_file(
+            layout, rows=rows, cols=cols, known_strategies=known, population_size=agents
+        )
+        assert layout.occupied_count == agents
 
     def test_a_bare_name_resolves_against_grid_templates(self) -> None:
         """No separator means 'a template' — the #122 rule."""

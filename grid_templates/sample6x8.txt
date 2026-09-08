@@ -1,0 +1,11 @@
+# written by the pdsim layout painter
+kind: lattice_grid
+rows: 6
+cols: 8
+
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect
+tit_for_tat tit_for_tat tit_for_tat tit_for_tat always_defect always_defect always_defect always_defect

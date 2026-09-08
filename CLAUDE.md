@@ -42,7 +42,11 @@ plain name; since M11b E2 every section with advanced parameters —
 Matching, Structure, Movement, Dynamics — ends its widgets with a
 collapsed "Advanced settings" expander, whose header reads "Advanced
 settings — N changed: …" when any folded value differs from its
-default, so a folded widget's path names its fold), and the widget's
+default, so a folded widget's path names its fold; since M11b E4 the app
+has FOUR top-level tabs — "Run lab", "Layout painter", "Results browser",
+"Sweep" — and the Layout painter's widgets sit directly on its tab with
+no expander, its canvas appearing only once a grid exists and is coarse
+enough to paint), and the widget's
 registry label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
 session that writes the instructions — never from assumptions about
 typical Streamlit apps. Known traps, learned the hard way: this app has
@@ -410,10 +414,36 @@ throttle kept as cached-figure re-emission; the controls row filled
 after the pass so a finished run re-enables Run in the same pass; the
 real app measured at ≈ 0.17–0.23 s per pass; zero re-recordings, zero
 new goldens; 1255 tests).
-**The next implementation effort is Phase E4** (the mouse layout
-painter), then E5 close-out (which carries the held items
-#177(f3)/(f4), the async well-mixed round_robin calibration branch
-(#181), DESIGN §4.1's stale "radio" wording (#182(f4)), and the
-fixed_n greying of the three folded economy knobs (#182(f7))).
+Phase E4 — the mouse layout painter — landed 2026-09-06 (DECISIONS
+#186 design-layer rulings + #187 build record; the fourth top-level
+"Layout painter" tab, second in the strip; `charts.paint_canvas`, one
+scatter of square markers in row-major site order over the EXISTING
+pixel-array predicate, `dragmode="select"`, width never below 320 px;
+the Streamlit-free `ui/painter_helpers.py` with the mutable,
+grid-size-agnostic `LayoutDraft` in app state (the stroke a pure
+transformation, one-level undo, fill, clear, resize, the rebuild cache
+adopted on measurement); `layouts.format_layout_file` as the format's
+write side — the parser skips `#` lines, so ONE fixed comment line;
+saves into `grid_templates/` under bare names with the three protected
+examples (`Grid_Layout_Template.md` renamed to
+`example_template_20x20.txt`); the hand-off callback through the
+existing populate path, enabled only for a saved, unchanged draft
+placing at least two agents; three seeds through the factored
+`_panel_lookahead`; `streamlit>=1.58`; zero re-recordings, zero new
+goldens; 1323 tests). A validation-feedback fix followed (2026-09-07,
+DECISIONS #188): plotly hides the pan tool under fixed-range axes and a
+plain click on a scatter marker reaches no Streamlit handler, so the
+"pan tool then click" single-cell path was replaced by a "Tool" radio —
+"Draw (drag to paint)" rasterises the lasso path as a brush stroke,
+"Rectangle (drag a box)" and "Lasso (enclose an area)" take the enclosed
+cells — with no pan tool at all (the owner's ruling: pan matters only
+with zoom); 1334 tests.
+**The next implementation effort is Phase E5 close-out** (which
+carries the held items #177(f3)/(f4), the async well-mixed round_robin
+calibration branch (#181), DESIGN §4.1's stale "radio" wording
+(#182(f4)), the fixed_n greying of the three folded economy knobs
+(#182(f7)), and the two E4 held findings — the recorder's CRLF copy of
+the layout file on Windows (#187 f2) and the hand-off leaving the
+Scenario dropdown's label on a recording (#187 f6)).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

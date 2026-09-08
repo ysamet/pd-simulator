@@ -623,7 +623,12 @@ empty and is the FILLING regime, the one Kaznatcheev & Shultz's early-run
 result concerns. Plus a layout-FILE reference mechanism so a hand-authored
 arrangement is DATA the engine reads (rule 8: the run must re-run from its
 config; rule 4: the engine never knows a mouse was involved). The mouse
-painter that writes such files is M11b.
+painter that writes such files SHIPPED in M11b Phase E4 (2026-09-06; #186
+designed, #187 built) as the app's "Layout painter" tab (§4.1 item 6): it
+writes an ordinary layout file into `grid_templates/` through the format's
+write side, `layouts.format_layout_file` (the parser's twin, in the same
+module, called by no engine path), and hands the file's bare name to the
+Run lab — so the engine still reads a FILE exactly as before.
 
 **Layout file format** (M11a Phase B). Plain text: a header of
 `kind: lattice_grid`, `rows:` and `cols:` lines, then a body of one token
@@ -660,7 +665,10 @@ under the honest-presence rule (#83); an agent's recorded site is its
 post-boundary (sync) or recording-point (async) position, so a moved agent
 appears at its new site in the next snapshot. Still out of scope: per-site
 capacity above 1, irregular/geographic site sets, and co-residency
-semantics (all M19); the layout painter (M11b Phase E4).
+semantics (all M19). The layout painter shipped in M11b Phase E4 (§4.1
+item 6); its large-grid editing surface — a zoomed viewport with region
+tools over the pixel-array regime, or a map-shaped site set — is M19's, as
+a second renderer over the same `LayoutDraft` and save path (#186 R3).
 
 **M11a spec obligation** (design-freeze §12, restated because ~15
 parameters arrive at once): every new CONCEPT, every ENUM VALUE
@@ -997,6 +1005,50 @@ top, parameters, live plots below):
    chart** (M9b, #65): overall population plus per-strategy
    actions-weighted lines, y pinned 0–1; the final-summary area adds the
    cooperation pair matrix as table rows.
+6. **Layout painter tab** (M11b Phase E4, #186/#187) — the second tab in
+   the strip (`["Run lab", "Layout painter", "Results browser", "Sweep"]`),
+   a TOOL that writes the layout files a config references (#109): the
+   engine reads a FILE exactly as before, never knowing a mouse was
+   involved. Its widgets sit directly on the tab, no expander. Three
+   seeds — "New blank grid" from the "Rows" / "Columns" boxes (each in
+   [1, 500]), "Load into painter" over the `.txt` files of
+   `grid_templates/` (tokens validated against the registry through the
+   one validator), and "Start from the Run lab's founding preview" (the
+   panel's forward values through the same `_panel_lookahead` the panel
+   itself uses, then `grid_visible` → `grid_preview_config` →
+   `founding_view`); changing the boxes with a grid present offers a
+   "Resize grid" button rather than resizing implicitly. The canvas
+   (`charts.paint_canvas`) is the project's one INPUT figure: a single
+   scatter of square markers in row-major site order (a selection's point
+   index IS the site id), rendered with `width="content"` at an explicit
+   size never below 320 px wide, exactly where the existing pixel-array
+   predicate is false — otherwise a sentence says the grid is too fine to
+   paint by mouse (M19's large-grid editor is a second renderer over the
+   same draft, #186 R3). A "Tool" radio sets the figure's own drag mode
+   (#188): "Draw (drag to paint)" and "Lasso (enclose an area)" use
+   plotly's lasso, "Rectangle (drag a box)" its box select, and the app
+   reads the completed drag back per tool — Draw rasterises the lasso
+   PATH's vertices (every cell the pointer crossed: a brush stroke, painted
+   on release), the other two take the enclosed points. Every stroke is a
+   drag: a plotly chart in Streamlit reports no mouse motion and no plain
+   click on a scatter marker, and there is no pan tool (a painter has no
+   zoom; plotly hides pan under fixed-range axes anyway). "Brush" = the
+   registered display names plus "Empty (eraser)"; every selected cell
+   takes the brush; "Undo last stroke" (one level), "Fill all", "Clear
+   all". Readouts with (?): "Sites",
+   "Painted agents" (the population size the hand-off sets), "Empty
+   cells", "Saved as", a per-strategy caption. "Save layout" writes
+   `layouts.format_layout_file` text (one fixed comment line, LF endings)
+   into `grid_templates/` under a bare name — the shipped examples are
+   protected, an existing file needs "Replace the existing file". "Use
+   this layout in the Run lab" is a button callback that sets evolution
+   mode, a lattice of the painting's size, `from_file` naming the file, and
+   fills the Population section through the existing populate path; it is
+   enabled only for a saved, unchanged draft placing at least two agents,
+   the reason shown beside it. The draft (`ui/painter_helpers.LayoutDraft`,
+   app state under `_layout_draft`) and every helper are grid-size-
+   agnostic; the built figure is cached on the draft and reset by every
+   mutation (#187).
 
 Config assembly and scenario↔widget mapping live in the Streamlit-free
 `pdsim/ui/helpers.py`; pydantic validation errors surface as plain sentences
@@ -1128,8 +1180,17 @@ SCHEDULE (synchronized global reshuffling pulses are a modelling artifact
 with no asynchronous meaning). Movement remains a **population-dynamics
 concern, orthogonal to strategies** — strategies do not decide movement in
 the base design (unchanged from #46). Named future option, out of M11b: a
-movement energy cost (#165). Still M11b: the mouse layout painter that
-writes the layout files M11a's config references (#109; Phase E4).
+movement energy cost (#165). The mouse layout painter that writes the
+layout files M11a's config references (#109) SHIPPED in Phase E4
+(2026-09-06; #186 designed, #187 built): a fourth top-level "Layout
+painter" tab whose canvas is a second, INPUT-only figure (`charts.
+paint_canvas`, one scatter of square markers — plotly's heatmap and image
+traces have no selection support, so the read-only `grid_chart` cannot be
+the click surface) rendered exactly where the existing pixel-array
+predicate is false; the draft (`ui/painter_helpers.LayoutDraft`) and every
+helper are grid-size-agnostic, so M19's large-grid editing surface is a
+SECOND renderer over the same draft and the same save path, with no engine
+implication (#186 R3). §4.1 item 6 describes the tab.
 
 **M19 — geographic structures**: irregular site sets from GeoJSON polygons
 (shared-border adjacency) or raster masks (cells absent outside a

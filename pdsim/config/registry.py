@@ -844,7 +844,10 @@ register(
             "layout file parameter). Its tokens are strategy MACHINE NAMES "
             "exactly as registered — the app lists the current spellings "
             "beside the layout file box, and the grid_templates folder ships "
-            "worked examples. Ignored under the 'well_mixed' structure."
+            "worked examples. You need not type such a file at all: the "
+            "app's Layout painter tab paints one with the mouse, saves it, "
+            "and fills these widgets in for you. Ignored under the "
+            "'well_mixed' structure."
         ),
         learn_more=(
             "Starting arrangement is a genuine experimental variable in "
@@ -888,7 +891,9 @@ register(
             "the difference and offers to fill the section in from the file "
             "with one click, so nothing needs retyping. A copy of the file "
             "is saved into the run folder, so a recorded run can always be "
-            "re-run even if the original file later moves or changes."
+            "re-run even if the original file later moves or changes. The "
+            "app's Layout painter tab paints and saves such a file by mouse "
+            "and then fills this box and the Population section in for you."
         ),
     )
 )
