@@ -1,5 +1,17 @@
 # M11b Phase E4 — combined handback for the design chat
 
+**Follow-up fixes: #189** (2026-09-07; the owner's walkthrough of steps
+3–11): the painter's "Delete layout file" behind a "Yes, delete this
+file" box, the Results browser's "Open a run" selecting the newly
+recorded run when a live run finishes, and one correction to the
+walkthrough that accompanied this handback in the session message —
+its step 4 placed the "Population mix OK: N agents." caption "below the
+panel"; precisely, the caption renders in the Run lab below the
+"Per-strategy parameters" expander and above the row holding "Update
+granularity", "Run", and "Stop". This file never carried that
+walkthrough, so the correction lives here, in CLAUDE.md's
+validation-precision paragraph, and in DECISIONS #189.
+
 **Written 2026-09-07 by the implementation layer.** Three things in one
 document: (1) Phase E4 — the mouse layout painter — as built against the
 design layer's rulings (DECISIONS #186) with its build record (#187);

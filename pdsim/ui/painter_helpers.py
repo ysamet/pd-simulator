@@ -52,7 +52,7 @@ SHIPPED_TEMPLATES: tuple[str, ...] = (
 )
 """The layout files that ship with the repository and may never be overwritten.
 
-The painter refuses these names on save (#186 R5). A test pins that every
+The painter refuses these names on save (#186 R5) and on delete (#189 R1). A test pins that every
 ``example_*.txt`` actually present in ``grid_templates/`` appears here, so a
 later shipped example cannot be overwritten silently because nobody added it
 (#186 amendment b). The third entry is the owner's 20 × 20 sample, renamed
@@ -659,6 +659,29 @@ def normalise_template_name(name: str) -> str:
     return name if Path(name).suffix else f"{name}.txt"
 
 
+def _is_bare_name(name: str) -> bool:
+    """Whether ``name`` can only address a file directly inside one folder.
+
+    The #122 bare-name rule, shared by the save and delete checks so the two
+    can never drift: no path separator, not absolute, nothing that ``Path``
+    would resolve to a different final component (``".."``, a trailing
+    separator), and at least one letter or digit.
+
+    Args:
+        name: The typed or chosen name, already stripped.
+
+    Returns:
+        True for a bare file name.
+    """
+    return not (
+        "/" in name
+        or "\\" in name
+        or Path(name).is_absolute()
+        or Path(name).name != name
+        or not any(character.isalnum() for character in name)
+    )
+
+
 def template_name_problem(name: str, *, exists: bool, replace: bool) -> str | None:
     """Why a save under this name is refused, or ``None`` when it is allowed.
 
@@ -680,13 +703,7 @@ def template_name_problem(name: str, *, exists: bool, replace: bool) -> str | No
     stripped = name.strip()
     if not stripped:
         return "Give the layout a file name before saving."
-    if (
-        "/" in stripped
-        or "\\" in stripped
-        or Path(stripped).is_absolute()
-        or Path(stripped).name != stripped
-        or not any(character.isalnum() for character in stripped)
-    ):
+    if not _is_bare_name(stripped):
         return (
             "Use a bare file name with letters or digits and no folder or path "
             "separator — layouts are saved into the grid_templates folder, and a bare "
@@ -734,6 +751,70 @@ def save_draft(draft: LayoutDraft, directory: Path, name: str, *, comment: bool 
         handle.write(text)
     draft.saved_as = normalised
     draft.dirty = False
+    return path
+
+
+def delete_problem(name: str, *, exists: bool) -> str | None:
+    """Why deleting this template is refused, or ``None`` when it is allowed.
+
+    The save-side protections in the other direction (#189 R1): only a bare
+    name inside the templates folder (#122), never one of the shipped
+    examples (case-insensitively, as :func:`template_name_problem` checks),
+    and only a file that still exists — the "Existing layout file" list is
+    read before the delete row renders, so it can lag a deletion by one
+    pass. Deleting is safe for recorded runs by construction: each carries
+    its own copy of its layout (#120(d)); at most a Run lab "Layout file"
+    box still naming the file will report it missing (#126).
+
+    Args:
+        name: The chosen file name (the selectbox's value).
+        exists: Whether that file is present in the templates folder.
+
+    Returns:
+        A plain-language sentence naming the problem, or ``None``.
+    """
+    stripped = name.strip()
+    if not stripped:
+        return "Choose a layout file to delete first."
+    if not _is_bare_name(stripped):
+        return (
+            "Only a bare file name can be deleted — the painter removes files inside "
+            "the grid_templates folder and nowhere else."
+        )
+    normalised = normalise_template_name(stripped)
+    if normalised.lower() in {shipped.lower() for shipped in SHIPPED_TEMPLATES}:
+        return f"'{normalised}' is one of the shipped examples and cannot be deleted."
+    if not exists:
+        return (
+            f"There is no file named '{stripped}' in the grid_templates folder any "
+            "more — the list catches up on the next interaction."
+        )
+    return None
+
+
+def delete_template(directory: Path, name: str) -> Path:
+    """Remove a layout file from the templates folder, re-checking the rules.
+
+    Args:
+        directory: The templates folder (the app passes
+            :data:`pdsim.core.layouts.GRID_TEMPLATES_DIR`).
+        name: The chosen file name, exactly as listed.
+
+    Returns:
+        The removed path.
+
+    Raises:
+        ValueError: With the :func:`delete_problem` sentence when the name is
+            refused — so a programmatic caller cannot bypass the rules the
+            button enforces.
+        OSError: When the file system refuses the removal (a Windows lock).
+    """
+    stripped = name.strip()
+    path = Path(directory) / stripped
+    problem = delete_problem(stripped, exists=path.is_file())
+    if problem:
+        raise ValueError(problem)
+    path.unlink()
     return path
 
 

@@ -46,7 +46,11 @@ default, so a folded widget's path names its fold; since M11b E4 the app
 has FOUR top-level tabs — "Run lab", "Layout painter", "Results browser",
 "Sweep" — and the Layout painter's widgets sit directly on its tab with
 no expander, its canvas appearing only once a grid exists and is coarse
-enough to paint), and the widget's
+enough to paint, and its "Delete layout file" button acting on the
+"Existing layout file" choice only while "Yes, delete this file" is
+ticked; and the Run lab's "Population mix OK: N agents." caption renders
+below the "Per-strategy parameters" expander and above the row holding
+"Update granularity", "Run", and "Stop" — #189 R3), and the widget's
 registry label verbatim. Verify every location by reading `pdsim/ui/app.py` in the
 session that writes the instructions — never from assumptions about
 typical Streamlit apps. Known traps, learned the hard way: this app has
@@ -437,7 +441,15 @@ plain click on a scatter marker reaches no Streamlit handler, so the
 "Draw (drag to paint)" rasterises the lasso path as a brush stroke,
 "Rectangle (drag a box)" and "Lasso (enclose an area)" take the enclosed
 cells — with no pan tool at all (the owner's ruling: pan matters only
-with zoom); 1334 tests.
+with zoom); 1334 tests. A second validation-feedback fix followed
+(2026-09-07, DECISIONS #189): the painter's "Delete layout file" behind
+a "Yes, delete this file" box with the save-side protections in
+reverse; the Results browser's "Open a run" selecting the newly recorded
+run when a live run finishes (the finishing pass stages the folder name
+in the browser's existing selection slot — the defect predates the
+per-pass loop, the browser having never displaced a stored choice, so
+the ruled fix stands with its attribution corrected); the population-mix
+caption's location recorded above; 1346 tests.
 **The next implementation effort is Phase E5 close-out** (which
 carries the held items #177(f3)/(f4), the async well-mixed round_robin
 calibration branch (#181), DESIGN §4.1's stale "radio" wording

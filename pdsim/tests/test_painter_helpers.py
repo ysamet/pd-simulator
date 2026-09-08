@@ -458,6 +458,67 @@ class TestSaveAndHandoff:
         assert ph.handoff_problem(draft) is None
 
 
+class TestDelete:
+    """The delete rules and the removal itself (#189 R1)."""
+
+    def test_blank_and_path_like_names_are_refused(self) -> None:
+        """No name, or anything but a bare name: refused before the folder is touched."""
+        assert ph.delete_problem("", exists=True) is not None
+        assert ph.delete_problem("   ", exists=True) is not None
+        for bad in ("sub/dir.txt", "sub\\dir.txt", "C:\\abs\\file.txt", "/abs/file.txt", "..", "."):
+            problem = ph.delete_problem(bad, exists=True)
+            assert problem is not None, bad
+            assert "bare file name" in problem
+
+    @pytest.mark.parametrize("shipped", ph.SHIPPED_TEMPLATES)
+    def test_each_protected_example_is_refused(self, shipped: str) -> None:
+        """The shipped examples cannot be deleted — whatever the letter case."""
+        for variant in (shipped, shipped.removesuffix(".txt"), shipped.upper()):
+            problem = ph.delete_problem(variant, exists=True)
+            assert problem is not None, variant
+            assert "shipped examples" in problem
+
+    def test_a_missing_file_is_refused_and_a_present_one_allowed(self) -> None:
+        """exists=False → the 'no file named' sentence; exists=True → allowed."""
+        problem = ph.delete_problem("mine.txt", exists=False)
+        assert problem is not None
+        assert "no file named 'mine.txt'" in problem
+        assert ph.delete_problem("mine.txt", exists=True) is None
+
+    def test_delete_template_removes_a_real_file(self, tmp_path: Path) -> None:
+        """The file is unlinked and its path returned; nothing else is touched."""
+        target = tmp_path / "mine.txt"
+        target.write_text("x", encoding="utf-8")
+        other = tmp_path / "other.txt"
+        other.write_text("y", encoding="utf-8")
+        assert ph.delete_template(tmp_path, " mine.txt ") == target
+        assert not target.exists()
+        assert other.is_file()
+
+    def test_delete_template_refuses_a_protected_file_without_touching_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A shipped example present in the folder survives the call."""
+        protected = tmp_path / ph.SHIPPED_TEMPLATES[0]
+        protected.write_text("x", encoding="utf-8")
+        with pytest.raises(ValueError, match="shipped examples"):
+            ph.delete_template(tmp_path, ph.SHIPPED_TEMPLATES[0])
+        assert protected.is_file()
+
+    def test_delete_template_refuses_missing_and_path_like_names(self, tmp_path: Path) -> None:
+        """A programmatic caller cannot reach outside the folder or delete a ghost."""
+        outside = tmp_path / "elsewhere" / "victim.txt"
+        outside.parent.mkdir()
+        outside.write_text("x", encoding="utf-8")
+        with pytest.raises(ValueError, match="bare file name"):
+            ph.delete_template(tmp_path, "elsewhere/victim.txt")
+        with pytest.raises(ValueError, match="bare file name"):
+            ph.delete_template(tmp_path, str(outside))
+        assert outside.is_file()
+        with pytest.raises(ValueError, match="no file named"):
+            ph.delete_template(tmp_path, "ghost.txt")
+
+
 class TestShippedTemplatesProtection:
     """#186 amendment (b): the protected tuple matches the examples on disk."""
 

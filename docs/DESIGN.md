@@ -989,7 +989,8 @@ top, parameters, live plots below):
    on a toggle flip, the finishing pass, and the stopping pass;
    fine-grained events advance a progress line, batched every 200 events
    within the pass (DECISIONS #39); after the run, the final summary table
-   and periods-elapsed message. The mean-score chart has two orthogonal
+   and periods-elapsed message (a recorded run also becomes the Results
+   browser's "Open a run" selection, #189 R2). The mean-score chart has two orthogonal
    toggles (DECISIONS #44/#45), both switchable MID-RUN: **score view** —
    "Total" is the raw score selection acts on (scale ≈ payoff × (N−1) ×
    rounds), "Per round" divides by rounds actually played, landing on the
@@ -1040,7 +1041,14 @@ top, parameters, live plots below):
    cells", "Saved as", a per-strategy caption. "Save layout" writes
    `layouts.format_layout_file` text (one fixed comment line, LF endings)
    into `grid_templates/` under a bare name — the shipped examples are
-   protected, an existing file needs "Replace the existing file". "Use
+   protected, an existing file needs "Replace the existing file". "Delete
+   layout file" (#189) removes the file chosen under "Existing layout
+   file", enabled only while "Yes, delete this file" is ticked, under the
+   same protections in reverse — bare names inside `grid_templates/` only,
+   the shipped examples refused, a vanished file reported — and clears the
+   draft's saved name when it matches, so the hand-off greys again;
+   recorded runs are unaffected because each carries its own layout copy.
+   "Use
    this layout in the Run lab" is a button callback that sets evolution
    mode, a lattice of the painting's size, `from_file` naming the file, and
    fills the Population section through the existing populate path; it is
@@ -1406,5 +1414,8 @@ and renders without the async views (#65 compatibility, applied again).
 Consumers: the headless CLI (`python -m pdsim.run <config.yaml>` or
 `--scenario NAME`) records every run; the UI's "Record this run" control
 (default ON) records live runs; the UI's Results browser tab lists the index
-and re-renders any recorded run with the full #44/#45 view toggles, and can
-load a recorded config back into the parameter panel.
+and re-renders any recorded run with the full #44/#45 view toggles, opens
+the newly recorded run by itself when a live recorded run finishes (#189
+R2 — the finishing pass stages the folder name as the browser's next
+selection; a stopped or unrecorded run leaves the selection alone), and
+can load a recorded config back into the parameter panel.

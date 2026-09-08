@@ -247,6 +247,20 @@ PAINTER_HELP = {
         "names are checked against the registry first; a file naming an unknown "
         "strategy is refused with the same message the Run lab would give."
     ),
+    "confirm_delete": (
+        "Tick to enable 'Delete layout file'. Deleting is the one action on this "
+        "tab that cannot be undone, so it takes this explicit second step — "
+        "exactly as overwriting a file needs 'Replace the existing file'."
+    ),
+    "delete": (
+        "Remove the file chosen under 'Existing layout file' from the "
+        "grid_templates folder. Only files inside that folder can be removed, and "
+        "the three shipped examples never. Recorded runs are safe: every run "
+        "folder carries its own copy of its layout, so a deleted file cannot break "
+        "a re-run — at most a Run lab 'Layout file' box still naming it will report "
+        "the file missing. If the canvas was saved as this file, the painting "
+        "stays and counts as unsaved again."
+    ),
     "from_preview": (
         "Copy the Run lab's founding preview onto the canvas: the arrangement the "
         "current panel settings would found at generation 0 (their seed included), "
@@ -1769,7 +1783,8 @@ def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
     run keeps its charts, discards its recording (#53, preserved per #183
     R5), and moves into ``last_run`` flagged "stopped early". The
     finishing pass (``RunFinished`` seen) renders the summary table and the
-    periods-elapsed message, finalises the recorder, and moves the results
+    periods-elapsed message, finalises the recorder (staging the new folder
+    as the Results browser's selection, #189 R2), and moves the results
     into ``last_run`` exactly as the in-script loop did.
 
     Chart rebuilds stay wall-clock throttled (#94): a pass inside the
@@ -1864,6 +1879,14 @@ def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
                 folder = recorder.finalize()
                 charts.export_run_charts(recorder.timeseries, folder, carrying_capacity=capacity)
                 st.caption(f"Recorded to {folder} — see the Results browser tab.")
+                # The newest run opens itself in the Results browser (#189
+                # R2): stage its folder name in the browser's own slot,
+                # which the browser applies to the "Open a run" key before
+                # that selectbox is instantiated — later on this very pass,
+                # since the Run lab renders first in the strip (#52's route,
+                # so the key keeps one writer). A stopped or unrecorded run
+                # never reaches this line and leaves the selection alone.
+                st.session_state["_select_run"] = folder.name
         elif recorder is not None:
             # Unreachable with the engine (every stream closes with
             # RunFinished); a recording without one must not ghost.
@@ -3370,6 +3393,53 @@ def _painter_tab() -> None:
         key="painter_from_preview",
         on_click=_draft_from_preview,
         help=PAINTER_HELP["from_preview"],
+    )
+
+    # --- Delete (#189 R1): the file chosen above, behind a confirmation box.
+    # Handled in the script body like Save, so the sentence renders in place
+    # at once. The row is filled BUTTON FIRST: a widget's key may be written
+    # only before that widget is instantiated in a script run, and the
+    # click's own pass must untick the box after removing the file — so the
+    # box is read from session state, the button rendered and handled, and
+    # the box instantiated last; its column keeps it on the left whatever
+    # the render order (the #184 idiom of a slot created early and filled
+    # late). The button greys on the next interaction; the `and confirmed`
+    # guard makes a click reaching that one render a no-op.
+    col_confirm, col_delete, _ = st.columns([2, 1, 2])
+    confirmed = bool(st.session_state.get("painter_confirm_delete", False))
+    if (
+        col_delete.button(
+            "Delete layout file",
+            key="painter_delete",
+            disabled=not names or not confirmed,
+            help=PAINTER_HELP["delete"],
+        )
+        and confirmed
+    ):
+        chosen = str(st.session_state.get("painter_source") or "")
+        try:
+            removed = painter_helpers.delete_template(layouts.GRID_TEMPLATES_DIR, chosen)
+        except ValueError as error:
+            st.error(str(error))
+        except OSError as error:
+            st.error(
+                f"Could not delete {chosen}: {error}. Something is still holding the "
+                "file open — close any window showing it, give OneDrive a moment, "
+                "then try again."
+            )
+        else:
+            if draft is not None and draft.saved_as == removed.name:
+                draft.saved_as = None  # the draft is not the file (#189 R1)
+            st.session_state["painter_confirm_delete"] = False
+            st.success(
+                f"Deleted {removed}. The file leaves the 'Existing layout file' list "
+                "from the next interaction on."
+            )
+    col_confirm.checkbox(
+        "Yes, delete this file",
+        key="painter_confirm_delete",
+        disabled=not names,
+        help=PAINTER_HELP["confirm_delete"],
     )
     if draft is None:
         st.caption(

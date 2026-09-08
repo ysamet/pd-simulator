@@ -6746,3 +6746,50 @@ themselves stay owner-validated (walkthrough step 2 rewritten). DOCS:
 this entry; DESIGN §4.1 item 6; CLAUDE.md current-phase; ROADMAP's E4
 line; `grid_templates/README.md`; zero re-recordings, zero new goldens.
 
+**#189 — 2026-09-07 — E4 validation feedback (the #180 precedent):
+the painter gains "Delete layout file" behind a confirmation box with
+the save-side protections (R1); the Results browser selects the NEWLY
+RECORDED run when a live run finishes, fixing a selection defect the
+per-pass loop introduced (R2); the walkthrough's population-mix
+caption location is made precise (R3) (M11b Phase E4 follow-up; #120(d),
+#122, #126, #184, #186–#188).** The owner's walkthrough of the E4
+handback's steps 3–11 found three things, ruled in the design
+conversation of 2026-09-07. R1 DELETE: the painter could create files
+it could not remove. A "Delete layout file" button acts on the file
+chosen in the "Existing layout file" selectbox, enabled only while a
+"Yes, delete this file" checkbox is ticked — deletion is the one
+irreversible action on the tab, so it takes an explicit second step
+exactly as overwriting does. Refused with a sentence, never silently:
+a name with a path separator or absolute (only bare names inside
+`grid_templates/`, the #122 rule), any of the three protected examples,
+and a file that no longer exists. Safe by construction: every recorded
+run carries its own copy of its layout (#120(d)), so deleting a
+template cannot break a re-run; it can only leave the Run lab's
+"Layout file" value pointing at a missing file, which the config
+validator already reports as a plain sentence (#126). If the deleted
+file is the current draft's `saved_as`, the draft stays on the canvas
+and `saved_as` clears, so the hand-off greys again with its
+"save first" reason — the draft is not the file. The rule-checking
+lives in the Streamlit-free helper module beside the save rules, and
+the app is the only writer or remover of files (hard rules 4 and 8
+untouched). R2 NEWEST RUN: after a recorded run finished, "Open a run"
+showed the previously selected run, and the new one had to be picked
+by hand. Diagnosis to be confirmed in code: before E3 the run finished
+inside one script pass and the browser rendered after it; on the
+per-pass loop (#184) the run finishes on its own finishing pass while
+the browser's keyed selectbox already holds an earlier choice in
+session state, and a keyed selectbox keeps its stored choice when a new
+option appears. FIX: the finishing pass writes the browser's selection
+key to the newly recorded folder's option value before the browser
+renders — legal, because the Run lab renders first in the strip and
+widget state may be set in the script before that widget is created
+on the same pass — so the newest run opens itself. Only the finishing
+pass of a RECORDED run does this; a stopped or unrecorded run leaves
+the selection alone. If the real cause differs, the build reports and
+fixes the real one. R3 PRECISION: the "Population mix OK: N agents."
+caption renders below the "Per-strategy parameters" section and above
+the run controls row — the handback's "below the panel" was correct
+but imprecise; CLAUDE.md's validation-precision paragraph records the
+location so no walkthrough guesses it again. Nothing else changes;
+zero goldens.
+

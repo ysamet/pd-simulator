@@ -881,6 +881,25 @@ def _captions(app: AppTest) -> list[str]:
     return [item.value for item in app.caption]
 
 
+def _choose_another_run(app: AppTest) -> str:
+    """Pick, in the Results browser, a run other than the one preselected.
+
+    Args:
+        app: The AppTest handle after a script run, with at least two runs.
+
+    Returns:
+        The chosen folder name — a stored choice the next run must displace
+        or leave alone (#189 R2).
+    """
+    box = app.selectbox(key="browser_run")
+    other = next(option for option in box.options if option != box.value)
+    box.select(other)
+    app.run()
+    assert not app.exception
+    assert app.selectbox(key="browser_run").value == other
+    return str(other)
+
+
 class TestLiveRunContinuity:
     """The E3 per-pass live loop (#168; #183 rulings; #184 build record).
 
@@ -991,6 +1010,68 @@ class TestLiveRunContinuity:
         assert app.session_state["last_run"]["timeseries"].periods == [0, 1]
         assert len(one_pass_per_run) == scheduled
         assert not any("cleaned up" in item.value for item in app.info)  # no stray banner
+
+    def test_finished_recorded_run_opens_itself_in_the_browser(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        one_pass_per_run: list[dict[str, object]],
+    ) -> None:
+        """#189 R2: the finishing pass of a RECORDED run selects the new folder.
+
+        The Task 0 (iii) reproduction turned into a pin: with older runs
+        present and one of them deliberately chosen, "Open a run" shows the
+        newly recorded folder once the run finishes — and not before (an
+        open recording has no summary yet, so it is not listed mid-run).
+        """
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        _record_tiny(tmp_path, seed=1)
+        _record_tiny(tmp_path, seed=2)
+        app = _fresh_app()
+        chosen = _choose_another_run(app)
+        _prepare_tiny_evolution(app, generations=2, record=True)
+        before = {p.name for p in tmp_path.iterdir() if p.is_dir()}
+        app.button(key="run_button").click()
+        app.run()  # pass 1
+        app.run()  # pass 2: the last period
+        assert app.session_state[LIVE_RUN_KEY].periods == 2
+        assert app.selectbox(key="browser_run").value == chosen  # untouched mid-run
+        app.run()  # pass 3: RunFinished — the recorder finalises
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        new = {p.name for p in tmp_path.iterdir() if p.is_dir()} - before
+        assert len(new) == 1
+        (new_run,) = new
+        assert new_run in app.selectbox(key="browser_run").options
+        assert app.selectbox(key="browser_run").value == new_run
+        assert "_select_run" not in app.session_state  # consumed by the browser
+        app.run()  # a further pass keeps it
+        assert app.selectbox(key="browser_run").value == new_run
+
+    def test_stopped_run_leaves_the_browser_selection_alone(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        one_pass_per_run: list[dict[str, object]],
+    ) -> None:
+        """#189 R2: a run stopped after pass two (the #184 shape) changes nothing."""
+        monkeypatch.setenv("PDSIM_RUNS_DIR", str(tmp_path))
+        _record_tiny(tmp_path, seed=1)
+        _record_tiny(tmp_path, seed=2)
+        app = _fresh_app()
+        chosen = _choose_another_run(app)
+        _prepare_tiny_evolution(app, generations=6, record=True)
+        app.button(key="run_button").click()
+        app.run()  # pass 1
+        app.run()  # pass 2
+        app.button(key="stop_button").click()
+        app.run()  # pass 3: stopped, the recording discarded
+        assert not app.exception
+        assert LIVE_RUN_KEY not in app.session_state
+        assert app.session_state["last_run"]["note"].endswith("stopped early")
+        assert app.selectbox(key="browser_run").value == chosen
+        assert len(app.selectbox(key="browser_run").options) == 2
+        assert "_select_run" not in app.session_state
 
     def test_run_disabled_and_granularity_greyed_while_running(
         self, one_pass_per_run: list[dict[str, object]]
@@ -1124,12 +1205,13 @@ PAINTER_WIDGET_KEYS = {
         "painter_fill",
         "painter_clear",
         "painter_save",
+        "painter_delete",
         "painter_handoff",
     ),
     "selectbox": ("painter_source",),
     "radio": ("painter_tool", "painter_brush"),
     "text_input": ("painter_file_name",),
-    "checkbox": ("painter_replace",),
+    "checkbox": ("painter_replace", "painter_confirm_delete"),
 }
 """Every painter widget that renders on EVERY pass, by AppTest accessor.
 
@@ -1536,3 +1618,59 @@ class TestLayoutPainter:
         assert any("too fine to paint" in item.value for item in app.info)
         assert _canvases(app) == []
         assert _painter_metric(app, "Sites") == "2000"  # the readouts still render
+
+    def test_delete_refused_unticked_and_for_a_protected_example(self, painter_env: Path) -> None:
+        """#189 R1: the button is greyed until the box is ticked; a shipped example is refused."""
+        app = _fresh_app()
+        assert app.button(key="painter_delete").disabled is True
+        assert app.checkbox(key="painter_confirm_delete").value is False
+        app.checkbox(key="painter_confirm_delete").set_value(True)
+        app.run()
+        assert app.button(key="painter_delete").disabled is False
+        app.selectbox(key="painter_source").select("example_island.txt")
+        app.run()
+        app.button(key="painter_delete").click()
+        app.run()
+        assert not app.exception
+        assert any("shipped examples" in item.value for item in app.error)
+        assert not app.success
+        assert (painter_env / "example_island.txt").is_file()
+        assert "example_island.txt" in app.selectbox(key="painter_source").options
+        assert app.checkbox(key="painter_confirm_delete").value is True  # a refusal keeps the box
+
+    def test_delete_accepted_for_a_saved_painting(self, painter_env: Path) -> None:
+        """#189 R1: the file goes; the painting stays, unsaved again; the hand-off greys."""
+        app = _fresh_app()
+        _new_grid(app, 4, 6)
+        painter_helpers.apply_brush(app.session_state[PAINTER_DRAFT_KEY], [0, 1, 2], "tit_for_tat")
+        app.run()
+        _save_as(app, "delete_me")
+        assert (painter_env / "delete_me.txt").is_file()
+        assert app.button(key="painter_handoff").disabled is False
+        app.run()  # the file list catches up with the save
+        app.selectbox(key="painter_source").select("delete_me.txt")
+        app.checkbox(key="painter_confirm_delete").set_value(True)
+        app.run()
+        app.button(key="painter_delete").click()
+        app.run()
+        assert not app.exception
+        assert not app.error
+        assert any(
+            "Deleted" in item.value and "delete_me.txt" in item.value for item in app.success
+        )
+        assert not (painter_env / "delete_me.txt").exists()
+        draft = app.session_state[PAINTER_DRAFT_KEY]
+        assert painter_helpers.draft_layout_file(draft).occupied_count == 3
+        assert draft.saved_as is None
+        assert len(_canvases(app)) == 1
+        assert _painter_metric(app, "Painted agents") == "3"
+        assert _painter_metric(app, "Saved as") == "not saved yet"
+        assert app.button(key="painter_handoff").disabled is True
+        assert any(text.startswith("Save the layout first") for text in _captions(app))
+        assert app.checkbox(key="painter_confirm_delete").value is False  # unticked on that pass
+        app.run()  # the list catches up; the stale choice resets without an exception
+        assert not app.exception
+        assert app.button(key="painter_delete").disabled is True
+        source = app.selectbox(key="painter_source")
+        assert "delete_me.txt" not in source.options
+        assert source.value in source.options
