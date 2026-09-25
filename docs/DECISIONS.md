@@ -7291,3 +7291,89 @@ stale sentences (#177(f6)/#181; #191 R4, the guide's owner); the
 fixed_n "never charged" wording ((a)(v)); the `initial_energy` gap in
 the two spatial scenarios' dicts ((c)(f4)).
 
+**#193 — 2026-09-24 — The project-files export script (owner request
+2026-09-24): `python -m pdsim.export_docs` assembles the Claude.ai
+project-knowledge upload set into a git-ignored folder under fixed,
+collision-free names, and reports what changed since the last export,
+so the owner never renames or hunts for a file when refreshing project
+knowledge; README files keep their repository names and locations
+(#186–#192; CLAUDE.md's knowledge-preservation contract).**
+(a) THE PROBLEM. Project knowledge is a flat list of files; the
+repository is not. `grid_templates/README.md` collides with the root
+`README.md`, so the owner renamed the copy by hand at every upload —
+and once renamed it inside the working tree by mistake (found and left
+alone by the E5 build). The refresh after each build was a manual walk
+over the handback's DOCS CHANGED list.
+(b) THE RULING. R1 A script, not a repository rename: the templates
+folder keeps `README.md` (GitHub renders a folder's README on its page;
+a prefixed name would not render), and the rule generalises to any
+future nested file. R2 The upload set, defined in ONE place (the
+script): `CLAUDE.md`, the root `README.md`, every `*.md` under `docs/`
+recursively EXCEPT `docs/WIP.md` (the session baton, never uploaded),
+and `grid_templates/README.md`. R3 The naming rule, fixed so a name
+never changes between exports: a root file keeps its name; a file under
+`docs/` keeps its bare filename, and the script REFUSES to run if two
+such files share a name; any other file is named
+`<parent folder>-<filename>` (so `grid_templates/README.md` →
+`grid_templates-README.md`, matching the name already in project
+knowledge). R4 The destination `exports/project-files/` is cleared and
+rewritten on every run and is git-ignored (`exports/` added to
+`.gitignore`); a manifest of content hashes (`.manifest.json`, a dotfile
+the owner does not upload) lets the script print three lists against
+the previous export — Changed (re-upload), New (upload), Removed (delete
+from project knowledge) — then the folder's path. R5 CLAUDE.md's
+handback template sentence "please refresh these in the Claude.ai
+project knowledge before your next design conversation" becomes "run
+`python -m pdsim.export_docs` and upload the files it lists as Changed
+and New (delete those it lists as Removed)"; the DOCS CHANGED list
+stays in the handback as the record of what the build touched. R6 The
+export name function is pure and pinned; pins: the naming rule on the
+three cases, the duplicate refusal, the WIP exclusion, and a temp-tree
+run producing the expected set and the three lists across two runs.
+(c) REJECTED: renaming READMEs in the repository (loses GitHub
+rendering, solves one file); collision detection instead of a fixed
+rule (a name would change the day a collision appeared, orphaning the
+old copy in project knowledge).
+(d) DOCS: this entry; CLAUDE.md (R5, and one sentence naming the script
+as the one source of the upload set); `.gitignore`.
+BUILD NOTE — 2026-09-24, the same session (Rule 7). Built as ruled
+(`pdsim/export_docs.py`: `export_name`, `upload_set`, `export_names`,
+`run_export`, `format_report`, `main`); two additions within the
+ruling, no deviation. (f1) The duplicate refusal (R3) is checked over
+the WHOLE export mapping — the root files and the `<folder>-<name>`
+case included — not only the `docs/` bare names; the ruled case is
+inside it, and the refusal fires before anything is written, so a
+refusal leaves the previous export intact (pinned). (f2) CLAUDE.md also
+gained a Commands bullet for the script, per that section's own
+standing instruction ("Keep this section updated as tooling lands") —
+beyond the two sentences (d) names. (f3) Tripwires: none fired. No two
+files under `docs/` share a bare filename on the real tree (checked
+before writing); every name the first real run produced follows R3 —
+38 names: `CLAUDE.md` and `README.md` from the root, 35 bare filenames
+from `docs/` (5 top-level with the `WIP.md` slot excluded, 8 specs, 5
+explainers, 17 design-notes), and `grid_templates-README.md`; the
+script writes nothing outside `exports/` (pinned by a snapshot of the
+temp tree before and after two runs). (f4) The real tree held no
+`docs/WIP.md` at the first run — the E5 baton was absorbed and deleted
+at session start — so the exclusion is exercised by the tests, not by
+that run. (f5) Implementation notes: the export folder is emptied in
+place rather than deleted and recreated (a file-explorer window or
+OneDrive keeps a stable folder); the previous manifest is read before
+the clear that would delete it; each copy is a byte-for-byte write of
+the source, hashed once (SHA-256); the manifest is written with sorted
+keys and LF so identical content gives identical bytes. (f6) The second
+real run printed all three lists empty; `git status` showed `exports/`
+ignored and `grid_templates/README.md` untouched.
+TESTS: +24 (1,358 → 1,382), all in `pdsim/tests/test_export_docs.py`
+under `tmp_path` only — the real repository is never read or written:
+the naming rule on its three cases (plus absolute/relative agreement,
+purity without a filesystem, the root refused); the upload set exactly
+as ruled, `WIP.md` excluded, non-markdown and outside-the-rule files
+excluded, a missing fixed member an error; the duplicate refusal and
+the previous export surviving it; the temp-tree run — the first run all
+New with byte-identical copies and a SHA-256 manifest, the second run
+empty, edit/add/remove landing one name in each list, stray files
+cleared, nothing outside `exports/` written; the three-way split; the
+command's printout (lists, then the path last) and exit codes (0; 1 on
+refusal with nothing written). Zero goldens touched.
+

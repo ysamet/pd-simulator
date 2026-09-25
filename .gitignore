@@ -24,6 +24,11 @@ runs/
 # never committed, never uploaded to the design chat.
 docs/WIP.md
 
+# The Claude.ai project-knowledge upload set, assembled by
+# `python -m pdsim.export_docs` (DECISIONS #193) — cleared and rewritten on
+# every run, never committed; upload from it, never edit it.
+exports/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

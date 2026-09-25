@@ -120,6 +120,13 @@ not have `pdsim` or its dependencies installed.
 - Regenerate parameter docs: `python -m pdsim.gendocs` (rewrites the committed
   `docs/PARAMETERS.md`; a pytest drift test fails while it is stale — rerun
   this after ANY registry change and stage the result)
+- Export the project-knowledge upload set: `python -m pdsim.export_docs`
+  (copies `CLAUDE.md`, the root `README.md`, every `*.md` under `docs/` except
+  `docs/WIP.md`, and `grid_templates/README.md` into the git-ignored
+  `exports/project-files/` under fixed names — a file under `docs/` keeps its
+  bare filename, any other nested file is prefixed with its folder, e.g.
+  `grid_templates-README.md` — and prints what changed since the last export
+  as Changed / New / Removed; upload exactly those. DECISIONS #193)
 - Benchmark: `python -m pdsim.bench` (median wall-clock seconds/generation
   across an N x matcher grid — the vectorization-trigger data, DECISIONS #58;
   `--out PATH` writes CSV; output is environment-specific, never committed)
@@ -141,7 +148,8 @@ This project is developed across multiple AI environments. Design discussion hap
 in the Claude.ai project chat; implementation happens here in Claude Code. **The
 files in `docs/` are the ONLY shared memory between these environments.** The chat
 side never sees this conversation, the code, or the commit history — it sees only
-the `docs/` files the user uploads to it.
+the `docs/` files the user uploads to it. The upload set is defined in
+`pdsim/export_docs.py` and nowhere else.
 
 **Scoping briefs are design-layer input (owner request 2026-09-06, after the
 Phase E4 brief reached this layer by mistake and produced DECISIONS #185).** A
@@ -227,8 +235,9 @@ decisions ends with these steps, in order:
 
 1. Re-check the triggers above; make any missing `docs/` updates now.
 2. Report to the user explicitly, in this exact shape:
-   - `DOCS CHANGED: <list of changed docs/ files> — please refresh these in the
-     Claude.ai project knowledge before your next design conversation.`
+   - ``DOCS CHANGED: <list of changed docs/ files> — run `python -m pdsim.export_docs`
+     and upload the files it lists as Changed and New (delete those it lists as
+     Removed).``
    - or `DOCS UNCHANGED: no design-layer changes this session.`
 3. If DECISIONS.md gained entries, mention the new entry numbers so the chat
    side can spot the delta at a glance.
