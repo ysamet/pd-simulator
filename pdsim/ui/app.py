@@ -3267,7 +3267,13 @@ def _painter_handoff(name: str, rows: int, cols: int, size: int, counts: dict[st
     :func:`_populate_from_layout_file` — #143's one write path, not a second.
     ``_loaded_values`` (the advisory baseline, #176 R5) is deliberately NOT
     touched: an A2 caution after handing off from a well-mixed economy
-    scenario is correct — incomes rescale on a lattice.
+    scenario is correct — incomes rescale on a lattice. The Scenario
+    dropdown is set to "Custom" (#187 f6 / #191 R8) TOGETHER with the
+    remembered loaded-scenario marker: :func:`_scenario_area` reloads a
+    scenario's config whenever the marker differs from the dropdown (#40),
+    so a bare "Custom" write would reload the defaults — an even split —
+    over the population this callback writes; the pair
+    :func:`_apply_pending_load` writes, written here for the same reason.
 
     Args:
         name: The saved file's bare name (what the Layout file box looks up).
@@ -3284,6 +3290,8 @@ def _painter_handoff(name: str, rows: int, cols: int, size: int, counts: dict[st
     st.session_state["structure.cols#value"] = int(cols)
     st.session_state["structure.initial_layout"] = "from_file"
     st.session_state["structure.layout_file"] = name
+    st.session_state["scenario_choice"] = CUSTOM
+    st.session_state["_loaded_scenario"] = CUSTOM
     _populate_from_layout_file(size, counts)
     st.session_state["_load_note"] = (
         f"The painting '{name}' is now the founding layout: evolution mode on a "

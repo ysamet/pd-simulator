@@ -77,7 +77,11 @@ ECONOMY_HELP: dict[str, str] = {
         "drawn into as many in return). With encounter mode 'per_pair' the "
         "duplicate pairs are collapsed after the draws, so the spatial "
         "figure is 1 × the effective neighbour count instead — each "
-        "neighbouring pair plays at most once per generation. " + ASYNC_EXPECTED_MATCHES_NOTE
+        "neighbouring pair plays at most once per generation. Under the "
+        "asynchronous clock in a well-mixed world the figure is ALWAYS ≈ 2k: "
+        "each activated agent draws k partners and is drawn in by about k "
+        "others, and the matching scheme is not consulted there (it is "
+        "greyed), so round_robin never means N − 1 under that clock. " + ASYNC_EXPECTED_MATCHES_NOTE
     ),
     "income": (
         "The two income extremes per generation: what an agent earns if every "
@@ -291,6 +295,42 @@ class SpatialIncome(NamedTuple):
     window_high: float
 
 
+def well_mixed_expected_matches_per_agent(
+    matcher: str, opponents_per_agent: int, population_size: int | None, time_model: str
+) -> int:
+    """Matches per agent when partners come from the whole population (no grid).
+
+    The well-mixed (or toggle-off) arithmetic in ONE place (#191 R4): under
+    the ASYNCHRONOUS clock the figure is ALWAYS 2k — each activated agent
+    draws ``min(k, N − 1)`` uniform partners and is drawn in by about k
+    others per generation-equivalent, and the matching scheme is greyed
+    and never consulted (the async loop has no round-robin) — so a
+    stranded ``round_robin`` must not print N − 1, which is what the
+    report did until M11b Phase E5 (#181's finding). Under the synchronous
+    clock ``round_robin`` plays N − 1 and ``random_k`` about 2k, exactly
+    as the calibration report always said.
+
+    Args:
+        matcher: ``matching.matcher`` — consulted under the synchronous
+            clock only.
+        opponents_per_agent: The configured k.
+        population_size: N — needed for the synchronous round-robin figure.
+        time_model: ``dynamics.time_model``.
+
+    Returns:
+        The whole-number matches figure.
+
+    Raises:
+        ValueError: If the synchronous round-robin figure is asked for
+            without a population size.
+    """
+    if time_model == "asynchronous" or matcher != "round_robin":
+        return 2 * opponents_per_agent
+    if population_size is None:
+        raise ValueError("The synchronous round_robin figure needs the population size (N − 1).")
+    return population_size - 1
+
+
 def expected_matches_per_agent(
     neighbourhood_shape: str,
     boundary: str,
@@ -299,15 +339,26 @@ def expected_matches_per_agent(
     site_count: int | None,
     encounter_mode: str,
     time_model: str,
+    *,
+    spatial: bool = True,
+    matcher: str = "round_robin",
+    population_size: int | None = None,
 ) -> int:
-    """Matches an interior agent on a full grid plays per generation (#181 R7).
+    """Matches an agent is expected to play per generation (#181 R7; #191 R4).
 
-    The ONE arithmetic source for the spatial matches figure — the
-    Structure section's "Expected matches per agent per generation"
-    readout, the Economy panel's calibration report, and advisory A1 all
-    consume it (through :func:`spatial_income_arithmetic`), so the three
-    surfaces cannot drift. Extracted in M11b Phase E2 from the multiplier
-    that :func:`spatial_income_arithmetic` used to inline.
+    The ONE arithmetic source for the matches figure — the Structure
+    section's "Expected matches per agent per generation" readout, the
+    Economy panel's calibration report, and advisory A1 all consume it
+    (through :func:`spatial_income_arithmetic`), so the three surfaces
+    cannot drift. Extracted in M11b Phase E2 from the multiplier that
+    :func:`spatial_income_arithmetic` used to inline; since M11b Phase E5
+    it answers the ASPATIAL case too — with ``spatial=False`` the grid
+    arguments are ignored and
+    :func:`well_mixed_expected_matches_per_agent` answers, so the
+    calibration report's well-mixed branches no longer carry arithmetic of
+    their own (#191 R4).
+
+    The spatial figure: an interior agent on a full grid.
 
     Every agent initiates ``min(k, degree)`` matches (the radius-aware
     :func:`~pdsim.config.experiment.effective_neighbour_count`) and is
@@ -336,11 +387,22 @@ def expected_matches_per_agent(
             or ``"per_pair"``; consulted only under the synchronous clock.
         time_model: ``dynamics.time_model`` — ``"synchronous"`` or
             ``"asynchronous"``.
+        spatial: Whether the engine's spatial gate holds
+            (:func:`spatial_calibration_active`); ``False`` routes to the
+            well-mixed arithmetic and ignores the grid arguments.
+        matcher: ``matching.matcher`` — read only when ``spatial`` is
+            False, and then only under the synchronous clock.
+        population_size: N — read only for the synchronous well-mixed
+            round-robin figure.
 
     Returns:
         The whole-number matches figure: 2 × or 1 × the effective
-        neighbour count.
+        neighbour count on a grid; N − 1 or 2k without one.
     """
+    if not spatial:
+        return well_mixed_expected_matches_per_agent(
+            matcher, opponents_per_agent, population_size, time_model
+        )
     per_pair = time_model != "asynchronous" and encounter_mode == "per_pair"
     multiplier = 1 if per_pair else 2
     return multiplier * effective_neighbour_count(
@@ -682,21 +744,44 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
         )
         matches = arithmetic.matches_per_agent
         regime_note = _spatial_regime_note(encounter_mode, asynchronous)
-    elif config.matching.matcher == "round_robin":
-        matches = float(n - 1)
-        regime_note = (
-            "Under round_robin, income scales with the population size: as N "
-            "grows every agent plays more matches, so this window MOVES — a "
-            "living cost calibrated for the founders drifts out of (or into) "
-            "the window as the population grows."
-        )
     else:
-        matches = 2.0 * config.matching.opponents_per_agent
-        regime_note = (
-            "Under random_k the interaction budget is bounded (≈ 2k matches "
-            "per agent) no matter how large the population grows, so this "
-            "window stays put for the whole run."
+        # The well-mixed figure comes from the one helper too (#191 R4):
+        # under the asynchronous clock the matcher is greyed and never
+        # consulted — each activation draws k uniform partners — so the
+        # figure is 2k whatever the stranded widget says; the report used
+        # to print N − 1 for a stranded round_robin here (#181).
+        matches = float(
+            well_mixed_expected_matches_per_agent(
+                config.matching.matcher,
+                config.matching.opponents_per_agent,
+                n,
+                dynamics.time_model,
+            )
         )
+        if asynchronous:
+            regime_note = (
+                "Under the asynchronous clock in a well-mixed world each "
+                "activated agent draws k uniform partners and is drawn in by "
+                "about k others, so the interaction budget is bounded — ≈ 2k "
+                "matches per agent per generation-equivalent, as an EXPECTED "
+                "figure — no matter how large the population grows, and this "
+                "window stays put for the whole run. The matching scheme is "
+                "not consulted under this clock (it is greyed), so round_robin "
+                "does not mean N − 1 here."
+            )
+        elif config.matching.matcher == "round_robin":
+            regime_note = (
+                "Under round_robin, income scales with the population size: as N "
+                "grows every agent plays more matches, so this window MOVES — a "
+                "living cost calibrated for the founders drifts out of (or into) "
+                "the window as the population grows."
+            )
+        else:
+            regime_note = (
+                "Under random_k the interaction budget is bounded (≈ 2k matches "
+                "per agent) no matter how large the population grows, so this "
+                "window stays put for the whole run."
+            )
     rounds = _expected_rounds(
         config.match.length_mode,
         config.match.rounds_per_match,
@@ -786,6 +871,20 @@ def calibration_report(config: ExperimentConfig) -> CalibrationReport:
                 f"recorded moves by generation {dynamics.generations}, with "
                 "the per-round history copy growing alongside (cost quadratic "
                 "in run length). Set the population memory depth to bound it."
+            )
+        elif asynchronous:
+            # The matcher is not consulted under the asynchronous clock
+            # (#191 R4's ripple): partners are k uniform draws per
+            # activation, so a given opponent recurs only occasionally —
+            # the random_k picture, never round_robin's every-pair-every-
+            # generation growth, whatever the greyed widget says.
+            memory_note = (
+                "Histories persist for an agent's whole life and memory depth "
+                "is unlimited. Under the asynchronous clock in a well-mixed "
+                "world partners are uniform draws, so a given opponent recurs "
+                "only occasionally, relationships stay short and this rarely "
+                "matters — but for very long runs the population memory depth "
+                "is the bound."
             )
         elif config.matching.matcher == "round_robin":
             worst = rounds * dynamics.generations

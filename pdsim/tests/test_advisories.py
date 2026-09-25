@@ -14,6 +14,7 @@ from pdsim.config.registry import ParamValue
 from pdsim.config.scenarios import get_scenario_info
 from pdsim.ui import helpers
 from pdsim.ui.advisories import (
+    A1_MESSAGE,
     A2_MESSAGE,
     A2_TRIGGER_KEYS,
     ECONOMY_PANEL_SURFACE,
@@ -126,6 +127,27 @@ class TestA1LivingCostWindow:
         assert [a.key for a in fired] == ["A1"]
         assert fired[0].severity == "caution"
         assert "defectors never starve" in fired[0].message
+        assert fired[0].message == A1_MESSAGE  # engagement free: no total named
+
+    def test_the_engagement_bill_enters_the_trigger(self) -> None:
+        """#191 R2: A1 judges the TOTAL cost the verdict line uses, not L alone.
+
+        On the flagship (8 matches, window 0 < cost < 24): L = 0 sits AT the
+        all-D income, but one unit of engagement lifts the total to 8 —
+        inside the window, so the filter is ON and A1 stays silent; L = 12
+        is inside, but two per match makes the total 28 ≥ 24 — the filter is
+        OFF, A1 fires and names the total it judged.
+        """
+        assert (
+            self._a1_fires(**{"dynamics.basic_living_cost": 0.0, "dynamics.engagement_cost": 1.0})
+            is False
+        )
+        values = _flagship_values(**{"dynamics.engagement_cost": 2.0})
+        fired = advisories_for_surface(ECONOMY_PANEL_SURFACE, values, values)
+        assert [a.key for a in fired] == ["A1"]
+        assert fired[0].message.startswith(A1_MESSAGE)
+        assert "engagement bill" in fired[0].message
+        assert "= 28)" in fired[0].message
 
     def test_gate_silences_a1_under_async_fixed_n(self) -> None:
         """R4: fixed_n has no metabolic filter for A1 to describe."""
@@ -189,7 +211,17 @@ class TestA2ChangedSinceLoad:
         }
         assert set(changed) == set(A2_TRIGGER_KEYS)
         for key, new_value in changed.items():
-            values = _flagship_values(**{key: new_value})
+            # #191 R3: A2 fires only at a LIVE widget. On the flagship the
+            # matching scheme is greyed (spatial sampling consults the grid,
+            # not the matcher), so its row is exercised with spatial
+            # interaction off in BOTH mappings — the matcher live, and the
+            # only difference the key itself.
+            extra: dict[str, ParamValue] = (
+                {"matching.spatial_interaction": False} if key == "matching.matcher" else {}
+            )
+            loaded = _flagship_values(**extra)
+            values = _flagship_values(**extra, **{key: new_value})
+            assert helpers.greying(key, values)[0] is False, key
             fired = advisories_for_surface(key, values, loaded)
             assert [a.key for a in fired if a.key == "A2"] == ["A2"], key
             a2 = next(a for a in fired if a.key == "A2")
@@ -229,6 +261,28 @@ class TestA2ChangedSinceLoad:
         """No baseline, nothing to differ from — never guess one."""
         values = _flagship_values(**{"matching.opponents_per_agent": 6})
         assert all(key != "A2" for key, _ in _keys_fired(values, {}))
+
+    def test_silent_while_the_changed_widget_is_greyed(self) -> None:
+        """#191 R3: a change stranded under a greyed widget multiplies nothing.
+
+        Encounter mode changed under the synchronous clock fires; the clock
+        flipped to asynchronous (variable_n, so the R4 gate stays OPEN and
+        only liveness can silence it) greys the widget and A2 goes quiet;
+        flipped back, the difference still stands and A2 fires again.
+        """
+        loaded = _flagship_values()
+        changed: dict[str, ParamValue] = {"matching.encounter_mode": "per_pair"}
+        assert any(key == "A2" for key, _ in _keys_fired(_flagship_values(**changed), loaded))
+        stranded = _flagship_values(
+            **changed,
+            **{"dynamics.time_model": "asynchronous", "dynamics.async_population": "variable_n"},
+        )
+        assert economy_active(stranded)
+        assert helpers.greying("matching.encounter_mode", stranded)[0] is True
+        assert all(key != "A2" for key, _ in _keys_fired(stranded, loaded))
+        back = _flagship_values(**changed)
+        assert helpers.greying("matching.encounter_mode", back)[0] is False
+        assert any(key == "A2" for key, _ in _keys_fired(back, loaded))
 
 
 class TestA3FullNeighbourhood:

@@ -18,7 +18,32 @@ from pdsim.ui.economy_helpers import (
     infeasible_parents_metric,
     infeasible_parents_visible,
     spatial_income_arithmetic,
+    well_mixed_expected_matches_per_agent,
 )
+
+
+def _well_mixed_config(time_model: str, matcher: str = "round_robin") -> ExperimentConfig:
+    """A well-mixed energy economy, N = 100, k = 5, under either clock.
+
+    Args:
+        time_model: ``"synchronous"`` or ``"asynchronous"`` (variable_n,
+            so the economy is the paradigm under both).
+        matcher: The configured matching scheme (greyed under async).
+
+    Returns:
+        The validated config.
+    """
+    return ExperimentConfig.model_validate(
+        {
+            "population": {"size": 100, "composition": {"tit_for_tat": 50, "always_defect": 50}},
+            "matching": {"matcher": matcher, "opponents_per_agent": 5},
+            "dynamics": {
+                "time_model": time_model,
+                "reproduction_mode": "energy_economy",
+                "async_population": "variable_n",
+            },
+        }
+    )
 
 
 def _economy_config(**overrides: object) -> ExperimentConfig:
@@ -388,6 +413,51 @@ class TestExpectedMatchesPerAgent:
                 "von_neumann", "torus", 5, 2, 100, "per_initiator", "synchronous"
             )
             == 10
+        )
+
+    def test_well_mixed_async_is_two_k_never_the_greyed_matcher(self) -> None:
+        """#191 R4: async well-mixed → 2k whatever the matcher says; sync unchanged."""
+        assert well_mixed_expected_matches_per_agent("round_robin", 5, 100, "asynchronous") == 10
+        assert well_mixed_expected_matches_per_agent("random_k", 5, 100, "asynchronous") == 10
+        assert well_mixed_expected_matches_per_agent("round_robin", 5, 100, "synchronous") == 99
+        assert well_mixed_expected_matches_per_agent("random_k", 5, 100, "synchronous") == 10
+        with pytest.raises(ValueError, match="population size"):
+            well_mixed_expected_matches_per_agent("round_robin", 5, None, "synchronous")
+        # The one helper answers the aspatial case too, grid arguments ignored.
+        for time_model, expected in (("asynchronous", 10), ("synchronous", 99)):
+            assert (
+                expected_matches_per_agent(
+                    "von_neumann",
+                    "torus",
+                    5,
+                    1,
+                    None,
+                    "per_initiator",
+                    time_model,
+                    spatial=False,
+                    matcher="round_robin",
+                    population_size=100,
+                )
+                == expected
+            )
+
+    @pytest.mark.parametrize("matcher", ["round_robin", "random_k"])
+    def test_async_well_mixed_report_prints_two_k(self, matcher: str) -> None:
+        """#191 R4 pinned on the report: N = 100, k = 5 → 10, not 99 (#181's finding)."""
+        report = calibration_report(_well_mixed_config("asynchronous", matcher))
+        assert report.spatial is False
+        assert report.matcher == matcher
+        assert report.expected_matches == 10.0
+        assert "EXPECTED" in report.regime_note
+        assert "not consulted" in report.regime_note
+        assert report.memory_note is None or "round_robin" not in report.memory_note
+
+    def test_sync_well_mixed_round_robin_still_prints_n_minus_one(self) -> None:
+        """The synchronous figure is untouched: round_robin N − 1, random_k 2k."""
+        assert calibration_report(_well_mixed_config("synchronous")).expected_matches == 99.0
+        assert (
+            calibration_report(_well_mixed_config("synchronous", "random_k")).expected_matches
+            == 10.0
         )
 
     @pytest.mark.parametrize("encounter_mode", ["per_initiator", "per_pair"])

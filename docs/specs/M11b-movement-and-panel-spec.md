@@ -1,12 +1,15 @@
 # M11b — Agent movement, encounter mode, calibration + advisories, and the parameter-panel redesign
 
-**Status: frozen; in progress** (created 2026-08-17, Phase 0; Phase A
-landed 2026-08-17 — DECISIONS #171; Phase B landed 2026-08-18 — DECISIONS
-#172; Phase C landed 2026-08-20 — DECISIONS #174/#175; Phase D landed
-2026-08-24 — DECISIONS #176/#177, the ruling-7 measurement gate PASSED;
-Phase E1 landed 2026-09-01 — DECISIONS #178/#179; Phase E2 landed
-2026-09-03 — DECISIONS #181/#182; Phase E3 landed 2026-09-05 — DECISIONS
-#183/#184; Phase E4 landed 2026-09-06 — DECISIONS #186/#187).
+**Status: implemented (see DECISIONS #171–#192)** (created 2026-08-17,
+Phase 0; Phase A landed 2026-08-17 — DECISIONS #171; Phase B landed
+2026-08-18 — DECISIONS #172; Phase C landed 2026-08-20 — DECISIONS
+#174/#175; Phase D landed 2026-08-24 — DECISIONS #176/#177, the ruling-7
+measurement gate PASSED; Phase E1 landed 2026-09-01 — DECISIONS #178/#179;
+Phase E2 landed 2026-09-03 — DECISIONS #181/#182; Phase E3 landed
+2026-09-05 — DECISIONS #183/#184; Phase E4 landed 2026-09-06 — DECISIONS
+#186/#187, with the #188/#189 validation-feedback fixes; Phase E5 — the
+close-out — landed 2026-09-08 — DECISIONS #190/#191/#192; the milestone
+is COMPLETE).
 This spec is a frozen historical
 record (#62): deviations during implementation become new DECISIONS
 entries, never retro-edits of this file beyond this status line.

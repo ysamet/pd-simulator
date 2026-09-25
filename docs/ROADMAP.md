@@ -420,7 +420,69 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     (plotly hides pan under fixed axes; a plain click reaches no
     handler), replaced by a "Tool" radio — Draw (the lasso path
     rasterised as a brush stroke), Rectangle, Lasso — with no pan tool;
-    1334 tests.
+    1334 tests. A second validation-feedback fix followed (2026-09-07,
+    DECISIONS #189): "Delete layout file" behind "Yes, delete this
+    file"; the Results browser selecting the newly recorded run (the
+    defect predates the per-pass loop); 1,346 tests.
+    ✅ **M11b Phase E5 landed 2026-09-08** (DECISIONS #190 display-
+    architecture rulings, #191 pre-drafting rulings, #192 build record
+    and milestone completion): the movement validation scenario
+    `the_restless_frontier` ("The Restless Frontier" — the flagship
+    verbatim plus `movement` rate 0.5 / radius 1 / decay 0.0 at the
+    same seed and horizon, its founding pinned cell for cell to the
+    flagship's, its text reusing the flagship's arithmetic and stating
+    what movement adds as direction); A1 judging the TOTAL
+    per-generation cost its verdict uses and naming it when engagement
+    is not free; A2's liveness conjunct from the greying table (a change
+    stranded under a greyed widget no longer fires); the one
+    expected-matches helper answering the well-mixed case too — 2k
+    under the asynchronous clock, never the greyed matcher (the report
+    printed N − 1); DESIGN §4.1 item 3's "radio" retired; the three
+    folded economy knobs confirmed READ by the asynchronous fixed_n
+    engine (none greyed; #182(f7) closed correct-as-built); the
+    recorder's byte copy of the layout file; the hand-off setting
+    "Custom" together with the loaded-scenario marker; the #189 build
+    recorded. Zero re-recordings, zero new goldens; 1358 tests.
+    ✅ **M11b COMPLETE 2026-09-08** (DECISIONS #164–#192: phases A, B,
+    C, D, E1–E5 with the #180/#188/#189 validation-feedback fixes; the
+    spec's status "implemented"; 1358 tests passing, from 1059 at the
+    M11a close). Carried forward by name: M11c stage one (spec-first,
+    #190); the M11b explainer's movement/migration literature pass
+    (#190 R10, a design-layer session); the calibration guide's two
+    Phase-C-stale sentences (#191 R4, the guide's owner).
+  - **M11c — The grid component and smooth live display (DECISIONS #190;
+    spec-first, three stages; sits between M11b's close-out and M12 — a
+    third letter under M11, no renumbering).** One cause behind two owner
+    reports (the live-run page shudder and the painter painting only on
+    release): Streamlit re-runs the whole script per pass and its plotly
+    chart hashes the figure into its element identity, so a changed figure
+    is torn down and remounted (#184(a)(vii)). Two mechanisms inside
+    Streamlit: a KEYED custom component — a plain HTML canvas plus one
+    JavaScript file served from a folder inside the package, no build
+    toolchain — that keeps its identity across reruns and redraws in place,
+    owning the pixels for live display and for painting under the held
+    pointer, with zoom and pan over hundreds of thousands of cells; and a
+    TIMER-DRIVEN fragment (`run_every`) confining the per-generation rerun
+    to the run area, reversing #184's rejection (which chose headless
+    drivability of the whole loop over smoothness — the pass function stays
+    pinnable by direct call). **Stage one:** the component for the painter
+    and the live-run grid, zoom and pan, the "too fine to paint" refusal
+    (#186 R3) lifted, the fragment, the #184(e) whole-loop pins re-expressed
+    as direct-call pins. **Stage two:** the panel's founding preview and the
+    Results browser onto the same component — the ONE grid renderer over all
+    four surfaces, restoring #145(d)'s discipline in JavaScript; the ninth
+    §12 readout and the #149 pins ruled then. **Stage three:** streaming
+    time-series charts inside the component (one point per line per
+    generation appended in JavaScript — no blink, charts in step with the
+    grid; #190 R5). Testing: the Python argument builder and stroke
+    application pinned as pure functions; the drawing tested by a manual
+    checklist in the spec's Validation section; browser automation deferred
+    (#190 R6). Migration off Streamlit is PARKED behind a named trigger — a
+    measured live run still unfollowable after stages one and three, or the
+    M19 map goal needing what an iframe cannot give; the canvas JavaScript
+    is portable to any successor. M11c gets a design note, not a literature
+    explainer (#190 R10). Neither mechanism makes a run faster; both make it
+    smooth to watch.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &
@@ -506,12 +568,12 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
   blended and a dominant-strategy view, §6.3); centroid/Euclidean
   distance as a structure-supplied metric. Purely additive after M18 and
   needs nothing from M12-M18, so it can be pulled forward without
-  renumbering pain provided M11a honours the forward-guards. The
-  large-grid editing surface — a zoomed viewport with region tools over
-  the pixel-array regime, or map-shaped site sets — joins M19 as a second
-  renderer over the E4 `LayoutDraft` and its save path (#186 R3): the
-  larger the grid and population, the harder a layout file is to write by
-  hand, and the owner's stated destination is real state and country maps.
+  renumbering pain provided M11a honours the forward-guards.
+  The large-grid editing surface reserved here by #186 R3 was pulled
+  forward into M11c (#190): the zoomed, pannable canvas over the pixel-array
+  regime lands there as the one grid renderer over the E4 `LayoutDraft`;
+  M19 keeps what is genuinely geographic — map-shaped site sets, per-site
+  capacity, geographic distance — over that same component.
   **TASK (spec Design 12, #135): register `site_capacity` as a tunable
   registry parameter and remove M11a's pinned-at-1 validator** —
   answering the three deferred questions #135 records (the

@@ -946,7 +946,9 @@ top, parameters, live plots below):
    composition inputs (names/descriptions from the Strategy Registry, live
    sum check gating Run) and a per-strategy parameter expander writing only
    non-default values into `strategy_params` (DECISIONS #41).
-3. **Mode-awareness** — `run.mode` as a prominent radio; ignored parameters
+3. **Mode-awareness** — `run.mode` as the segmented-control mode strip
+   below the Scenario dropdown (the M11b Phase E1 tab split, #179; the
+   pre-E1 "prominent radio" wording retired by #191 R5); ignored parameters
    are greyed out (never hidden) with a tooltip explaining why (#34). The
    same pattern keys `matching.opponents_per_agent` off the *matcher*
    widget's current value: k is greyed while round_robin is selected (#57).

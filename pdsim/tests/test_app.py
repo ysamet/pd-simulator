@@ -1497,6 +1497,10 @@ class TestLayoutPainter:
         app.button(key="painter_handoff").click()
         app.run()
         assert not app.exception
+        # #191 R8: the dropdown reads "Custom" and the marker agrees, so the
+        # #40 load-on-change path did not fire over the painting's counts.
+        assert app.selectbox(key="scenario_choice").value == "Custom"
+        assert app.session_state["_loaded_scenario"] == "Custom"
         assert app.session_state["run.mode"] == "evolution"
         assert app.selectbox(key="structure.kind").value == "lattice"
         assert app.checkbox(key="structure.rows#limit").value is True
@@ -1534,13 +1538,14 @@ class TestLayoutPainter:
     def test_validation_pin_recorded_layout_and_cli_rerun(
         self, painter_env: Path, tmp_path: Path
     ) -> None:
-        """(vii) Hand off, record a run: layout.txt is the saved text; the CLI re-run is identical.
+        """(vii) Hand off, record a run: layout.txt is the saved BYTES; the CLI re-run is identical.
 
-        The spec's V5 chain for E4. The recorded copy is compared after
-        normalising line endings: the recorder writes its copy with
-        ``Path.write_text``, which on Windows translates LF to CRLF — a
-        pre-existing io-layer behaviour reported in #187, not changed here
-        (the parser reads both identically, so the re-run is unaffected).
+        The spec's V5 chain for E4. The recorded copy is compared byte for
+        byte (#191 R7): the recorder used to write its copy with
+        ``Path.write_text``, which on Windows translated LF to CRLF (#187
+        f2), so the pin normalised line endings; it is a ``shutil.copyfile``
+        now, and the pin is literal. The run recorded straight after the
+        hand-off carries "Custom" in the results index (#191 R8).
         """
         app = _fresh_app()
         _load_template(app, "example_island.txt")
@@ -1562,8 +1567,10 @@ class TestLayoutPainter:
         cards = list_runs(runs_dir)
         assert len(cards) == 1
         folder = runs_dir / str(cards[0]["run_id"])
-        recorded = (folder / "layout.txt").read_bytes().replace(b"\r\n", b"\n")
+        assert cards[0]["scenario"] == "Custom"  # R8: the hand-off's label, not the old one
+        recorded = (folder / "layout.txt").read_bytes()
         assert recorded == saved
+        assert b"\r" not in recorded
         # The recorded config names the local copy by its bare name; loading
         # it back resolves that name beside the config (the #122 rule), so
         # the raw YAML is what carries "layout.txt".

@@ -6793,3 +6793,501 @@ but imprecise; CLAUDE.md's validation-precision paragraph records the
 location so no walkthrough guesses it again. Nothing else changes;
 zero goldens.
 
+**#190 — 2026-09-08 — Display architecture rulings (design layer): the
+live-run page shudder and the painter's paint-on-release share ONE cause —
+full-script reruns plus the plotly chart's figure-hashed element identity
+(#184(a)(vii)) — and are fixed inside Streamlit by a KEYED custom component
+(an HTML canvas plus one JavaScript file served from a folder inside the
+package, no build toolchain; identity verified in the installed 1.58 bundle,
+E4 handback Part 3) and a TIMER-DRIVEN fragment (reversing #184(d)(f1)'s
+rejection on the smoothness criterion); the work is a spec-first
+mini-milestone **M11c — "the grid component and smooth live display"**,
+between M11b's close-out and M12, in three stages; migration off Streamlit
+parked behind a named trigger; the JavaScript testing policy; #187 f2/f6
+routed into E5; the "too fine to paint" refusal (#186 R3) lifted with zoom
+in M11c stage one; the #189 record check; M11c gets a design note, not a
+literature explainer (owner rulings 2026-09-07/08; #145, #149, #184–#189).**
+(a) THE REPORT AND THE DIAGNOSIS. Owner report 2026-09-07: on live runs —
+especially large spatial energy-economy runs — the whole page shudders and
+the charts blink on every generation, making the run hard to follow; in the
+painter the owner wants cells to paint under the held pointer, which the
+plotly canvas cannot do (it reports a completed drag only, #188 finding 5;
+every colour change is a full round trip and a chart remount). Diagnosis,
+re-verified against the record: Streamlit re-executes the whole script per
+pass — ≈ 190 ms of page work per pass beyond the engine (#184(a)(viii));
+`plotly_chart` hashes the figure spec into its element id, so a changed
+figure is a NEW element, torn down and remounted (#184(a)(vii)); flicker per
+rebuilt figure was predicted and accepted in E3 with the delay slider as the
+lever (#184(d)(f4)). Two mechanisms fix it inside Streamlit: (1) a KEYED
+custom component keeps its iframe across reruns whatever its arguments do
+(`key_as_main_identity={"name","url"}`) and redraws in place; it owns the
+pixels for live display AND for painting under the pointer, and an HTML
+canvas draws hundreds of thousands of cells with zoom and pan — the
+large-grid editing surface #186 R3 reserved for M19; (2) a fragment confines
+the per-generation rerun to the run area (2.8 vs 70 ms per pass on the E3
+probe). Two things the fragment does NOT do, stated so the M11c verdicts are
+not surprises: it does not stop a plotly chart blinking (the remount is per
+rebuilt figure wherever the rebuild runs), and it does not make a run faster
+(the engine's per-generation time is untouched — the run becomes smooth to
+watch, not quicker). Migrating off Streamlit (Dash, NiceGUI, Panel, a Qt
+desktop app) was assessed in the design conversation as a milestone-scale
+rewrite of the panel, browser, sweep tab and several hundred app tests for a
+gain largely reachable incrementally; the canvas JavaScript is portable to
+any of them, so nothing built here is wasted if the trigger fires.
+(b) THE RULINGS.
+R2 ACCEPT the diagnosis and the fix pair; stay on Streamlit. Migration is
+PARKED behind a named trigger, either of: a measured live run still
+unfollowable after both mechanisms land; or the M19 map goal needing what an
+embedded iframe cannot give. The fragment is necessarily TIMER-DRIVEN
+(`st.fragment(run_every=…)`): #184(a)(v)(4) established that a fragment
+cannot reschedule itself from a full-script pass, and every mid-run
+interaction the #183 R4 contract requires (a scenario load, a mode switch,
+any panel edit) IS a full-script pass — so the per-generation pass must be
+fired by the browser-side timer, and the pass function stays pinnable by
+DIRECT CALL. Consequences owned by the M11c spec: the #184(e) pins that
+drive the whole loop through the app in one headless call (tests (i)–(viii)
+and the #39 tiny-live-run pin) are re-expressed as direct-call pins of the
+pass function — a retire-with-replacement, not a free change; Task 0
+verifies that the timer keeps firing while another tab is viewed and that a
+full-script rerun re-arms it; DESIGN §4.1 bullet 4's "not a fragment"
+sentence is amended in M11c, not before.
+R3 PLACEMENT: option (ii) — a spec-first mini-milestone M11c between M11b's
+E5 close-out and M12, E5 FIRST. Rejected: (i) a further M11b phase after
+the close-out (the frozen spec's Phase E list ends at E5; a new frontend
+technology and the reversal of a built ruling are milestone-scale by
+CLAUDE.md's own definition); (iii) folding into E5 (E5 already carries the
+restless-frontier scenario, five held findings and the milestone close-out).
+M11 already splits into lettered halves, so a third letter needs no
+renumbering (ROADMAP's "execution order = numeric order" rule is milestone-
+level).
+R4 REACH: option (c), STAGED — the component becomes the ONE grid renderer
+over all four surfaces (painter, live view, the panel's founding preview,
+the Results browser), restoring #145(d)'s one-renderer discipline in
+JavaScript and closing the E4 departure (#186 R2). Stage one = painter +
+live-run grid; stage two = panel preview + browser. At stage two the ninth
+§12 readout "Pixel-array rendering" (#145(c), which reads the plotly
+renderer's own switch), the #149 small-cell trigger and 320 px minimum
+width, and their pins lose their referent — stage two's own prompt rules
+what replaces them; stage one leaves them alive.
+R5 TIME-SERIES CHARTS: Path B — STREAMING charts inside the component as a
+FIRM third stage (owner ruling 2026-09-08). Under fragment-plus-throttle
+(#184(b)) each rebuild re-sends the entire series and remounts the chart,
+so the charts blink up to twice a second and lag the grid by up to the
+throttle window; the rebuild cost grows with run length. Streaming sends
+one point per line per generation and appends in JavaScript — constant
+cost, no blink, charts in step with the grid every generation. Price: the
+axes, legends and the score-view/time-scope toggles re-implemented in
+JavaScript (a toggle flip asks Python for the full series once, then
+streams again). Rejected: Path A (measure first, streaming conditional) —
+the owner watches long runs and wants the charts in step with the grid.
+R6 TESTING POLICY for JavaScript: the Python argument builder (what the
+component is called with) and stroke application (the returned stroke
+applied through the EXISTING pure `apply_brush`) are pinned as pure
+functions; the drawing's test is a manual checklist in the M11c spec's
+Validation section; browser automation (Playwright) is DEFERRED until the
+component settles. Grounds: AppTest models no component element (#187(a)
+(ii); handback Part 3 finding 6) — the JavaScript is the project's first
+code pytest does not exercise, and the spec says so plainly. Acceptance
+also lists a built wheel to confirm the component folder ships (hatchling
+`packages = ["pdsim"]`, handback Part 3 finding 7).
+R7 #187's HELD FINDINGS into E5, both YES: (f2) the recorder's copy of the
+layout file becomes a one-line BYTE copy (`shutil.copyfile`) so the ruled
+byte-for-byte pin is literal on Windows — an io-layer change that touches
+no period table; (f6) the hand-off sets the Scenario dropdown to "Custom" —
+with the guard that the callback writes the dropdown AND the remembered
+loaded-scenario marker together, because DESIGN §4.1 item 1 (#40) loads a
+scenario's config on a dropdown change, and a bare "Custom" write would
+reload defaults plus an even split over the population the hand-off just
+wrote. Task 0 verifies the exact keys (E5 rulings entry).
+R8 THE "TOO FINE TO PAINT" REFUSAL (#186 R3) is LIFTED in the same stage
+that ships zoom — M11c STAGE ONE (zoom and pan are a scale and an offset in
+the canvas JavaScript and belong to the component's first delivery); the
+`pixel_array_active` predicate itself stands until stage two (the preview
+and browser still consult it). The Rows/Columns cap of 500 (#186 R7;
+250,000 sites) STAYS for M11c — "hundreds of thousands of cells" is a
+claim Task 0 measures, not a ruling.
+R9 THE #189 RECORD CHECK. The uploaded #189 says the Results-browser
+selection defect was one "the per-pass loop introduced" and carries no
+build record; CLAUDE.md says the defect PREDATES the loop, the fix stands
+with attribution corrected, tests 1,346; the handback says the correction
+"lives in DECISIONS #189"; ROADMAP's E4 line stops at #188 / 1,334 and
+names neither "Delete layout file" nor #189. E5's Task 0 compares the
+repository's #189 with the quoted wording: identical → the E5 entry records
+the #189 build (predating attribution, 1,346) and ROADMAP's E4 line gains
+one #189 sentence; different → Rule 7 stop and report (an in-place edit
+of an entry breaks the append-only rule).
+R10 DOCS SHAPE: M11c gets a DESIGN NOTE (`docs/design-notes/`) describing
+the component and fragment and why, NOT a literature explainer — it is
+display technology with no science in it. The M11b explainer's movement/
+migration literature pass remains a named carry-out for a design session
+after E5 (spec Out of scope).
+(c) WHAT THE FRESH READ ADDED, recorded so it is not re-discovered: E5 is
+not small — the spec's E5 bullet carries `the_restless_frontier` with its
+worked arithmetic (E5 rulings entry); the M11c staging is stage one
+(component for painter + live grid, zoom/pan, refusal lifted, timer-driven
+fragment, the pin re-expression), stage two (preview + browser, readout
+ruling), stage three (streaming charts); the M19 line's "large-grid editing
+surface" sentence moves to M11c, M19 keeping only what is geographic.
+(d) DOCS: this entry (appended by the E5 build); ROADMAP's M11c bullet and
+the M19 sentence amendment (text in the E5 prompt); DESIGN untouched here
+(§4.1 items 4/6 and §6.3 amended by M11c's own build); CLAUDE.md's current-
+phase paragraph names M11c as the effort after E5.
+
+**#191 — 2026-09-08 — Phase E5 pre-drafting rulings (design layer): the
+movement validation scenario `the_restless_frontier` / "The Restless
+Frontier" is the flagship configuration verbatim plus one deliberate
+`movement` section (rate 0.5, radius 1, decay 0.0 explicit) at the
+flagship's seed and horizon, its text reusing the flagship's income
+arithmetic unchanged and stating what movement adds as DIRECTION (R1);
+A1 triggers on the same TOTAL cost its verdict uses (R2, #177(f3)); A2
+gains a liveness conjunct from the #141 greying table (R3, #177(f4)); the
+one expected-matches helper gains the asynchronous well-mixed branch —
+2k, never the greyed matcher (R4, #181); DESIGN §4.1 item 3's "radio"
+becomes the segmented control (R5, #182(f4)); the three folded economy
+knobs under async `fixed_n` are greyed or kept live per what the engine
+source actually reads — Task 0 decides, no rule from memory (R6,
+#182(f7)); the recorder's byte copy (R7, #187 f2); the hand-off sets
+"Custom" together with the loaded-scenario marker (R8, #187 f6); the
+#189 record check (R9, #190 R9); the close-out obligations (R10) (M11b
+Phase E5; spec Phase E bullet E5 / V5; #36, #40, #52, #139, #141, #151,
+#170, #172, #176, #177, #181, #182, #186–#190).**
+R1 THE SCENARIO. Base: `spatial_reciprocity` ("Cooperation Survives in
+Clusters") copied VERBATIM — 20×20 torus (400 sites for N = 200), AllC
+100 / AllD 100 founded as `patches`, `von_neumann`, spatial interaction
+on with k = 5 clamping to play-all-4, one round per match, T = 5, R = 3,
+P = 0, S = −1, L = 12 / θ = 60 / σ = 40, μ = 0, horizon 100, seed 42 —
+every payoff and ledger value pinned explicitly in the config dict (the
+#151 rule: a future default change must not rewrite a scenario's
+arithmetic). Plus ONE deliberate section: `movement.rate = 0.5`,
+`movement.radius = 1`, `movement.decay = 0.0` — decay written explicitly
+although irrelevant at radius 1 (the scenario states its intent, the
+#151 `senescence_factor` precedent). Why the flagship as base: the spec
+defines this scenario as movement measured "against M11a's natal-locality
+baseline", and the flagship IS that baseline; sharing every other number
+makes the comparison clean (rejected: a fresh configuration — its own
+arithmetic to derive, and nothing to compare against). Why 0.5, not 1:
+the movers are a strict subset each generation, so erosion is gradual and
+readable; it is the value spec V2 and the #172 goldens use (rejected:
+rate 1 — every agent hops every generation, a scatter, not an erosion).
+Why the same seed: the founding is dealt before any demographic boundary,
+so generation 0 is the flagship's generation 0 cell for cell and the ONLY
+difference between the two scenarios is movement (rejected: a new seed —
+founding noise added to the comparison; Task 0 confirms the founding
+precedes the first movement step in `engine.py`). Why horizon 100:
+comparable to the flagship's; erosion at rate 0.5 is visible well inside
+it (rejected: longer — nothing in the arithmetic needs it). THE TEXT: the
+flagship's arithmetic unchanged, because movement changes WHO sits where,
+not what a position earns — a fully-neighboured agent plays 8 matches per
+generation (#139); a cooperator with n cooperating neighbours earns
+8n − 8 and nets 8n − 20 against L = 12 (interior +12, flat edge +4,
+corner −4); an interior defector earns 0 and starves during generation
+4; interior cooperators first breed at generation 2 (64 ≥ 60). What
+movement adds, as direction, never as a number (the outcome is a random
+process): at radius 1 a move needs an EMPTY adjacent site, so at
+generation 0 the blob's walled-in interiors are blocked and "Blocked
+moves this generation" starts near half the walled-in count (the 0.5
+coin) and FALLS as rim agents step out and unblock the layer behind them
+— the readout is itself the erosion meter; each hop from an interior to
+the rim turns a +12 cooperator into a +4 or −4 one, so cooperator
+breeding slows relative to the flagship and the clusters' edges roughen
+and spread into the empty half; an interior defector that would starve
+can hop to a rim beside cooperators and earn 10n. Things to try: rate 0
+(the control — identical to "Cooperation Survives in Clusters" at the
+same seed), rate 1, radius left blank (unlimited reach: positions mix
+freely while play stays local), rate 0.1. Sibling check: #151 rejected
+sibling comparison scenarios, but this one is mandated by the spec and
+differs by a whole mechanism, stated in its text. Mechanics: joins the
+#36 shrunk-copy smoke test; `PARAMETERS.md` regenerates (gendocs embeds
+scenario text, #177(f5)); a pin that the two registered configs differ
+ONLY in their `movement` section.
+R2 A1 (#177(f3)): A1 currently triggers on `basic_living_cost` alone
+while its verdict uses total cost = L + engagement × matches, so at
+engagement > 0 "defectors never starve" can overstate. Ruling: A1
+triggers on the same TOTAL cost the verdict uses — one arithmetic source
+(`spatial_income_arithmetic`, the §12 one-source rule) — and the message
+names the total when engagement > 0. ADVISORIES.md A1 amended citing
+this entry. Rejected: leaving the edge documented — an advisory that can
+be wrong about its own subject is worse than none.
+R3 A2 (#177(f4)): A2 gains a LIVENESS conjunct — it fires only while the
+changed widget is LIVE per the #141 greying table (the one source); a
+value stranded under a greyed widget multiplies nothing there, and when
+the clock flips back and the widget goes live again the difference still
+stands, so A2 fires then, when it matters. ADVISORIES.md A2 amended.
+R4 ASYNC WELL-MIXED (#181): the one helper (`expected_matches_per_agent`,
+#182) gains the branch: asynchronous AND well-mixed → 2k with k =
+`opponents_per_agent`, phrased as expected (the per-initiator arithmetic,
+#176 R3), never the greyed matcher; pinned on a round_robin asynchronous
+well-mixed configuration, where it printed N − 1. The calibration
+guide's two Phase-C-stale sentences (#177(f6)/#181) are a design-layer
+document and stay a carry-out for the guide's owner — not E5's.
+R5 DESIGN §4.1 item 3 (#182(f4)): "as a prominent radio" → the E1
+segmented-control mode strip (#179). Wording only.
+R6 THE THREE FOLDED KNOBS under async `fixed_n` (#182(f7)): Engagement
+cost, Reproduction overhead, Capital return rate render live inside the
+Dynamics fold on "The b/c > k Threshold". Whether the `fixed_n` engine
+reads any of them cannot be told from the record (fitness reads an
+energy STOCK under `fixed_n`, so engagement cost might still be charged
+per match). Ruling in the #186 amendment-(c) form: Task 0 verifies in
+the engine source which of the three the asynchronous `fixed_n` path
+reads; each one it does NOT read joins the greying table under async
+`fixed_n` with a note naming the cause; each one it DOES read stays live
+and the finding closes as correct-as-built, the reason recorded. Either
+outcome is a Rule 7 report; no greying rule is written from memory.
+R7 THE BYTE COPY (#187 f2, #190 R7): `RunRecorder._copy_layout_file`
+copies with `shutil.copyfile` (bytes) instead of a text write; the V5
+pin (test_app.py `TestLayoutPainter` pin (vii)) drops its line-ending
+normalisation and compares BYTES. An io-layer change touching no period
+table: zero goldens.
+R8 "CUSTOM" ON HAND-OFF (#187 f6, #190 R7): the hand-off callback sets
+the Scenario dropdown to "Custom" AND the remembered loaded-scenario
+marker (`_loaded_scenario` or whatever Task 0 finds it named) in the
+same callback, so the #40 load-on-change path does not fire and the
+population the hand-off wrote survives; a run recorded straight after a
+hand-off then carries "Custom" in the results index (the #52 rule now
+covers both paths). Pinned: after a hand-off the dropdown reads "Custom"
+and the Population section still holds the painting's counts.
+R9 THE #189 RECORD CHECK: as #190 R9 rules — compare, then either record
+the #189 build inside #192 and add the ROADMAP sentence, or stop.
+R10 THE CLOSE-OUT: the spec's status line → "implemented (see DECISIONS
+#171–#192)"; ROADMAP — the E5 landing line, an "M11b COMPLETE" line, the
+E4 line's #189 sentence (per R9), the M11c bullet and the M19 sentence
+(both verbatim from the E5 prompt); CLAUDE.md's current-phase paragraph —
+M11b complete, the next effort M11c stage one (spec-first), the M11b
+explainer's literature pass a named carry-out; DESIGN §4.1 item 3 (R5)
+only — item 4's "not a fragment" sentence is deliberately LEFT for M11c;
+#190 and #191 appended verbatim, #192 the build record AND the milestone
+completion entry; `PARAMETERS.md` regenerated; ADVISORIES.md A1/A2
+amended; zero re-recordings, zero new goldens (a scenario is a config,
+not a golden; the byte copy touches no period table).
+
+**#192 — 2026-09-08 — M11b Phase E5 BUILT — the close-out:
+`the_restless_frontier` / "The Restless Frontier" registered as the
+flagship verbatim plus one `movement` section, its founding pinned cell
+for cell to the flagship's; A1 judging the TOTAL per-generation cost its
+verdict uses and naming it; A2's liveness conjunct from the greying table;
+the one expected-matches helper answering the well-mixed case — 2k under
+the asynchronous clock, never the greyed matcher (the report printed
+N − 1); DESIGN §4.1 item 3's "radio" retired; the three folded economy
+knobs confirmed READ by the asynchronous `fixed_n` engine, so none greys
+and #182(f7) closes correct-as-built; the recorder's byte copy of the
+layout file; the hand-off setting "Custom" together with the
+loaded-scenario marker; the #189 build recorded — AND THE MILESTONE
+COMPLETION ENTRY for M11b (#190/#191 rulings; #164–#189; spec Phase E
+bullet E5 / V5).**
+(a) TASK 0 FINDINGS. (i) Streamlit 1.58.0, plotly 6.8.0; the baseline
+1,346 passing, ruff clean. (ii) THE #189 CHECK (R9): the repository's
+#189 is byte-identical to the quoted wording — its decision line says
+"a selection defect the per-pass loop introduced" and its R2 ends "If
+the real cause differs, the build reports and fixes the real one"; it
+carries no build record — so this entry records the #189 build. The E4
+follow-up session (2026-09-07) built "Delete layout file" behind "Yes,
+delete this file" (`painter_helpers.delete_problem` / `delete_template`
+beside the save rules, sharing one bare-name check; the row filled
+button-first because a widget's key cannot be written after the widget
+is instantiated on a pass, so the box unticks on the deleting pass and
+the button greys on the next interaction, a click reaching that render
+a guarded no-op), and the finishing pass of a recorded run staging its
+folder name in the browser's existing `_select_run` slot, which the
+browser applies to the "Open a run" key before that selectbox is
+created on the same pass. Its Task 0 reproduction ran the same
+AppTest script against the parent commit of the E3 live-run commit and
+the OLD run was selected there too: the browser's selection logic,
+unchanged since M7 (commit 5844911), assigns the key only when the
+stored choice has vanished from the folder list, so a new folder never
+displaced a stored choice under either loop — the ruled fix stands,
+its attribution corrected (the defect PREDATES the per-pass loop);
+1,346 tests (1,334 + 12). (iii) THE DROPDOWN AND ITS MARKER (R8), from
+`app.py` `_scenario_area`: the selectbox is `key="scenario_choice"`;
+the #40 load fires on `if st.session_state.get("_loaded_scenario") !=
+choice:` and the marker is written after it, `st.session_state
+["_loaded_scenario"] = choice`; the precedent pair is
+`_apply_pending_load`'s `st.session_state["scenario_choice"] = CUSTOM`
+followed by `st.session_state["_loaded_scenario"] = CUSTOM`; the
+recorder's index label is `choice = st.session_state.get
+("_loaded_scenario")` at the Run click. (iv) `RunRecorder.
+_copy_layout_file` stood on `destination.write_text(source.read_text
+(encoding="utf-8"), encoding="utf-8")` — a text rewrite, CRLF on
+Windows. (v) THE THREE KNOBS (R6), every read in `pdsim/core/`:
+`engagement_cost` — `async_dynamics.py` `_record_match`: `agent.energy
++= payoff - self._dynamics.engagement_cost`, called from `_step_event`
+for every partner match BEFORE the `if self._fixed_n:` fork, so BOTH
+population modes charge it (and `economy.py` / `dynamics.py` for the
+synchronous ledger); `capital_return_rate` — `async_dynamics.py`
+`_accrue`: `growth = (1.0 + self._dynamics.capital_return_rate) **
+dt`, and `_step_event` calls `crossed = self._accrue(1.0 / n)`
+unconditionally, both modes; `reproduction_overhead` —
+`async_dynamics.py` `_moran_birth` (the fixed_n birth): `parent.energy
+-= dynamics.offspring_stake + dynamics.reproduction_overhead`, the
+same line in `_births` (variable_n) and in `dynamics.py`. Under
+`fixed_n` the energy STOCK is read by `_proportional_parent` (roulette
+weights `e_i − min(e)`) and by `_select_victim` under `energy_decides`
+(the poorest dies): the engagement bill scales with matches played and
+the compounding with the balance — NON-uniform shifts that change who
+breeds and who dies — and the overhead lowers the breeder's balance.
+VERDICT: all three are READ by the asynchronous `fixed_n` path; none
+joins the greying table; #182(f7) closes as correct-as-built, pinned
+on "The b/c > k Threshold" (`test_ui_helpers`). A wording finding
+beside it, held for the design layer: `_accrue` also charges
+`basic_living_cost × Δt` under `fixed_n` — a UNIFORM shift that
+cancels out of proportional selection and out of the poorest-dies rule,
+so the living cost is effect-free there rather than "never charged" as
+`economy_active`'s docstring, `economy_inactive_summary`'s label and
+the `_VARIABLE_N_ONLY` note put it; nothing observable differs. (vi)
+THE HELPER (R4): `expected_matches_per_agent` had ONLY spatial
+branches (1 × the radius-aware effective neighbour count under
+synchronous `per_pair`, else 2 ×); the well-mixed figures lived in
+`calibration_report`'s own `elif matcher == "round_robin": n − 1 /
+else: 2k` branches, which the helper never saw — so "follow for free"
+did not hold as written. Measured before the change: a well-mixed
+asynchronous round_robin configuration at N = 100, k = 5 printed 99.0
+(and 99.0 synchronous). The asynchronous engine draws `size =
+min(self._k, n - 1)` uniform partners per focal activation
+(`_step_event`, the skip-mapped `rng.choice`), ≈ 2k matches per agent
+per generation-equivalent. (vii) A1 compared `report.living_cost` with
+the two incomes while the panel's verdict line judged
+`report.total_cost` (= L + engagement × matches); A2's closure tested
+the gate, the baseline's presence and inequality only; the #141 table
+is reachable through the `helpers` import `advisories.py` already
+carried (`helpers.greying`). (viii) THE FLAGSHIP as registered: seed
+42; N = 200 as AllC 100 / AllD 100; T 5 / R 3 / P 0 / S −1;
+`spatial_interaction` True, k 5; `length_mode` fixed, 1 round; a 20 ×
+20 von Neumann torus founded as `patches`; generations 100,
+`energy_economy`, θ 60, σ 40, L 12, μ 0 — `initial_energy` (40), the
+engagement cost, the capital return rate and the reproduction overhead
+are registry defaults in that dict (see (c)(f4)). The order:
+`EconomyDynamics.__init__` (`dynamics.py`) founds — `self._occupancy =
+found_population(config, founders, rng)`, "before any other draw" —
+and movement runs in `step` as "the boundary's FINAL demographic act"
+after deaths and births (`if self._movement is not None:
+self._movement_phase(next_population)`); `build_movement_rule`
+consumes no RNG. The same-seed claim holds and is pinned by a headless
+founding of both configs compared site for site. (ix) The walkthrough
+paths, corrected in the handback: the run-area metrics read "Blocked
+parents this generation", "Infeasible parents this generation",
+"Blocked moves this generation"; "Engagement cost", "Reproduction
+overhead" and "Capital return rate (r)" sit in the Dynamics section's
+"Advanced settings" fold, "Encounter mode" in the Matching section's,
+"Movement decay (β)" in the Movement section's; "Time model",
+"Reproduction mode" and "Async population mode" are everyday Dynamics
+widgets; the Economy calibration renders inside the Dynamics expander
+AFTER its fold; "Custom" starts at `reproduction_mode = imitation`, so
+the well-mixed step must set the reproduction mode first; the
+Structure readout "Expected matches per agent per generation" does not
+render in a well-mixed world (the engine's spatial gate is false); on
+the flagship an engagement cost of 1 leaves the total (20) inside the
+window, so the walkthrough uses 2 (total 28 ≥ 24: the verdict says
+above and A1 fires naming 28).
+(b) AS BUILT. Task 1 — `scenarios.py`: `the_restless_frontier` / "The
+Restless Frontier", the flagship's dict verbatim plus `"movement":
+{"rate": 0.5, "radius": 1, "decay": 0.0}`, registered last (the
+dropdown's last entry); its text in the #151 voice — the question,
+every override's reason, the reusable arithmetic (8 matches; 8n − 8
+and 8n − 20; +12 / +4 / −4; the interior defector's 0 and its
+starvation during generation 4; first breeding at generation 2) and
+the direction (the blocked-moves readout as the erosion meter,
+interiors becoming edges so breeding slows and clusters roughen and
+spread, the starving interior defector escaping to a rim); things to
+try: rate 0 (the control), rate 1, radius blank, rate 0.1. Task 2 —
+A1 judges `report.total_cost` with the inclusive bounds unchanged and,
+when the total differs from L, appends `A1_TOTAL_COST_NOTE` ("Judged
+on the TOTAL per-generation cost the calibration verdict uses — the
+living cost plus the engagement bill (L + engagement cost × matches =
+28)."); A2's closure gains `disabled, _ = helpers.greying(key, values);
+if disabled: return None` after the inequality. Task 3 —
+`well_mixed_expected_matches_per_agent(matcher, k, N, time_model)`
+(asynchronous → 2k whatever the matcher; synchronous round_robin →
+N − 1, a `ValueError` without N; synchronous random_k → 2k) as a
+public sibling, and `expected_matches_per_agent` gains keyword-only
+`spatial`, `matcher`, `population_size` routing to it when
+`spatial=False`, so ONE entry point answers every case;
+`calibration_report`'s aspatial branch calls the well-mixed helper and
+carries a third regime note for the asynchronous well-mixed case
+(bounded ≈ 2k EXPECTED per generation-equivalent; the matcher not
+consulted, so round_robin does not mean N − 1); the memory note's
+round_robin sentence is synchronous-only now, the asynchronous
+well-mixed case getting its own uniform-draws sentence;
+`ECONOMY_HELP["expected_matches"]` states the rule. Task 4 — no
+greying change ((a)(v)); the pin only. Task 5 — `shutil.copyfile
+(source, destination)`; pin (vii) compares bytes and asserts no CR;
+`test_results.py`'s copy test writes LF bytes and compares bytes.
+Task 6 — `_painter_handoff` writes `scenario_choice` and
+`_loaded_scenario` to "Custom" together, before the populate call;
+pinned in (vi) (the dropdown and the marker read "Custom", the
+painting's counts survive) and (vii) (the results index card reads
+"Custom").
+(c) RULE 7. (f1) R4's premise: the helper had no well-mixed branch to
+extend — the aspatial arithmetic lived in the report; built as the
+public sibling plus the `spatial=False` route so the one-source rule
+holds by construction (the report's aspatial branch carries no
+arithmetic of its own any more); the memory note's matcher branch was
+the "other path" R4 asked to be verified, and it now branches on the
+clock first. (f2) R3's conjunct silences one existing pin: on the
+flagship the matching scheme is GREYED (spatial sampling never
+consults it), so `test_every_trigger_key_fires_when_changed` now
+exercises the matcher row with spatial interaction off in both
+mappings — a false positive retired, exactly the ruling's point; the
+ADVISORIES A2 text names the example. (f3) R6: all three knobs READ,
+none greyed (the finding closes correct-as-built), plus the "never
+charged" wording finding in (a)(v). (f4) R1's "every payoff and ledger
+value pinned explicitly": the flagship's dict, copied verbatim as
+ruled, leaves `initial_energy` (40 — the "starting 40" both texts
+name), `engagement_cost`, `capital_return_rate` and
+`reproduction_overhead` (all 0) to the registry defaults; the copy is
+verbatim and the equality pin compares VALIDATED configs, so both
+scenarios share the same latent gap — held for the design layer rather
+than pinning one dict and not the other. (f5) The owner's working tree
+at session start held `grid_templates/README.md` deleted and an
+untracked `grid_templates/grid_templates-README.md` — the owner's own
+rename, presumably an upload copy; not touched, not staged;
+`PAINTER_HELP["source"]` still says "the README there is not a
+layout". (f6) The walkthrough corrections of (a)(ix). (f7) Cost: the
+A2 conjunct reads the greying table for nine trigger keys on every
+panel paint — nine dictionary lookups and predicates, no measurable
+cost.
+(d) TESTS: +12 (1,346 → 1,358): `test_scenarios.py` (the
+config-equality pin — only `movement` differs; the founding pin; the
+text pin; the #36 shrunk-copy smoke run gains the scenario);
+`test_advisories.py` (the engagement bill enters the trigger; silent
+while the changed widget is greyed, firing again when it comes back);
+`test_economy_helpers.py` (the well-mixed helper under both clocks and
+through the one entry point; the report at N = 100, k = 5 under the
+asynchronous clock for both matchers → 10; the synchronous figures
+unchanged: 99 and 10); `test_ui_helpers.py` (the three knobs live on
+"The b/c > k Threshold"); `test_results.py` and `test_app.py` pin
+(vii) tightened to bytes; `test_app.py`'s hand-off pins gain the
+"Custom" dropdown, marker and index-label assertions; the scenario
+round-trip and load parametrisations gain the new scenario. All 31
+golden masters pass untouched: zero re-recordings, zero new goldens
+(a scenario is a config, not a golden; the byte copy touches no period
+table).
+(e) DOCS: this entry; #190 and #191 appended verbatim; DESIGN §4.1
+item 3 (R5) only — item 4's "not a fragment" sentence deliberately
+LEFT for M11c; ADVISORIES A1 (trigger, message, note) and A2 (trigger,
+note); ROADMAP (the E4 line's #189 sentence, the E5 landing line, the
+"M11b COMPLETE" line, the M11c bullet, the M19 sentence); CLAUDE.md's
+current-phase paragraph; the spec's status line → implemented;
+`PARAMETERS.md` regenerated (the new scenario's text).
+MILESTONE COMPLETION — **M11b — Agent movement, encounter mode,
+calibration + advisories, and the parameter-panel redesign — is
+COMPLETE 2026-09-08** (spec `docs/specs/M11b-movement-and-panel-spec.
+md`, frozen 2026-08-17; design rulings #164–#170): Phase A —
+feasibility-aware admission (#171); Phase B — movement, `pdsim/core/
+movement.py` and the `movement.*` registry section (#172); Phase C —
+`matching.encounter_mode` (#174/#175); Phase D — the asynchronous
+calibration branch and advisories A1–A3 (#176/#177); Phase E1 — the
+run-mode tab split (#178/#179; the #180 stable-key fix); E2 — the
+disclosure axis (#181/#182); E3 — live-run display continuity
+(#183/#184); E4 — the mouse layout painter (#185 scoping; #186/#187;
+the #188 Draw-tool and #189 delete / newest-run fixes); E5 — this
+close-out (#190/#191/#192). 1,358 tests passing at completion
+(1,059 at the M11a close). Goldens across the milestone: the Phase A
+re-recording budget went unused (#171), two movement-on goldens were
+RECORDED in Phase B (#172), and no golden was re-recorded in any phase.
+Carried forward, named: M11c stage one — spec-first (#190 R3; the
+design layer writes `docs/specs/M11c-grid-component-spec.md` before
+any build); the M11b explainer's movement/migration literature pass
+(#190 R10; spec Out of scope); the calibration guide's two Phase-C-
+stale sentences (#177(f6)/#181; #191 R4, the guide's owner); the
+fixed_n "never charged" wording ((a)(v)); the `initial_energy` gap in
+the two spatial scenarios' dicts ((c)(f4)).
+

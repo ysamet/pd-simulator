@@ -450,12 +450,36 @@ in the browser's existing selection slot — the defect predates the
 per-pass loop, the browser having never displaced a stored choice, so
 the ruled fix stands with its attribution corrected); the population-mix
 caption's location recorded above; 1346 tests.
-**The next implementation effort is Phase E5 close-out** (which
-carries the held items #177(f3)/(f4), the async well-mixed round_robin
-calibration branch (#181), DESIGN §4.1's stale "radio" wording
-(#182(f4)), the fixed_n greying of the three folded economy knobs
-(#182(f7)), and the two E4 held findings — the recorder's CRLF copy of
-the layout file on Windows (#187 f2) and the hand-off leaving the
-Scenario dropdown's label on a recording (#187 f6)).
+Phase E5 — the close-out — landed 2026-09-08 (DECISIONS #190 the
+display-architecture rulings that place the next milestone, #191
+pre-drafting rulings, #192 build record and milestone completion): the
+movement validation scenario `the_restless_frontier` ("The Restless
+Frontier" — the flagship verbatim plus one `movement` section, rate
+0.5 / radius 1 / decay 0.0, same seed and horizon, founding pinned
+cell for cell to the flagship's); A1 judging the TOTAL per-generation
+cost its verdict uses and naming it when engagement is not free; A2's
+liveness conjunct from the greying table; the one expected-matches
+helper answering the well-mixed case — 2k under the asynchronous
+clock, never the greyed matcher (the report printed N − 1); DESIGN
+§4.1 item 3's "radio" retired; the three folded economy knobs
+confirmed READ by the asynchronous fixed_n engine, so none greys
+(#182(f7) closed correct-as-built); the recorder's byte copy of the
+layout file (#187 f2); the hand-off setting "Custom" together with the
+loaded-scenario marker (#187 f6); zero re-recordings, zero new goldens;
+1358 tests.
+**M11b is COMPLETE (2026-09-08; DECISIONS #164–#192; spec status
+"implemented"; 1358 tests passing).** **The next implementation effort
+is M11c stage one — the grid component and smooth live display — and
+it is SPEC-FIRST: the design layer writes
+`docs/specs/M11c-grid-component-spec.md` before any build** (DECISIONS
+#190: a keyed custom component — an HTML canvas plus one JavaScript
+file served from inside the package — as the one grid renderer, and a
+timer-driven fragment for the per-generation pass; three stages; the
+ROADMAP bullet holds the scope). Named carry-outs for the design
+layer: the M11b explainer's movement/migration literature pass (#190
+R10); the calibration guide's two Phase-C-stale sentences (#191 R4);
+the fixed_n "living cost never charged" wording (#192(a)(v) — the cost
+is charged but effect-free there); the `initial_energy` value left to
+the registry default in the two spatial scenarios' dicts (#192(c)(f4)).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

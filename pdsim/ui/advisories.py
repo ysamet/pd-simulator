@@ -16,16 +16,21 @@ Streamlit, and ``app.py`` only renders.
 
 The batch (docs/ADVISORIES.md, as amended by #170 and #176):
 
-* **A1** — living cost outside the survival window (caution; Economy
-  panel, beside the calibration readout). Gate: :func:`~pdsim.ui.
-  economy_helpers.economy_active` (#176 R4). Fires when the basic living
-  cost is at or below the all-defector income, or at or above the
-  all-cooperator income (#176 R1 — both bounds INCLUSIVE for the
-  advisory, which is exactly why the printed window is strict).
+* **A1** — the per-generation cost outside the survival window (caution;
+  Economy panel, beside the calibration readout). Gate: :func:`~pdsim.ui.
+  economy_helpers.economy_active` (#176 R4). Fires when the TOTAL
+  per-generation cost — the living cost plus the engagement bill,
+  ``L + engagement_cost × matches``, the same figure the panel's verdict
+  line judges (#191 R2) — is at or below the all-defector income, or at
+  or above the all-cooperator income (#176 R1 — both bounds INCLUSIVE for
+  the advisory, which is exactly why the printed window is strict). The
+  message names the total whenever engagement is not free.
 * **A2** — an income-multiplying parameter changed without recalibration
   (caution; inline at the changed widget). Gate: the same R4 predicate.
   Fires per trigger key while its current value differs from the LOADED
-  value (#176 R5).
+  value (#176 R5) AND the widget is LIVE per the #141 greying table
+  (#191 R3): a value stranded under a greyed widget multiplies nothing,
+  and the difference still stands when the widget comes back.
 * **A3** — spatial interaction with k at or above the reachable
   neighbourhood size (info; beside the spatial-interaction toggle).
   Gate: the engine's ACTUAL spatial gate — evolution AND lattice AND
@@ -111,6 +116,14 @@ A1_MESSAGE = (
 )
 """A1's message (docs/ADVISORIES.md, first clause per #176 R1)."""
 
+A1_TOTAL_COST_NOTE = (
+    " Judged on the TOTAL per-generation cost the calibration verdict uses — "
+    "the living cost plus the engagement bill (L + engagement cost × matches "
+    "= {total:g})."
+)
+"""A1's second sentence when engagement is not free (#191 R2): the trigger
+and the verdict line judge the same total, and the message says which."""
+
 A2_MESSAGE = (
     "This change rescales every agent's income (it may raise or lower it). "
     "Recompute the survival window before trusting the living cost."
@@ -179,15 +192,20 @@ def _calibration_for(values: Mapping[str, ParamValue]) -> CalibrationReport | No
 def _a1_living_cost(
     values: Mapping[str, ParamValue], loaded_values: Mapping[str, ParamValue]
 ) -> str | None:
-    """A1: the living cost sits outside the survival window (#176 R1).
+    """A1: the per-generation cost sits outside the survival window (#176 R1).
 
-    Fires when ``basic_living_cost`` ≤ the all-D income (inclusive — at
-    the bound a defector nets exactly zero and never starves) or ≥ the
-    all-C income (inclusive — at the bound a pure cooperator nets zero
-    and cannot fund reproduction's overheads). The incomes come from
-    :func:`calibration_report`, which branches to the spatial arithmetic
-    exactly when the spatial gate holds (#154/#176), so the advisory and
-    the readout beside it can never disagree.
+    Fires when the TOTAL cost — ``basic_living_cost`` plus
+    ``engagement_cost × matches``, exactly the figure the panel's verdict
+    line judges (#191 R2; before it, L alone, which could call the filter
+    off while the engagement bill had switched it on) — is ≤ the all-D
+    income (inclusive — at the bound a defector nets exactly zero and
+    never starves) or ≥ the all-C income (inclusive — at the bound a pure
+    cooperator nets zero and cannot fund reproduction's overheads). The
+    incomes and the total come from :func:`calibration_report`, which
+    branches to the spatial arithmetic exactly when the spatial gate holds
+    (#154/#176), so the advisory and the readout beside it can never
+    disagree. When engagement is not free the message says the total was
+    judged, and names it.
 
     Args:
         values: Current widget values (with the app's lookahead).
@@ -195,14 +213,18 @@ def _a1_living_cost(
             table's).
 
     Returns:
-        :data:`A1_MESSAGE` when the filter is off, else ``None``.
+        :data:`A1_MESSAGE` (plus :data:`A1_TOTAL_COST_NOTE` when the total
+        differs from L) when the filter is off, else ``None``.
     """
     if not economy_active(values):
         return None
     report = _calibration_for(values)
     if report is None:
         return None
-    if report.living_cost <= report.all_d_income or report.living_cost >= report.all_c_income:
+    cost = report.total_cost
+    if cost <= report.all_d_income or cost >= report.all_c_income:
+        if cost != report.living_cost:
+            return A1_MESSAGE + A1_TOTAL_COST_NOTE.format(total=cost)
         return A1_MESSAGE
     return None
 
@@ -214,7 +236,12 @@ def _a2_rule(key: str) -> AdvisoryPredicate:
     functions — the same rule at nine surfaces. The baseline is the
     LOADED scenario's values: loading writes a fresh baseline, so loading
     clears every A2 by construction. A key absent from the baseline has
-    nothing to differ from and stays silent (never guess a baseline).
+    nothing to differ from and stays silent (never guess a baseline). The
+    liveness conjunct (#191 R3): the rule fires only while the widget is
+    LIVE per the #141 greying table — :func:`helpers.greying`, the one
+    source — because a value stranded under a greyed widget multiplies
+    nothing there; when the widget comes back live the difference still
+    stands, and the advisory fires then, when it matters.
 
     Args:
         key: The trigger key this closure watches.
@@ -231,6 +258,9 @@ def _a2_rule(key: str) -> AdvisoryPredicate:
         if key not in loaded_values:
             return None
         if values.get(key) == loaded_values[key]:
+            return None
+        disabled, _ = helpers.greying(key, values)
+        if disabled:
             return None
         return A2_MESSAGE
 

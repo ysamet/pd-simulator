@@ -729,12 +729,13 @@ class TestStructurePersistence:
     def test_the_layout_file_is_copied_into_the_run_folder(self, tmp_path: Path) -> None:
         """Hard rule 8: the folder re-runs even after the original moves."""
         source = tmp_path / "painting.txt"
-        source.write_text(
-            "kind: lattice_grid\nrows: 3\ncols: 3\n\n"
-            "tit_for_tat tit_for_tat tit_for_tat\n"
-            "always_defect always_defect always_defect\n"
-            ". . .\n",
-            encoding="utf-8",
+        # Written as BYTES with LF endings (what the painter writes), so the
+        # byte-identity assertion below is not vacuous on Windows.
+        source.write_bytes(
+            b"kind: lattice_grid\nrows: 3\ncols: 3\n\n"
+            b"tit_for_tat tit_for_tat tit_for_tat\n"
+            b"always_defect always_defect always_defect\n"
+            b". . .\n"
         )
         config = self._lattice_economy_config()
         config = config.model_copy(
@@ -751,7 +752,10 @@ class TestStructurePersistence:
         # (#122's explicit pin — a recorder that consumed the file would
         # destroy the template every run reads from).
         assert source.is_file()
-        assert copy.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+        # Byte for byte (#191 R7): a text rewrite used to turn LF into CRLF
+        # on Windows, so the recorded copy differed from the painting.
+        assert copy.read_bytes() == source.read_bytes()
+        assert b"\r" not in copy.read_bytes()
         # The recorded config points at the copy, and re-loading resolves it
         # even though the bare name does not exist in the working directory.
         reloaded = load_config(folder / "config.yaml")

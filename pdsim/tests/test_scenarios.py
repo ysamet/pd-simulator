@@ -8,6 +8,7 @@ stream.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pdsim.config.experiment import ExperimentConfig
@@ -19,7 +20,10 @@ from pdsim.config.scenarios import (
     register_scenario,
 )
 from pdsim.core import engine
+from pdsim.core.dynamics import build_initial_population
 from pdsim.core.events import CycleFinished, GenerationFinished, RunFinished
+from pdsim.core.layouts import found_population
+from pdsim.core.strategies.registry import strategy_name_of
 
 V1_SCENARIOS = {
     "classic_tournament",
@@ -39,10 +43,12 @@ ALL_SCENARIOS = V1_SCENARIOS | {
     "donation_game_threshold",
     "the_drifting_frontier",
     "the_filling_grid",
+    "the_restless_frontier",
 }
 """The five v1 seed scenarios, M10a's energy-economy scenario, the four
-M10b event-time scenarios (spec Validation V1/V2/V3/V5), and the four
-M11a population-structure scenarios (DECISIONS #151)."""
+M10b event-time scenarios (spec Validation V1/V2/V3/V5), the four M11a
+population-structure scenarios (DECISIONS #151), and M11b's movement
+validation scenario (DECISIONS #191 R1)."""
 
 
 def _shrunk(config: ExperimentConfig) -> ExperimentConfig:
@@ -157,6 +163,68 @@ class TestRegistryMechanics:
                 config=valid_config,
                 things_to_try="   ",
             )
+
+
+class TestRestlessFrontier:
+    """The E5 movement scenario (DECISIONS #191 R1): the flagship plus one section."""
+
+    def test_differs_from_the_flagship_only_in_movement(self) -> None:
+        """Validated config to validated config, every other number is the flagship's."""
+        frontier = get_scenario_info("the_restless_frontier")
+        flagship = get_scenario_info("spatial_reciprocity")
+        assert frontier.display_name == "The Restless Frontier"
+        a = frontier.config.model_dump(mode="json")
+        b = flagship.config.model_dump(mode="json")
+        assert a["movement"] == {"rate": 0.5, "radius": 1, "decay": 0.0}
+        assert b["movement"]["rate"] == 0.0
+        del a["movement"], b["movement"]
+        assert a == b
+        assert a["seed"] == 42
+        assert a["dynamics"]["generations"] == 100
+
+    def test_founding_is_the_flagships_cell_for_cell(self) -> None:
+        """Same seed, founding before the first movement step: generation 0 matches.
+
+        A headless founding of each config — the engine's own
+        ``build_initial_population`` then ``found_population`` on a fresh
+        generator at the shared seed, the first RNG consumer of a run —
+        compared site for site and strategy for strategy.
+        """
+        placements: dict[str, dict[int, tuple[str, object]]] = {}
+        for name in ("spatial_reciprocity", "the_restless_frontier"):
+            config = get_scenario_info(name).config
+            founders = build_initial_population(config)
+            occupancy = found_population(config, founders, np.random.default_rng(config.seed))
+            assert occupancy is not None
+            placements[name] = {
+                agent.agent_id: (
+                    strategy_name_of(agent.strategy),
+                    occupancy.site_of(agent.agent_id),
+                )
+                for agent in founders
+            }
+        assert placements["spatial_reciprocity"] == placements["the_restless_frontier"]
+        assert len(placements["the_restless_frontier"]) == 200
+        assert len({site for _, site in placements["the_restless_frontier"].values()}) == 200
+
+    def test_the_text_carries_the_arithmetic_and_the_direction(self) -> None:
+        """The flagship's figures reused unchanged; movement stated as direction."""
+        info = get_scenario_info("the_restless_frontier")
+        for figure in (
+            "8 matches",
+            "8n − 8",
+            "8n − 20",
+            "+12",
+            "+4",
+            "−4",
+            "generation 4",
+            "generation 2",
+            "seed, 42",
+        ):
+            assert figure in info.description, figure
+        assert "Blocked moves this generation" in info.description
+        for hint in ("Rate 0", "rate 1", "blank", "rate 0.1"):
+            assert hint in info.things_to_try, hint
 
 
 class TestScenariosRunEndToEnd:

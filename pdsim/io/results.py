@@ -440,7 +440,10 @@ class RunRecorder:
         stops re-running the moment that file moves or changes, which
         violates hard rule 8. Copying the file in — and recording the copy's
         bare name — makes the folder self-contained; the loader resolves a
-        bare name against the config's own folder.
+        bare name against the config's own folder. The copy is a BYTE copy
+        (#191 R7): a text rewrite translated LF to CRLF on Windows, so the
+        recorded ``layout.txt`` was not byte-identical to the painting it
+        came from (#187 f2) — the parser never minded, the pin did.
 
         Args:
             config: The run's configuration.
@@ -459,7 +462,7 @@ class RunRecorder:
             # moments later and reports it far more usefully.
             return config
         destination = self.folder / LAYOUT_FILE_NAME
-        destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        shutil.copyfile(source, destination)  # bytes, never a text rewrite (#191 R7)
         return config.model_copy(
             update={"structure": structure.model_copy(update={"layout_file": LAYOUT_FILE_NAME})}
         )

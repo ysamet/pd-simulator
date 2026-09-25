@@ -518,6 +518,30 @@ class TestAsyncGreying:
         ):
             assert helpers.greying(key, fixed) == (False, ""), key
 
+    def test_the_three_folded_knobs_stay_live_on_the_threshold_scenario(self) -> None:
+        """#191 R6 / #182(f7): the async fixed_n engine READS all three, so none greys.
+
+        Verified in the engine source (E5 Task 0): the engagement cost lands
+        on both participants at every match (``_record_match``, shared by
+        both population modes); capital returns compound in the per-event
+        accrual sweep both engines run (``_accrue``); the Moran birth
+        charges σ plus the overhead (``_moran_birth``). All three move the
+        balances the fitness-proportional breeder draw and the
+        energy-decides victim rule read, so the finding closes as
+        correct-as-built.
+        """
+        values = helpers.widget_values_from_config(
+            get_scenario_info("donation_game_threshold").config
+        )
+        assert values["dynamics.time_model"] == "asynchronous"
+        assert values["dynamics.async_population"] == "fixed_n"
+        for key in (
+            "dynamics.engagement_cost",
+            "dynamics.reproduction_overhead",
+            "dynamics.capital_return_rate",
+        ):
+            assert helpers.greying(key, values) == (False, ""), key
+
     def test_cadence_m_needs_every_m_events(self) -> None:
         """The m widget keys off the cadence choice (#34 pattern)."""
         boundary = {**self.ASYNC, "output.recording_cadence": "per_generation_equivalent"}
