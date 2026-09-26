@@ -450,6 +450,7 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     #190); the M11b explainer's movement/migration literature pass
     (#190 R10, a design-layer session); the calibration guide's two
     Phase-C-stale sentences (#191 R4, the guide's owner).
+    🔧 **Tooling 2026-09-24** (DECISIONS #193): `python -m pdsim.export_docs` assembles the project-knowledge upload set under fixed names and reports Changed / New / Removed; 1,382 tests.
   - **M11c — The grid component and smooth live display (DECISIONS #190;
     spec-first, three stages; sits between M11b's close-out and M12 — a
     third letter under M11, no renumbering).** One cause behind two owner
@@ -483,6 +484,7 @@ strain the app. The bench (#58/#91/#102/#156) supplies the data.
     is portable to any successor. M11c gets a design note, not a literature
     explainer (#190 R10). Neither mechanism makes a run faster; both make it
     smooth to watch.
+    📐 **Spec FROZEN 2026-09-25** (`docs/specs/M11c-grid-component-spec.md`; DECISIONS #194): stage one as four build sub-prompts — 1.1 the component in view mode on the run-area grid (with the scenario-ledger and fixed_n-wording carry-outs), 1.2 the timer-driven fragment, 1.3 the painter on the component with the "too fine to paint" refusal lifted, 1.4 the close-out with the design note; the whole-loop pins stay app-level, re-driven by repeated full-script passes (#194 R13, revising #190 R2's letter); the migration trigger reads "after stages one and three" (#194(a)(f5)); the calibration guide's stale encounter-mode sentences corrected in the spec session.
 - **M12 — Agent attributes + attribute-conditional strategies.** Generic
   attributes mapping with visibility and inheritance policies; strategies
   conditioning on an opponent's visible tags (Riolo tags; Hammond &

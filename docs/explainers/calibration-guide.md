@@ -371,7 +371,7 @@ When `matching.spatial_interaction` is switched on, the matcher dropdown greys o
 
 Every agent initiates a match against each neighbour — that is *degree* matches. But each of those neighbours is also busy initiating against *its* neighbours, and you are one of them, so you get drawn in *degree* more times. Four neighbours means roughly **eight** matches, not four. Eight neighbours means roughly **sixteen**, not eight.
 
-pdsim does not remove these duplicates, and that is deliberate rather than accidental: the same behaviour is already present in `random_k`, and inheriting it unchanged keeps income statistics comparable between the spatial and non-spatial cases. But it means the neighbourhood shape dropdown is an income multiplier, which is not how anyone reads a setting called "neighbourhood shape."
+By default pdsim keeps these duplicates, and that default is deliberate rather than accidental: the same behaviour is already present in `random_k`, and inheriting it unchanged keeps income statistics comparable between the spatial and non-spatial cases. But it means the neighbourhood shape dropdown is an income multiplier, which is not how anyone reads a setting called "neighbourhood shape." Since M11b the "Encounter mode" setting can remove the duplicates; §4.4 explains when you would want to.
 
 *(This figure has since been measured in-engine rather than derived: on a fully occupied von Neumann torus at k ≥ 4, every agent plays exactly 8 matches per generation, with no variance — VT-6(b), DECISIONS #139.)*
 
@@ -398,9 +398,9 @@ Choose **Moore** when the terrain is open and a diagonal step costs nothing extr
 
 ### §4.4 — How often should two neighbours actually meet?
 
-§4.2 established that a neighbouring pair currently meets **twice** per generation, because each of the two starts one match. Nothing about the world being modelled makes that so — it falls out of the fact that matches are indexed by whoever initiated them.
+§4.2 established that, by default, a neighbouring pair meets **twice** per generation, because each of the two starts one match. Nothing about the world being modelled makes that so — it falls out of the fact that matches are indexed by whoever initiated them.
 
-For many real situations, one encounter per pair per period is the natural unit. When scattered groups occasionally run into one another, the encounter is an event that happens to the *pair*; it is circumstance, not each side independently deciding to seek the other out. Doubling it is a modelling claim, and at present pdsim is making that claim on your behalf.
+For many real situations, one encounter per pair per period is the natural unit. When scattered groups occasionally run into one another, the encounter is an event that happens to the *pair*; it is circumstance, not each side independently deciding to seek the other out. Doubling it is a modelling claim, and by default pdsim makes that claim on your behalf.
 
 Two further points, neither obvious:
 
@@ -408,7 +408,7 @@ Two further points, neither obvious:
 
 **The doubling is invisible on exactly the half of the flagship where you would look for it**, because 8 × 0 and 4 × 0 are both zero. Only the cooperator side shows it.
 
-A configurable encounter mode is on the roadmap for a later milestone. Until it lands, use the ≈ 2 × degree figure and know that it is a choice rather than a fact.
+Since M11b the choice is yours. "Encounter mode" — in the Matching section, inside its "Advanced settings" fold — set to per_pair keeps at most one match per neighbouring pair per generation: on a fully occupied von Neumann grid with k of at least 4, that is 4 matches per agent instead of 8, and every income halves with it, so recheck the survival window (§4.5) after switching. Under the asynchronous clock the setting is greyed: each event's focal agent starts its own matches, so the doubled figure stands there as an expected value. Either way, the doubling is a choice rather than a fact.
 
 ### §4.5 — The survival window
 

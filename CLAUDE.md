@@ -214,6 +214,8 @@ historical record. Specs count as docs for the DOCS CHANGED ritual and are
 uploaded to project knowledge. Small fixes still travel as plain prompts —
 specs are for milestone-scale work.
 
+**Design notes (`docs/design-notes/`).** Besides the prompts and handbacks the folder already holds, it carries DESIGN NOTES: durable, plain-language technical explanations of a milestone that has no science in it (display technology, tooling), written instead of a literature explainer (DECISIONS #190 R10, #194 R19). The first is M11c's `M11c-grid-component-design-note.md`, written at stage one's close-out from the as-built code and measurements and extended as later stages land.
+
 **Prompt size limit.** A single prompt must stay under 50,000 characters. The
 harness truncates silently past that, marking the cut but leaving the
 receiving session with no way to recover the tail. Deliverables that would
@@ -477,18 +479,6 @@ layout file (#187 f2); the hand-off setting "Custom" together with the
 loaded-scenario marker (#187 f6); zero re-recordings, zero new goldens;
 1358 tests.
 **M11b is COMPLETE (2026-09-08; DECISIONS #164–#192; spec status
-"implemented"; 1358 tests passing).** **The next implementation effort
-is M11c stage one — the grid component and smooth live display — and
-it is SPEC-FIRST: the design layer writes
-`docs/specs/M11c-grid-component-spec.md` before any build** (DECISIONS
-#190: a keyed custom component — an HTML canvas plus one JavaScript
-file served from inside the package — as the one grid renderer, and a
-timer-driven fragment for the per-generation pass; three stages; the
-ROADMAP bullet holds the scope). Named carry-outs for the design
-layer: the M11b explainer's movement/migration literature pass (#190
-R10); the calibration guide's two Phase-C-stale sentences (#191 R4);
-the fixed_n "living cost never charged" wording (#192(a)(v) — the cost
-is charged but effect-free there); the `initial_energy` value left to
-the registry default in the two spatial scenarios' dicts (#192(c)(f4)).
+"implemented"; 1358 tests passing).** A tooling session followed (2026-09-24, DECISIONS #193): `python -m pdsim.export_docs`, the one source of the project-knowledge upload set; 1,382 tests. **M11c — the grid component and smooth live display — has its spec FROZEN 2026-09-25** (`docs/specs/M11c-grid-component-spec.md`; DECISIONS #190 display-architecture rulings, #194 spec rulings): a keyed custom component (an HTML canvas plus one JavaScript file served from `pdsim/ui/frontend/grid_canvas/`) as the one grid renderer and a timer-driven fragment for the per-generation pass, in three stages. **The next implementation effort is stage one's sub-prompt 1.1** — the component in view mode on the Run lab's run-area grid — drafted by the design layer against the committed spec; then 1.2 (the fragment), 1.3 (the painter), 1.4 (the close-out). The component's JavaScript is the project's first code pytest does not exercise: its test is the spec's Validation checklist, run by the owner (#190 R6, #194 R14). Carry-outs placed by #194: the scenario ledger values written explicitly and the fixed_n living-cost wording (both in 1.1); the calibration guide's stale encounter-mode sentences DONE in the spec session. Named carry-outs remaining for the design layer: the M11b explainer's movement/migration literature pass with its sanity check of the movement mechanism (#194 R24); the nullable-number "no limit" wording for `initial_energy` (#194 R25).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.
