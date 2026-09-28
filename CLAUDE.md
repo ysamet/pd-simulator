@@ -126,7 +126,9 @@ not have `pdsim` or its dependencies installed.
   `exports/project-files/` under fixed names — a file under `docs/` keeps its
   bare filename, any other nested file is prefixed with its folder, e.g.
   `grid_templates-README.md` — and prints what changed since the last export
-  as Changed / New / Removed; upload exactly those. DECISIONS #193)
+  as Changed / New / Removed, after a first line giving the upload-set total;
+  upload exactly those. Claude Code runs it at every session's end and quotes
+  the printout in the handback. DECISIONS #193, #195)
 - Benchmark: `python -m pdsim.bench` (median wall-clock seconds/generation
   across an N x matcher grid — the vectorization-trigger data, DECISIONS #58;
   `--out PATH` writes CSV; output is environment-specific, never committed)
@@ -232,17 +234,28 @@ corrupts literal asterisks — an `e*` becomes an italic marker and the asterisk
 vanishes. If a received prompt shows any of these symptoms, report it and
 request re-delivery rather than writing the damaged text.
 
+**Session start and turn timestamps (owner request 2026-09-26, DECISIONS #195).** Every session opens with two acts, in order: (1) print a local date-and-time stamp with its UTC offset — `python -c "from datetime import datetime; print(datetime.now().astimezone().isoformat(timespec='seconds'))"` (standard library only; works in any shell) — as the very first command; (2) check for `docs/WIP.md` (the session-continuity protocol below). Every TURN — each reply to an owner message, not only the first — prints the same stamp as its first command and again as its last, and the handback lists every turn's start and end stamps. Every date written into a record — a DECISIONS entry, a ROADMAP line, a spec status line, CLAUDE.md's current-phase paragraph — is the local date of the turn that writes it, read from that turn's opening stamp, never taken from a prompt, a brief or a spec; a session spanning midnight says so in its build record.
+
 **Mandatory end-of-session ritual.** Every session that changed code or made
 decisions ends with these steps, in order:
 
 1. Re-check the triggers above; make any missing `docs/` updates now.
 2. Report to the user explicitly, in this exact shape:
-   - ``DOCS CHANGED: <list of changed docs/ files> — run `python -m pdsim.export_docs`
-     and upload the files it lists as Changed and New (delete those it lists as
-     Removed).``
+   - ``DOCS CHANGED: <list of changed docs/ files> — upload the files the export
+     printout below lists as Changed and New (delete those it lists as Removed).``
    - or `DOCS UNCHANGED: no design-layer changes this session.`
+   In either case run `python -m pdsim.export_docs` yourself as the session's
+   last docs act and quote its printout VERBATIM directly below that line: the
+   upload-set total, the Changed, New and Removed lists, and the folder path
+   (owner request 2026-09-26, DECISIONS #195). The lists compare against the
+   PREVIOUS export, not against project knowledge, so the owner uploads from
+   this quoted printout and does not rerun the script (a rerun lists nothing);
+   if an earlier handback's upload was skipped, its lists are uploaded too, or
+   the whole folder, which always holds the full set.
 3. If DECISIONS.md gained entries, mention the new entry numbers so the chat
    side can spot the delta at a glance.
+4. Print the closing timestamp (the session-start paragraph above) and list
+   every turn's start and end stamps in the handback (DECISIONS #195).
 
 Never end a significant session without step 2. Stale or silent docs are bugs —
 they cause other advisors to give wrong advice with full confidence.
@@ -479,6 +492,6 @@ layout file (#187 f2); the hand-off setting "Custom" together with the
 loaded-scenario marker (#187 f6); zero re-recordings, zero new goldens;
 1358 tests.
 **M11b is COMPLETE (2026-09-08; DECISIONS #164–#192; spec status
-"implemented"; 1358 tests passing).** A tooling session followed (2026-09-24, DECISIONS #193): `python -m pdsim.export_docs`, the one source of the project-knowledge upload set; 1,382 tests. **M11c — the grid component and smooth live display — has its spec FROZEN 2026-09-25** (`docs/specs/M11c-grid-component-spec.md`; DECISIONS #190 display-architecture rulings, #194 spec rulings): a keyed custom component (an HTML canvas plus one JavaScript file served from `pdsim/ui/frontend/grid_canvas/`) as the one grid renderer and a timer-driven fragment for the per-generation pass, in three stages. **The next implementation effort is stage one's sub-prompt 1.1** — the component in view mode on the Run lab's run-area grid — drafted by the design layer against the committed spec; then 1.2 (the fragment), 1.3 (the painter), 1.4 (the close-out). The component's JavaScript is the project's first code pytest does not exercise: its test is the spec's Validation checklist, run by the owner (#190 R6, #194 R14). Carry-outs placed by #194: the scenario ledger values written explicitly and the fixed_n living-cost wording (both in 1.1); the calibration guide's stale encounter-mode sentences DONE in the spec session. Named carry-outs remaining for the design layer: the M11b explainer's movement/migration literature pass with its sanity check of the movement mechanism (#194 R24); the nullable-number "no limit" wording for `initial_energy` (#194 R25).
+"implemented"; 1358 tests passing).** A tooling session followed (2026-09-24, DECISIONS #193): `python -m pdsim.export_docs`, the one source of the project-knowledge upload set; 1,382 tests. **M11c — the grid component and smooth live display — has its spec FROZEN 2026-09-25** (`docs/specs/M11c-grid-component-spec.md`; DECISIONS #190 display-architecture rulings, #194 spec rulings): a keyed custom component (an HTML canvas plus one JavaScript file served from `pdsim/ui/frontend/grid_canvas/`) as the one grid renderer and a timer-driven fragment for the per-generation pass, in three stages. **Stage one's sub-prompt 1.1 landed 2026-09-26** (DECISIONS #195 — the standing timestamp and export-printout rules plus 1.1's pre-drafting rulings — and #196, the build record): the keyed component `pdsim_grid_canvas` (`pdsim/ui/grid_canvas.py`; the Streamlit-free `pdsim/ui/grid_canvas_helpers.py`; the page in `pdsim/ui/frontend/grid_canvas/`) draws the Run lab's run-area grid in view mode — the whole grid sent once per pass as one byte per site, redrawn in place, with wheel zoom, drag pan and in-canvas "+", "−", "Fit" — and the plotly live grid is retired; runs still advance under the full-script loop; 1,424 tests. **The next implementation effort is sub-prompt 1.2** — the timer-driven fragment — drafted by the design layer against the committed spec; then 1.3 (the painter), 1.4 (the close-out). The component's JavaScript is the project's first code pytest does not exercise: its test is the spec's Validation checklist, run by the owner (#190 R6, #194 R14). Carry-outs placed by #194: the scenario ledger values written explicitly and the fixed_n living-cost wording (both done in 1.1, DECISIONS #196); the calibration guide's stale encounter-mode sentences DONE in the spec session. Named carry-outs remaining for the design layer: the M11b explainer's movement/migration literature pass with its sanity check of the movement mechanism (#194 R24); the nullable-number "no limit" wording for `initial_energy` (#194 R25).
 Design everything to not block the v2/v3 extensions listed in
 `docs/DESIGN.md` §6.

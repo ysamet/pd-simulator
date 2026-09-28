@@ -82,7 +82,7 @@ class TestEconomyActiveGate:
         assert economy_active(values) is True
 
     def test_asynchronous_fixed_n_is_inactive(self) -> None:
-        """fixed_n never charges the living cost — no insolvency deaths exist."""
+        """fixed_n charges the living cost to all alike — no insolvency deaths exist."""
         values = _flagship_values(
             **{
                 "dynamics.time_model": "asynchronous",

@@ -1,6 +1,6 @@
 # M11c — The grid component and smooth live display
 
-**Status: draft (frozen 2026-09-25 — DECISIONS #190, #194; no stage built yet).**
+**Status: in progress (frozen 2026-09-25 — DECISIONS #190, #194; stage one sub-prompt 1.1 built 2026-09-26 — #195, #196).**
 This spec is frozen intent (#62): deviations during implementation become new DECISIONS entries, never retro-edits beyond this status line. Rationale and rejected alternatives live in DECISIONS #190 (the display-architecture rulings) and #194 (this spec's rulings R1–R25); this file is the binding summary.
 
 ## Purpose

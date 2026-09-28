@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<!--
+  The page of the pdsim grid component, `pdsim_grid_canvas` (M11c; spec
+  docs/specs/M11c-grid-component-spec.md; DECISIONS #190, #194-#196).
+  Streamlit loads this file inside an iframe; all behaviour lives in
+  grid_canvas.js. No build step and no external resource of any kind:
+  the page works offline.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pdsim grid canvas</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+  #root {
+    position: relative;
+    width: 100%;
+    font-family: sans-serif;
+    font-size: 14px;
+  }
+  #stage {
+    position: relative;
+    width: 100%;
+    min-height: 30px; /* room for the zoom buttons on a very flat grid */
+  }
+  #grid {
+    touch-action: none; /* the page, not the browser, owns drags on the canvas */
+    display: block;
+    width: 100%;
+    height: 0;
+    cursor: grab;
+  }
+  #zoom-controls {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    gap: 4px;
+  }
+  #zoom-controls button {
+    min-width: 26px;
+    height: 24px;
+    padding: 0 6px;
+    font: inherit;
+    font-size: 13px;
+    line-height: 22px;
+    border-radius: 4px;
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  #zoom-controls button:hover {
+    opacity: 1;
+  }
+  #error {
+    color: #d33;
+    padding: 4px 0;
+  }
+  #hover {
+    height: 22px; /* FIXED: hovering must never change the frame height */
+    line-height: 22px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding-bottom: 4px;
+  }
+  .key-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+  #debug {
+    font-family: monospace;
+    font-size: 12px;
+    padding-bottom: 2px;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="stage">
+    <canvas id="grid"></canvas>
+    <div id="zoom-controls">
+      <button id="zoom-in" type="button" title="Zoom in">+</button>
+      <button id="zoom-out" type="button" title="Zoom out">&minus;</button>
+      <button id="zoom-fit" type="button" title="Show the whole grid">Fit</button>
+    </div>
+  </div>
+  <div id="error" hidden></div>
+  <div id="hover"></div>
+  <div id="key"></div>
+  <div id="debug" hidden></div>
+</div>
+<script src="grid_canvas.js"></script>
+</body>
+</html>

@@ -1596,7 +1596,12 @@ class LiveRun:
             built with; a toggle flip forces a rebuild on its own pass.
         figures: The last-built chart figures by role (the app's redraw
             cache — re-emitted unchanged on passes inside the #94 throttle
-            window, so the browser keeps the previous frame).
+            window, so the browser keeps the previous frame). The run-area
+            grid is not among them since M11c 1.1: it is sent every pass.
+        run_number: The Run click's number (M11c 1.1, #195 F3) — the first
+            half of every live grid frame's version ``"<run>:<period>"``.
+        key_entries: The live grid's colour key as palette indices, fixed
+            at the Run click from the frozen config (#195 F4).
     """
 
     events: Iterator[Event]
@@ -1611,6 +1616,8 @@ class LiveRun:
     last_redraw: float = 0.0
     view: tuple[bool, bool] | None = None
     figures: dict[str, object] = field(default_factory=dict)
+    run_number: int = 0
+    key_entries: tuple[int, ...] = ()
 
 
 def advance_one_period(

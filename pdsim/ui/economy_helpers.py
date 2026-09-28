@@ -549,9 +549,15 @@ def economy_active(values: Mapping[str, ParamValue]) -> bool:
     corner would make a "metabolic filter" warning describe a filter that
     does not exist: under the asynchronous clock the reproduction-mode
     widget is inert (#154) and ``async_population`` chooses the paradigm
-    instead; under ``fixed_n`` the living cost is never charged (no
-    insolvency deaths — the Moran replacement is the only demography);
-    under tournament the economy is ignored wholesale.
+    instead; under ``fixed_n`` the living cost IS charged, but to every
+    agent alike, so it cannot change who breeds or who dies — the
+    energy-above-the-poorest lottery and the poorest-dies rule read only
+    the DIFFERENCES between agents' energies, and a uniform charge leaves
+    every difference unchanged (energies 50 and 30 weigh 20 and 0 in the
+    lottery; charge both 12 → 38 and 18, still 20 and 0, and the poorest is
+    unchanged), with no insolvency deaths — the Moran replacement is the
+    only demography (#194 R22); under tournament the economy is ignored
+    wholesale.
 
     Takes the WIDGET-VALUE mapping (with the app's lookahead), not a
     config, because A2 must fire at paint time while the panel may not
@@ -578,8 +584,11 @@ def economy_inactive_summary(values: Mapping[str, ParamValue]) -> tuple[str, str
     Consulted exactly when :func:`economy_active` is False on the
     evolution tab, and names the cause the way the collapsed sections do
     (#178 R5): under the asynchronous clock the inactive corner is
-    ``fixed_n`` — the living cost is never charged there, the Moran
-    replacement being the only demography — and under the synchronous
+    ``fixed_n`` — the living cost IS charged there, to every agent alike,
+    so it cannot change who breeds or who dies (selection reads only the
+    differences between energies, which a uniform charge leaves unchanged;
+    #194 R22), the Moran replacement being the only demography — and under
+    the synchronous
     clock it is ``imitation`` reproduction, where nobody pays a living
     cost or starves. Tournament never reaches this label: the whole
     Dynamics section is hidden on that tab (#178 R3).
@@ -594,12 +603,17 @@ def economy_inactive_summary(values: Mapping[str, ParamValue]) -> tuple[str, str
     """
     if values.get("dynamics.time_model") == "asynchronous":
         return (
-            "Economy — inactive under fixed_n (living cost not charged)",
+            "Economy — inactive under fixed_n (living cost charged to all alike — "
+            "no effect on selection)",
             "Under the fixed-size ('fixed_n' Moran) population the living "
-            "cost is never charged and nobody starves — the Moran "
-            "replacement is the only demography, so there is no survival "
-            "window to calibrate. Switch 'Async population' to "
-            "'variable_n' to run the economy in event time.",
+            "cost IS charged, but to every agent alike, so it cannot change "
+            "who breeds or who dies: choosing a parent (and, under "
+            "'energy_decides', choosing who dies) reads only the differences "
+            "between agents' energies, and an equal charge leaves every "
+            "difference unchanged. Nobody starves — the Moran replacement is "
+            "the only demography, so there is no survival window to "
+            "calibrate. Switch 'Async population' to 'variable_n' to run the "
+            "economy in event time.",
         )
     return (
         "Economy — inactive under imitation",

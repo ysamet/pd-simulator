@@ -344,3 +344,13 @@ class TestCommand:
         assert "New (upload): 1\n  b.md" in text
         assert "Removed (delete from project knowledge): 1\n  c.md" in text
         assert text.splitlines()[-1] == "somewhere"
+
+    def test_first_line_gives_the_upload_set_total(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The printout opens with the total, worded as every handback quotes it (#195 A)."""
+        _make_tree(tmp_path)
+        monkeypatch.setattr(export_docs, "REPO_ROOT", tmp_path)
+        assert export_docs.main() == 0
+        first = capsys.readouterr().out.splitlines()[0]
+        assert first == f"Project-knowledge upload set: {len(EXPECTED_NAMES)} files exported."

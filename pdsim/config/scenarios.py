@@ -683,6 +683,7 @@ register_scenario(
             "defined here — the additivity readout beside the payoff "
             "widgets says so."
         ),
+        # Every payoff and ledger value is written explicitly (DECISIONS #151, #194 R21, #195 F5).
         config=ExperimentConfig.model_validate(
             {
                 "seed": 42,
@@ -711,7 +712,11 @@ register_scenario(
                     "reproduction_mode": "energy_economy",
                     "reproduction_threshold": 60.0,
                     "offspring_stake": 40.0,
+                    "initial_energy": 40.0,
                     "basic_living_cost": 12.0,
+                    "engagement_cost": 0.0,
+                    "reproduction_overhead": 0.0,
+                    "capital_return_rate": 0.0,
                     "mutation_rate": 0.0,
                 },
             }
@@ -813,6 +818,7 @@ register_scenario(
             "measurement above is the honest picture), so try other seeds "
             "and expect either outcome."
         ),
+        # Every payoff and ledger value is written explicitly (DECISIONS #151, #194 R21, #195 F5).
         config=ExperimentConfig.model_validate(
             {
                 "seed": 4,
@@ -842,6 +848,13 @@ register_scenario(
                     "async_population": "fixed_n",
                     "moran_rule": "death_birth",
                     "fixed_n_death_rule": "pure_random",
+                    "reproduction_threshold": 500.0,
+                    "offspring_stake": 400.0,
+                    "initial_energy": 400.0,
+                    "basic_living_cost": 200.0,
+                    "engagement_cost": 0.0,
+                    "reproduction_overhead": 0.0,
+                    "capital_return_rate": 0.0,
                     "mutation_rate": 0.0,
                 },
             }
@@ -899,6 +912,7 @@ register_scenario(
             "slow. Compare the Founding and Final grid views in the "
             "results browser to see how far the region wandered."
         ),
+        # Every payoff and ledger value is written explicitly (DECISIONS #151, #194 R21, #195 F5).
         config=ExperimentConfig.model_validate(
             {
                 "seed": 7,
@@ -935,7 +949,11 @@ register_scenario(
                     "reproduction_mode": "energy_economy",
                     "reproduction_threshold": 500.0,
                     "offspring_stake": 400.0,
+                    "initial_energy": 400.0,
                     "basic_living_cost": 200.0,
+                    "engagement_cost": 0.0,
+                    "reproduction_overhead": 0.0,
+                    "capital_return_rate": 0.0,
                     "carrying_capacity": 240,
                     "base_hazard": 0.05,
                     "senescence_factor": 1.0,
@@ -1024,6 +1042,7 @@ register_scenario(
             "shows the fill (13 of them) and then that the standstill is "
             "permanent."
         ),
+        # Every payoff and ledger value is written explicitly (DECISIONS #151, #194 R21, #195 F5).
         config=ExperimentConfig.model_validate(
             {
                 "seed": 11,
@@ -1051,7 +1070,11 @@ register_scenario(
                     "reproduction_mode": "energy_economy",
                     "reproduction_threshold": 200.0,
                     "offspring_stake": 150.0,
+                    "initial_energy": 150.0,
                     "basic_living_cost": 40.0,
+                    "engagement_cost": 0.0,
+                    "reproduction_overhead": 0.0,
+                    "capital_return_rate": 0.0,
                     "mutation_rate": 0.0,
                 },
             }
@@ -1148,6 +1171,7 @@ register_scenario(
             "flagship's things-to-try describes, is what the run shows — "
             "watch it rather than trust a prediction."
         ),
+        # Every payoff and ledger value is written explicitly (DECISIONS #151, #194 R21, #195 F5).
         config=ExperimentConfig.model_validate(
             {
                 "seed": 42,
@@ -1176,7 +1200,11 @@ register_scenario(
                     "reproduction_mode": "energy_economy",
                     "reproduction_threshold": 60.0,
                     "offspring_stake": 40.0,
+                    "initial_energy": 40.0,
                     "basic_living_cost": 12.0,
+                    "engagement_cost": 0.0,
+                    "reproduction_overhead": 0.0,
+                    "capital_return_rate": 0.0,
                     "mutation_rate": 0.0,
                 },
                 "movement": {"rate": 0.5, "radius": 1, "decay": 0.0},

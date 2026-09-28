@@ -8,9 +8,13 @@ stream.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from pdsim.config import scenarios as scenarios_module
 from pdsim.config.experiment import ExperimentConfig
 from pdsim.config.scenarios import (
     ScenarioInfo,
@@ -163,6 +167,87 @@ class TestRegistryMechanics:
                 config=valid_config,
                 things_to_try="   ",
             )
+
+
+SPATIAL_SCENARIOS = (
+    "spatial_reciprocity",
+    "donation_game_threshold",
+    "the_drifting_frontier",
+    "the_filling_grid",
+    "the_restless_frontier",
+)
+"""The five spatial scenarios (#151, #191 R1) whose dicts write every ledger value."""
+
+LEDGER_KEYS = (
+    "game.payoff_temptation",
+    "game.payoff_reward",
+    "game.payoff_punishment",
+    "game.payoff_sucker",
+    "dynamics.reproduction_threshold",
+    "dynamics.offspring_stake",
+    "dynamics.initial_energy",
+    "dynamics.basic_living_cost",
+    "dynamics.engagement_cost",
+    "dynamics.reproduction_overhead",
+    "dynamics.capital_return_rate",
+)
+"""The four payoffs and the seven energy-ledger values (#194 R21 as ruled in #195 F5)."""
+
+
+def _scenario_dict_literals() -> dict[str, dict[str, object]]:
+    """Every registered scenario's config dict AS WRITTEN in ``scenarios.py``.
+
+    A validated config cannot tell a written value from a registry default
+    (validation fills both in), so the pin reads the source: each
+    ``ScenarioInfo(...)`` call's ``config=ExperimentConfig.model_validate({…})``
+    literal, evaluated as plain data with :func:`ast.literal_eval`.
+
+    Returns:
+        Machine name → the literal dict passed to ``model_validate``.
+    """
+    source = Path(scenarios_module.__file__).read_text(encoding="utf-8")
+    literals: dict[str, dict[str, object]] = {}
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "ScenarioInfo":
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            name = ast.literal_eval(keywords["name"])
+            config_call = keywords["config"]
+            assert isinstance(config_call, ast.Call)
+            literals[name] = ast.literal_eval(config_call.args[0])
+    return literals
+
+
+class TestSpatialLedgerWrittenExplicitly:
+    """#151's rule enforced (#194 R21, #195 F5): no load-bearing value rides a default."""
+
+    @pytest.mark.parametrize("name", SPATIAL_SCENARIOS)
+    def test_every_payoff_and_ledger_value_is_written(self, name: str) -> None:
+        """All eleven keys appear in the dict, each equal to the value the run uses."""
+        written = _scenario_dict_literals()[name]
+        config = get_scenario_info(name).config
+        for key in LEDGER_KEYS:
+            section, field = key.split(".")
+            section_dict = written.get(section)
+            assert isinstance(section_dict, dict), (name, section)
+            assert field in section_dict, (name, key)
+            assert section_dict[field] == getattr(getattr(config, section), field), (name, key)
+
+    def test_each_scenario_keeps_its_own_initial_energy(self) -> None:
+        """Blank meant "same as the offspring stake": each dict writes ITS OWN stake."""
+        for name in SPATIAL_SCENARIOS:
+            dynamics = get_scenario_info(name).config.dynamics
+            assert dynamics.initial_energy == dynamics.offspring_stake, name
+        energies = {
+            name: get_scenario_info(name).config.dynamics.initial_energy
+            for name in SPATIAL_SCENARIOS
+        }
+        assert energies == {
+            "spatial_reciprocity": 40.0,
+            "donation_game_threshold": 400.0,
+            "the_drifting_frontier": 400.0,
+            "the_filling_grid": 150.0,
+            "the_restless_frontier": 40.0,
+        }
 
 
 class TestRestlessFrontier:

@@ -55,7 +55,15 @@ from pdsim.sweep.spec import (
     sweep_spec_yaml,
     sweep_validation_messages,
 )
-from pdsim.ui import advisories, economy_helpers, helpers, painter_helpers, sweep_helpers
+from pdsim.ui import (
+    advisories,
+    economy_helpers,
+    grid_canvas,
+    grid_canvas_helpers,
+    helpers,
+    painter_helpers,
+    sweep_helpers,
+)
 from pdsim.ui.economy_helpers import (
     ASYNC_EXPECTED_MATCHES_NOTE,
     ECONOMY_HELP,
@@ -184,7 +192,9 @@ per-pass loop (M11b Phase E3) every pass repaints, so between rebuilds a
 pass re-emits the figures it built last time UNCHANGED — an identical spec
 is an identical element, which the browser leaves exactly as it is. A
 finishing or stopped pass, and a pass on which a display toggle flipped,
-always rebuild.
+always rebuild. The run area's GRID is not one of these figures (M11c
+sub-prompt 1.1, DECISIONS #196): it is a keyed custom component that keeps
+its iframe across passes and redraws in place, so it is sent on EVERY pass.
 """
 
 LIVE_RUN_KEY = "_live_run"
@@ -194,6 +204,27 @@ App state, not widget state (DECISIONS #184): it is never re-assigned by
 ``_preserve_hidden_widget_state`` and no widget owns it. Present exactly
 while a run is in progress; the finishing or stopping pass moves the
 results into ``last_run`` (#44) and removes it.
+"""
+
+RUN_COUNTER_KEY = "_run_counter"
+"""Session-state key of the Run-click counter (M11c 1.1, DECISIONS #195 F3).
+
+App state, increased at every Run click within the browser session and
+carried by the :class:`~pdsim.ui.helpers.LiveRun` and the persisted last
+run: it is the first half of a live grid frame's version
+(``"<run>:<period>"``), so a new run's frames never repeat an old run's.
+"""
+
+LIVE_GRID_KEY = "live_grid"
+"""Element key of the run-area grid component (spec §1; M11c 1.1)."""
+
+LIVE_GRID_SLOT_KEY = "live_grid_slot"
+"""Key of the container the run-area grid sits in, alone (M11c 1.1).
+
+A keyed container's block id is the browser's identity for it, so the slot —
+and the component's iframe inside it — keeps its identity even when an
+element above it (a one-pass note, a hidden panel section) appears or
+disappears between passes: nothing remounts the grid mid-run.
 """
 
 PAINTER_DRAFT_KEY = "_layout_draft"
@@ -1598,7 +1629,11 @@ def _final_summary_area(timeseries: RunTimeseries) -> None:
 
 
 def _start_live_run(
-    config: ExperimentConfig, granularity: str, record: bool, scenario: str | None
+    config: ExperimentConfig,
+    granularity: str,
+    record: bool,
+    scenario: str | None,
+    run_number: int = 0,
 ) -> LiveRun:
     """Open a run: the engine generator, the accumulator, and the recorder.
 
@@ -1606,7 +1641,8 @@ def _start_live_run(
     first pass (:func:`_live_pass`). The config passed in is the one the
     recorder writes (``config.yaml`` goes to disk right here, #47) and the
     one the engine consumes: FROZEN at the Run click, whatever the panel
-    shows afterwards (#183 R4, hard rule 8).
+    shows afterwards (#183 R4, hard rule 8). The live grid's colour key is
+    fixed here too, from that frozen config (#195 F4).
 
     Args:
         config: The validated ExperimentConfig to run.
@@ -1614,6 +1650,8 @@ def _start_live_run(
             whole run (DECISIONS #35; #183 R1).
         record: Persist this run to a run folder as it streams (#49).
         scenario: Scenario name for the recording's index row, if any.
+        run_number: This Run click's number (#195 F3) — the first half of
+            every live grid frame's version.
 
     Returns:
         The holder the passes advance, to be kept under ``LIVE_RUN_KEY``.
@@ -1625,6 +1663,8 @@ def _start_live_run(
         mode=config.mode,
         timeseries=RunTimeseries(mode=config.mode),
         recorder=recorder,
+        run_number=run_number,
+        key_entries=tuple(grid_canvas_helpers.live_key_entries(config)),
     )
 
 
@@ -1656,6 +1696,9 @@ def _finish_live_run(live: LiveRun, note: str, capacity: float | None) -> None:
         "timeseries": live.timeseries,
         "note": note,
         "carrying_capacity": capacity,
+        # The live grid's identity, kept with the run it drew (#195 F3/F4).
+        "run_number": live.run_number,
+        "key_entries": live.key_entries,
     }
     st.session_state.pop(LIVE_RUN_KEY, None)
 
@@ -1680,32 +1723,42 @@ def _abandon_live_run(live: LiveRun) -> None:
     st.session_state.pop(LIVE_RUN_KEY, None)
 
 
-def _live_grid_figure(config: ExperimentConfig, timeseries: RunTimeseries) -> Figure | None:
-    """Build the current-occupancy grid from the latest period snapshot.
+def _live_grid_args(live: LiveRun) -> dict[str, object] | None:
+    """The run-area grid component's arguments from the latest period snapshot.
 
     The latest snapshot IS the render state (Design 10): a lattice run with
     per-agent data redraws its occupancy as periods finish — what lets the
     drifting frontier actually be watched. Imitation runs have empty
     snapshots and keep the founding preview above instead (nothing moves,
-    #116).
+    #116). Since M11c sub-prompt 1.1 the grid is the keyed component
+    ``pdsim_grid_canvas`` in view mode (DECISIONS #194–#196), shown exactly
+    where and when the retired plotly live grid was.
 
     Args:
-        config: The run's configuration.
-        timeseries: The live series (its last snapshot is drawn).
+        live: The run in progress (its config and its latest snapshot).
 
     Returns:
-        The grid figure, or ``None`` when there is nothing to draw.
+        The component's keyword arguments, or ``None`` when there is nothing
+        to draw (a well-mixed world, no per-agent data, no placed agent).
     """
+    config = live.config
+    timeseries = live.timeseries
+    rows, cols = config.structure.rows, config.structure.cols
     if config.structure.kind != "lattice" or not timeseries.agent_snapshots:
         return None
-    placements = {
-        snapshot.site_id: snapshot.strategy
-        for snapshot in timeseries.agent_snapshots[-1]
-        if snapshot.site_id is not None
-    }
-    if not placements or config.structure.rows is None or config.structure.cols is None:
+    placements = grid_canvas_helpers.placements_from_snapshots(timeseries.agent_snapshots[-1])
+    if not placements or not rows or not cols:
         return None
-    return charts.grid_chart(config.structure.rows, config.structure.cols, placements)
+    period = timeseries.periods[-1] if timeseries.periods else 0
+    return grid_canvas_helpers.live_grid_args(
+        rows,
+        cols,
+        placements,
+        key_entries=live.key_entries,
+        version=grid_canvas_helpers.frame_version(live.run_number, period),
+        # The page's frame-time readout, behind `?grid_debug=1` (spec §4).
+        debug=st.query_params.get("grid_debug") == "1",
+    )
 
 
 def _draw_blocked_metrics(
@@ -1790,7 +1843,9 @@ def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
     Chart rebuilds stay wall-clock throttled (#94): a pass inside the
     throttle window re-emits the figures it built last time, unchanged,
     so the browser keeps the previous frame; a toggle flip, the finishing
-    pass, and the stopping pass always rebuild.
+    pass, and the stopping pass always rebuild. The run-area grid is NOT
+    throttled (M11c 1.1): the keyed component is sent the whole grid on
+    every pass, in its own keyed slot, and redraws in place.
 
     Args:
         live: The run in progress (under ``LIVE_RUN_KEY``).
@@ -1810,7 +1865,10 @@ def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
     blocked_note = blocked_col.empty()
     infeasible_note = infeasible_col.empty()
     moves_note = moves_col.empty()
-    grid_live = st.empty()
+    # The grid's own slot: a keyed container holding the component alone,
+    # so nothing inside it appears or disappears above the grid between
+    # passes and the block keeps its identity if anything above it shifts.
+    grid_slot = st.container(key=LIVE_GRID_SLOT_KEY)
     if config.dynamics.time_model == "asynchronous":
         st.caption(GEN_EQUIV_AXIS_NOTE)
     capacity = economy_helpers.chart_carrying_capacity(config)
@@ -1840,19 +1898,15 @@ def _live_pass(live: LiveRun, per_round: bool, whole_game: bool) -> None:
         or helpers.should_redraw(now, live.last_redraw, live.delay, LIVE_REDRAW_MIN_SECONDS)
     ):
         live.figures = dict(_build_figures(timeseries, per_round, whole_game, capacity, True))
-        grid = _live_grid_figure(config, timeseries)
-        if grid is not None:
-            live.figures["grid"] = grid
         live.view = view
         live.last_redraw = now
     _paint_figures(live.figures, chart_left, chart_right, chart_coop, 0, economy=chart_economy)
-    grid_figure = live.figures.get("grid")
-    if grid_figure is not None and config.structure.rows and config.structure.cols:
-        grid_live.plotly_chart(
-            grid_figure,
-            width=_grid_width(config.structure.rows, config.structure.cols),
-            key="live_grid_0",
-        )
+    grid_args = _live_grid_args(live)
+    if grid_args is not None:
+        with grid_slot:
+            # Every pass, outside the #94 throttle; called as a module
+            # attribute so the app tests can observe the call.
+            grid_canvas.grid_canvas(grid_args, key=LIVE_GRID_KEY)
     _draw_blocked_metrics(config, timeseries, blocked_note, infeasible_note, moves_note)
 
     note = f"Results of the last run (seed {config.seed})"
@@ -2377,6 +2431,10 @@ def _run_lab() -> None:
 
     if controls.run_clicked and not running:
         st.session_state["stop_requested"] = False
+        # Every Run click gets a new number (#195 F3): the live grid's
+        # frame versions then never repeat across runs.
+        run_number = int(st.session_state.get(RUN_COUNTER_KEY, 0)) + 1
+        st.session_state[RUN_COUNTER_KEY] = run_number
         try:
             config = helpers.build_config(values, composition, strategy_params)
         except ValidationError as error:
@@ -2387,7 +2445,9 @@ def _run_lab() -> None:
             # scenario cell in the browser table read as missing data (#52).
             choice = st.session_state.get("_loaded_scenario")
             scenario = str(choice) if choice else CUSTOM
-            live = _start_live_run(config, controls.granularity, controls.record, scenario)
+            live = _start_live_run(
+                config, controls.granularity, controls.record, scenario, run_number
+            )
             st.session_state[LIVE_RUN_KEY] = live
             live.delay = controls.delay
             _live_pass(live, controls.per_round, controls.whole_game)

@@ -300,6 +300,26 @@ class TestDerivedDefaultWidgetValues:
         rebuilt = helpers.build_config(values, dict(config.population.composition))
         assert rebuilt == config
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "spatial_reciprocity",
+            "donation_game_threshold",
+            "the_drifting_frontier",
+            "the_filling_grid",
+            "the_restless_frontier",
+        ],
+    )
+    def test_written_initial_energy_still_loads_as_blank(self, name: str) -> None:
+        """Writing each spatial scenario's initial energy changes nothing on load (#196).
+
+        M11c 1.1 wrote each scenario's OWN resolved value explicitly (#195
+        F5); that value equals the stake, so the panel still presents it as
+        "same as the offspring stake" — box unticked — exactly as the blank.
+        """
+        values = helpers.widget_values_from_config(get_scenario_info(name).config)
+        assert values["dynamics.initial_energy"] is None
+
 
 class TestShouldRedraw:
     """The live view's wall-clock redraw throttle (DECISIONS #94)."""

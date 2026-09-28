@@ -1007,7 +1007,23 @@ top, parameters, live plots below):
    re-running. Below the chart pair, a full-width **cooperation-rate
    chart** (M9b, #65): overall population plus per-strategy
    actions-weighted lines, y pinned 0–1; the final-summary area adds the
-   cooperation pair matrix as table rows.
+   cooperation pair matrix as table rows. The run area's GRID is not one of
+   those figures (M11c sub-prompt 1.1, DECISIONS #194–#196): it is the keyed
+   custom component `pdsim_grid_canvas` in view mode (key `live_grid`; the
+   declaration and call in `ui/grid_canvas.py`, the Streamlit-free argument
+   builder and byte encoder in `ui/grid_canvas_helpers.py`, the page —
+   `index.html` and `grid_canvas.js`, no build step — in
+   `ui/frontend/grid_canvas/`), sent the whole grid on every pass as one
+   byte per site plus a few JSON arguments and redrawn in place — a keyed
+   component keeps its iframe across reruns, so the grid never remounts or
+   blanks and sits outside the #94 throttle; the page skips a frame whose
+   version (run number and period index) it has already drawn, draws one
+   pixel per site scaled without smoothing, grid lines only where a cell is
+   at least `charts.BORDER_MIN_SIDE_PX` (6) pixels on screen, the colour key
+   (every strategy the run can contain, plus Empty) and 1-based hover text,
+   and keeps the viewer's zoom (the mouse wheel about the pointer and
+   in-canvas "+", "−", "Fit", from whole-grid-fits to 64 px per cell) and
+   pan (a drag) across passes, refitting only when the grid's size changes.
 6. **Layout painter tab** (M11b Phase E4, #186/#187) — the second tab in
    the strip (`["Run lab", "Layout painter", "Results browser", "Sweep"]`),
    a TOOL that writes the layout files a config references (#109): the

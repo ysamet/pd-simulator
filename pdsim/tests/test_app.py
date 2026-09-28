@@ -28,7 +28,7 @@ from pdsim.core.strategies import all_strategies
 from pdsim.core.timeseries import RunTimeseries
 from pdsim.io.results import RunRecorder, list_runs, load_run
 from pdsim.run import main as cli_main
-from pdsim.ui import painter_helpers
+from pdsim.ui import grid_canvas_helpers, painter_helpers
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "ui" / "app.py")
 
@@ -576,7 +576,8 @@ class TestModeTabs:
         """R9 under fixed_n: the b/c > k scenario shows the summary.
 
         The scenario is async fixed_n, so it states its cause instead of
-        a calibration that would describe an uncharged living cost.
+        a calibration that would describe a filter that is not running —
+        the living cost is charged to all alike there and selects no one.
         """
         app = _fresh_app()
         app.selectbox(key="scenario_choice").select("The b/c > k Threshold")
@@ -1190,6 +1191,149 @@ class TestLiveRunContinuity:
         assert LIVE_RUN_KEY not in app.session_state
         assert "3 cycles" in app.success[0].value
         assert app.session_state["last_run"]["timeseries"].mode == "tournament"
+
+
+LIVE_GRID_KEY = "live_grid"
+"""The run-area grid component's element key (M11c 1.1; spec §1)."""
+
+
+def _live_grids(app: AppTest) -> list[dict[str, object]]:
+    """The run-area grid component's arguments as the last pass sent them.
+
+    AppTest models a custom component as an unknown element carrying the
+    ComponentInstance proto (M11c 1.1 Task 0 (c), DECISIONS #196): its JSON
+    arguments — which include the ``key`` Streamlit adds — and its bytes
+    arguments are both readable, so the tests read what the page receives.
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        One dict per grid component on the page (zero or one): the JSON
+        arguments, each bytes argument as ``bytes``, and the registered
+        ``component_name``.
+    """
+    grids = []
+    for element in app.get("component_instance"):
+        args = json.loads(element.proto.json_args)
+        if args.get("key") == LIVE_GRID_KEY:
+            args.update({arg.key: bytes(arg.bytes) for arg in element.proto.special_args})
+            args["component_name"] = element.proto.component_name
+            grids.append(args)
+    return grids
+
+
+def _plotly_live_grids(app: AppTest) -> list[object]:
+    """Any plotly chart still carrying the retired live grid's key (``live_grid_0``).
+
+    Args:
+        app: The AppTest handle after a script run.
+
+    Returns:
+        The matching plotly elements — always empty since M11c 1.1.
+    """
+    return [element for element in app.get("plotly_chart") if "live_grid" in element.proto.id]
+
+
+def _prepare_flagship(app: AppTest, generations: int, mutation_rate: float | None = None) -> None:
+    """Load "Cooperation Survives in Clusters" for a short unrecorded run.
+
+    Args:
+        app: The AppTest handle after its first run.
+        generations: The exact "Generations" value to set.
+        mutation_rate: A "Mutation rate" to set, if any.
+    """
+    app.selectbox(key="scenario_choice").select("Cooperation Survives in Clusters")
+    app.run()
+    app.number_input(key="dynamics.generations").set_value(generations)
+    if mutation_rate is not None:
+        app.number_input(key="dynamics.mutation_rate").set_value(mutation_rate)
+    app.slider(key="playback_delay").set_value(0.0)
+    app.checkbox(key="record_run").set_value(False)
+    app.run()
+    assert not app.exception
+
+
+class TestLiveGridComponent:
+    """The run-area grid on the keyed component (M11c 1.1; #194 R1/R15; #195 F3/F4; #196).
+
+    The page's drawing, gestures and theme are the spec's Validation
+    checklist's (C1–C7); these pin what Python sends it, pass by pass.
+    """
+
+    def test_lattice_run_sends_the_grid_every_pass(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """Rows, cols and the whole grid each pass; the period advances; the run number too."""
+        app = _fresh_app()
+        _prepare_flagship(app, generations=3)
+        app.button(key="run_button").click()
+        versions = []
+        for _ in range(3):  # passes 1-3: one generation each
+            app.run()
+            assert not app.exception
+            grids = _live_grids(app)
+            assert len(grids) == 1
+            grid = grids[0]
+            assert grid["component_name"].endswith(".pdsim_grid_canvas")
+            assert (grid["rows"], grid["cols"], grid["mode"]) == (20, 20, "view")
+            live = app.session_state[LIVE_RUN_KEY]
+            placements = grid_canvas_helpers.placements_from_snapshots(
+                live.timeseries.agent_snapshots[-1]
+            )
+            assert grid["cells"] == grid_canvas_helpers.encode_cells(20, 20, placements)
+            assert not _plotly_live_grids(app)
+            versions.append(grid["version"])
+        assert versions == ["1:0", "1:1", "1:2"]
+        app.run()  # pass 4: RunFinished — the final frame, its version unchanged
+        assert LIVE_RUN_KEY not in app.session_state
+        assert [grid["version"] for grid in _live_grids(app)] == ["1:2"]
+        assert app.session_state["last_run"]["run_number"] == 1
+        app.button(key="run_button").click()  # the next Run: a new run number
+        app.run()
+        assert [grid["version"] for grid in _live_grids(app)] == ["2:0"]
+
+    def test_the_whole_chain_ends_on_the_final_frame(self) -> None:
+        """One run() follows the chain to its end: the grid shows the last period's version."""
+        app = _fresh_app()
+        _prepare_flagship(app, generations=2)
+        app.button(key="run_button").click()
+        app.run()
+        assert not app.exception
+        assert len(app.success) == 1
+        assert [grid["version"] for grid in _live_grids(app)] == ["1:1"]
+        assert not _plotly_live_grids(app)
+
+    def test_key_lists_what_the_run_can_contain(
+        self, one_pass_per_run: list[dict[str, object]]
+    ) -> None:
+        """#195 F4: founders at μ = 0; every strategy above it; Empty last, registry order."""
+        codes = grid_canvas_helpers.strategy_codes()
+        app = _fresh_app()
+        _prepare_flagship(app, generations=1)
+        app.button(key="run_button").click()
+        app.run()
+        (grid,) = _live_grids(app)
+        assert grid["key_entries"] == [codes["always_cooperate"], codes["always_defect"], 0]
+        assert grid["palette"] == grid_canvas_helpers.grid_palette()
+        assert grid["names"] == grid_canvas_helpers.grid_names()
+        app.run()  # finish
+        _prepare_flagship(app, generations=1, mutation_rate=0.05)
+        app.button(key="run_button").click()
+        app.run()
+        (grid,) = _live_grids(app)
+        assert grid["key_entries"] == [*codes.values(), 0]
+
+    def test_well_mixed_run_shows_no_grid(self) -> None:
+        """No lattice, no grid: neither the component nor the retired plotly chart."""
+        app = _fresh_app()
+        _prepare_tiny_evolution(app, generations=2)
+        app.button(key="run_button").click()
+        app.run()
+        assert not app.exception
+        assert len(app.success) == 1
+        assert _live_grids(app) == []
+        assert not _plotly_live_grids(app)
 
 
 PAINTER_DRAFT_KEY = "_layout_draft"

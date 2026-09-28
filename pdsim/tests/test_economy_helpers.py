@@ -611,5 +611,11 @@ class TestEconomyInactiveSummary:
             "dynamics.async_population": "fixed_n",
         }
         label, explanation = economy_inactive_summary(values)
-        assert label == "Economy — inactive under fixed_n (living cost not charged)"
+        assert label == (
+            "Economy — inactive under fixed_n "
+            "(living cost charged to all alike — no effect on selection)"
+        )
+        # #194 R22: the living cost IS charged under fixed_n, uniformly.
+        assert "IS charged" in explanation
+        assert "never charged" not in explanation
         assert "variable_n" in explanation
